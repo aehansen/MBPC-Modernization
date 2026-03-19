@@ -19,7 +19,7 @@ function App() {
   const apiUrl = 'http://localhost:5009/api';
 
   useEffect(() => {
-    axios.get(`${apiUrl}/viaje/activos`)
+    axios.get(`${apiUrl}/viajes`)
       .then(response => {
         setViajes(response.data);
         setLoading(false);
@@ -56,12 +56,23 @@ function App() {
 
   // --- FUNCIONES DE CARGAS (Ya existían) ---
   const verDetalleViaje = (viaje) => {
-    setViajeSeleccionado(viaje);
-    setMensaje(""); 
-    axios.get(`${apiUrl}/carga/viaje/${viaje.id}`)
-      .then(response => setCargas(response.data))
-      .catch(err => console.error(err));
-  };
+      setViajeSeleccionado(viaje);
+      setMensaje(""); 
+      axios.get(`${apiUrl}/carga/viaje/${viaje.id}`)
+        .then(response => {
+          setCargas(response.data);
+          
+          // --- PARCHE: SCROLL AUTOMÁTICO HACIA ABAJO ---
+          setTimeout(() => {
+            document.getElementById('panel-cargas')?.scrollIntoView({ 
+              behavior: 'smooth', 
+              block: 'start' 
+            });
+          }, 100);
+          // ---------------------------------------------
+        })
+        .catch(err => console.error(err));
+    }
 
   const amarrarBarcaza = (cargaId) => {
     const muelle = prompt("Ingrese el nombre del Muelle de destino:");
@@ -175,7 +186,7 @@ function App() {
 
       {/* PANEL DE DETALLE DE CARGAS */}
       {viajeSeleccionado && (
-        <div style={{ marginTop: '40px', padding: '20px', backgroundColor: '#f8f9fa', border: '1px solid #ddd', borderRadius: '8px' }}>
+      <div id="panel-cargas" style={{ marginTop: '40px', padding: '20px', backgroundColor: '#f8f9fa', border: '1px solid #ddd', borderRadius: '8px' }}>
           <h2>Gestión Logística: {viajeSeleccionado.buque}</h2>
           {cargas.length === 0 ? (
             <p>No hay cargas o barcazas registradas para este viaje.</p>

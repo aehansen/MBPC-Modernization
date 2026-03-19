@@ -1,3 +1,9 @@
+using Microsoft.Extensions.Options;
+using MongoDB.Driver;
+using Mbpc.Api.Models.Config;
+// Acá asumo que tenés tus servicios en este namespace. Si es otro, ajustalo:
+using Mbpc.Api.Services; 
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
@@ -6,21 +12,22 @@ builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
 // --- CONFIGURACIÓN DE MONGODB ---
-// Mapeamos el JSON a nuestra clase fuertemente tipada
-builder.Services.Configure<Mbpc.Api.Configuration.MongoDbSettings>(
+// 1. Mapeamos la configuración del appsettings a nuestra clase fuertemente tipada
+builder.Services.Configure<MongoDbSettings>(
     builder.Configuration.GetSection("MongoDbSettings"));
 
-// Registramos el cliente de Mongo como Singleton
-builder.Services.AddSingleton<MongoDB.Driver.IMongoClient>(sp =>
+// 2. Registramos el MongoClient como Singleton
+builder.Services.AddSingleton<IMongoClient>(sp =>
 {
-    var settings = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Mbpc.Api.Configuration.MongoDbSettings>>().Value;
-    return new MongoDB.Driver.MongoClient(settings.ConnectionString);
+    var settings = sp.GetRequiredService<IOptions<MongoDbSettings>>().Value;
+    return new MongoClient(settings.ConnectionString);
 });
 // ---------------------------------
 
-// --- ZONA DE REGISTRO DE SERVICIOS MOCK ---
-builder.Services.AddSingleton<Mbpc.Api.Services.IViajeService, Mbpc.Api.Services.ViajeMongoService>();
-builder.Services.AddSingleton<Mbpc.Api.Services.ICargaService, Mbpc.Api.Services.CargaMongoService>(); 
+// --- ZONA DE REGISTRO DE SERVICIOS ---
+// Por ahora dejamos los Mock, en el próximo paso actualizamos el ViajeMongoService
+builder.Services.AddSingleton<IViajeService, ViajeMongoService>();
+builder.Services.AddSingleton<ICargaService, CargaMongoService>(); 
 // ------------------------------------------
 
 // Permitimos que el frontend de React se comunique con esta API

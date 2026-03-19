@@ -1,59 +1,39 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using MongoDB.Driver;
-using Mbpc.Api.Models;
-using Mbpc.Api.DTOs;
-using Mbpc.Api.Configuration;
 using Microsoft.Extensions.Options;
+using MongoDB.Driver;
+using Mbpc.Api.Models.Config;
+using Mbpc.Api.Models.Mongo;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace Mbpc.Api.Services
 {
     public class ViajeMongoService : IViajeService
     {
-        private readonly IMongoCollection<ViajeMongo> _viajesCollection;
+        private readonly IMongoCollection<ViajePosicionMongo> _viajesCollection;
 
-        // Inyectamos el cliente de Mongo y las opciones tipadas (Nada de configuraciones harcodeadas)
-        public ViajeMongoService(IMongoClient mongoClient, IOptions<MongoDbSettings> settings)
+        // Inyectamos el cliente de Mongo y nuestra configuración fuertemente tipada
+        public ViajeMongoService(IMongoClient mongoClient, IOptions<MongoDbSettings> mongoDbSettings)
         {
-            var database = mongoClient.GetDatabase(settings.Value.DatabaseName);
-            // Apuntamos a la colección donde caen los datos sincronizados
-            _viajesCollection = database.GetCollection<ViajeMongo>("viajes"); 
-        }
-
-        public IEnumerable<ViajeDto> ObtenerViajesActivos()
-        {
-            // Lectura real desde MongoDB: Filtramos los viajes activos
-            var filtro = Builders<ViajeMongo>.Filter.In(v => v.Estado, new[] { "En Curso", "Fondeado" });
+            var database = mongoClient.GetDatabase(mongoDbSettings.Value.DatabaseName);
             
-            var viajesMongo = _viajesCollection.Find(filtro).ToList();
-
-            // Mapeamos al DTO fuertemente tipado para el frontend
-            return viajesMongo.Select(MapearADto);
+            // Nos conectamos a la colección 'last_mbpc' mapeándola a nuestro DTO
+            _viajesCollection = database.GetCollection<ViajePosicionMongo>(mongoDbSettings.Value.LastMbpcCollectionName);
         }
 
-        public ViajeDto CrearViaje(NuevoViajeDto nuevoViaje)
+        public async Task<List<ViajePosicionMongo>> GetViajesAsync()
         {
-            // REGLA DE ARQUITECTURA: La escritura va a Oracle. 
-            // Por ahora, dejamos este método preparado para cuando armemos el repositorio de Oracle.
-            // Para no romper la interfaz IViajeService, lanzamos una excepción clara.
-            throw new NotImplementedException("Modernización en curso: La escritura de nuevos viajes se delegará a la capa de Oracle.");
+            // Traemos todos los registros. 
+            // En un futuro cercano le agregaremos paginación o filtros por RCK/Cuadrante.
+            return await _viajesCollection.Find(_ => true).ToListAsync();
         }
 
-        // Método auxiliar privado para mantener el desacoplamiento entre el modelo de BD y el DTO
-        private ViajeDto MapearADto(ViajeMongo v)
+        public async Task<ViajePosicionMongo?> GetViajeByMmsiAsync(string mmsi)
         {
-            return new ViajeDto
-            {
-                // Como Mongo usa ObjectId (string) y nuestro DTO viejo usaba int, 
-                // usamos el GetHashCode temporalmente para el prototipo en React, 
-                // o idealmente refactorizamos ViajeDto para soportar strings.
-                Id = v.Id!, 
-                Buque = v.NombreBuque,
-                Ruta = $"{v.Origen} -> {v.Destino}",
-                FechaInicioFormateada = v.FechaInicio.ToString("dd/MM/yyyy HH:mm"),
-                EstadoActual = v.Estado
-            };
+            // Búsqueda específica usando el MMSI, ideal para cuando hagamos el tracking de un buque
+            return await _viajesCollection.Find(v => v.Mmsi == mmsi).FirstOrDefaultAsync();
         }
+
+        // TODO: Métodos de escritura (POST/PUT) que luego conectaremos con Oracle 
+        // para mantener la sincronización del patrón Strangler Fig.
     }
 }

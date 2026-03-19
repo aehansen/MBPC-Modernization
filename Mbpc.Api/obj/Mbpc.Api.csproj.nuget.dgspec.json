@@ -51,9 +51,17 @@
         "net8.0": {
           "targetAlias": "net8.0",
           "dependencies": {
+            "Dapper": {
+              "target": "Package",
+              "version": "[2.1.72, )"
+            },
             "MongoDB.Driver": {
               "target": "Package",
               "version": "[3.7.0, )"
+            },
+            "Oracle.ManagedDataAccess.Core": {
+              "target": "Package",
+              "version": "[23.26.100, )"
             },
             "Swashbuckle.AspNetCore": {
               "target": "Package",

@@ -1,50 +1,51 @@
 using Microsoft.AspNetCore.Mvc;
 using Mbpc.Api.Services;
-using Mbpc.Api.DTOs;
+using Mbpc.Api.Models.Mongo;
+using Mbpc.Api.DTOs; // <-- AGREGAR ESTO
 using System.Collections.Generic;
+using System.Threading.Tasks;
 
 namespace Mbpc.Api.Controllers
 {
     [ApiController]
-    [Route("api/[controller]")] // Esto ruteará a /api/viaje
-    public class ViajeController : ControllerBase
+    [Route("api/[controller]")]
+    public class ViajesController : ControllerBase
     {
         private readonly IViajeService _viajeService;
 
-        // Inyección de dependencias limpia y directa
-        public ViajeController(IViajeService viajeService)
+        public ViajesController(IViajeService viajeService)
         {
             _viajeService = viajeService;
         }
 
-        // Mapeamos explícitamente al verbo GET
-        [HttpGet("activos")]
-        public ActionResult<IEnumerable<ViajeDto>> GetViajesActivos()
+        [HttpGet]
+        public async Task<ActionResult<List<ViajeDto>>> GetViajes()
         {
-            var viajes = _viajeService.ObtenerViajesActivos();
-            
-            if (viajes == null)
-            {
-                return NotFound("No se encontraron viajes activos.");
-            }
+            var posicionesMongo = await _viajeService.GetViajesAsync();
 
-            return Ok(viajes); // Devuelve HTTP 200 con el JSON estructurado
+            var viajesDto = posicionesMongo.Select(p => new ViajeDto
+            {
+                Id = p.VesselName,
+                Buque = p.VesselName ?? "DESCONOCIDO",
+                Ruta = $"Lat: {p.Latitude} | Lon: {p.Longitude} ({p.SpeedOverGround} nds)",
+                FechaInicioFormateada = p.MsgTime.ToString("dd/MM/yyyy HH:mm"),
+                EstadoActual = p.NavegationStatusDesc ?? "N/A"
+            }).ToList();
+
+            return Ok(viajesDto);
         }
-        // POST: api/viaje
-        [HttpPost]
-        public ActionResult<ViajeDto> IniciarViaje([FromBody] NuevoViajeDto nuevoViaje)
+
+        [HttpGet("{mmsi}")]
+        public async Task<ActionResult<ViajePosicionMongo>> GetViajeByMmsi(string mmsi)
         {
-            if (string.IsNullOrWhiteSpace(nuevoViaje.NombreBuque) || 
-                string.IsNullOrWhiteSpace(nuevoViaje.Origen) || 
-                string.IsNullOrWhiteSpace(nuevoViaje.Destino))
+            var viaje = await _viajeService.GetViajeByMmsiAsync(mmsi);
+            
+            if (viaje == null)
             {
-                return BadRequest("El buque, origen y destino son obligatorios para iniciar el viaje.");
+                return NotFound(new { mensaje = $"No se encontró posición para el buque con MMSI {mmsi}" });
             }
 
-            var viajeCreado = _viajeService.CrearViaje(nuevoViaje);
-            
-            // Retornamos un 201 Created con el objeto recién creado
-            return Created("", viajeCreado); 
+            return Ok(viaje);
         }
     }
 }

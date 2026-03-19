@@ -39,3 +39,16 @@ C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api\bin\Debug\net8.0\MongoDB.Driver.dll
 C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api\bin\Debug\net8.0\SharpCompress.dll
 C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api\bin\Debug\net8.0\Snappier.dll
 C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api\bin\Debug\net8.0\ZstdSharp.dll
+C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api\obj\Debug\net8.0\Mbpc.Api.sourcelink.json
+C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api\bin\Debug\net8.0\Dapper.dll
+C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api\bin\Debug\net8.0\Oracle.ManagedDataAccess.dll
+C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api\bin\Debug\net8.0\System.Configuration.ConfigurationManager.dll
+C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api\bin\Debug\net8.0\System.Diagnostics.PerformanceCounter.dll
+C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api\bin\Debug\net8.0\System.DirectoryServices.Protocols.dll
+C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api\bin\Debug\net8.0\System.Security.Cryptography.Pkcs.dll
+C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api\bin\Debug\net8.0\System.Security.Cryptography.ProtectedData.dll
+C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api\bin\Debug\net8.0\runtimes\win\lib\net8.0\System.Diagnostics.PerformanceCounter.dll
+C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api\bin\Debug\net8.0\runtimes\linux\lib\net8.0\System.DirectoryServices.Protocols.dll
+C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api\bin\Debug\net8.0\runtimes\osx\lib\net8.0\System.DirectoryServices.Protocols.dll
+C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api\bin\Debug\net8.0\runtimes\win\lib\net8.0\System.DirectoryServices.Protocols.dll
+C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api\bin\Debug\net8.0\runtimes\win\lib\net8.0\System.Security.Cryptography.Pkcs.dll
