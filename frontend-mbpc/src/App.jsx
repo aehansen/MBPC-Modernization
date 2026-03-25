@@ -29,24 +29,28 @@ function App() {
 
   // --- NUEVA FUNCIÓN: POST PARA CREAR VIAJE ---
   const iniciarViaje = (e) => {
-    e.preventDefault(); // Evita que la página se recargue al mandar el formulario
+    e.preventDefault(); 
 
     const payload = {
-      nombreBuque: nuevoBuque,
-      origen: nuevoOrigen,
-      destino: nuevoDestino
+      NombreBuque: nuevoBuque, // <-- Ajustado para que coincida EXACTO con el DTO
+      Origen: nuevoOrigen,
+      Destino: nuevoDestino
     };
 
-    axios.post(`${apiUrl}/viaje`, payload)
+    // CAMBIO 1: Ruta en plural (/viajes)
+    axios.post(`${apiUrl}/viajes`, payload)
       .then(response => {
-        // Agregamos el viaje nuevo al principio de la lista actual en memoria
-        setViajes([response.data, ...viajes]); 
-        setMensaje(`🚢 ¡Viaje del buque ${response.data.buque} iniciado con éxito!`);
+        // CAMBIO 2: Mostramos directamente el mensaje de éxito que manda el backend
+        setMensaje(response.data.mensaje);
         
         // Limpiamos el formulario
         setNuevoBuque("");
         setNuevoOrigen("");
         setNuevoDestino("");
+
+        // NOTA ARQUITECTÓNICA: Por ahora no agregamos nada a la tabla (setViajes),
+        // porque la escritura se fue a Oracle y la lectura lee de Mongo. 
+        // ¡Acá es donde entra el problema de sincronización que vamos a resolver!
       })
       .catch(err => {
         console.error(err);

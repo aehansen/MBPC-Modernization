@@ -7,7 +7,11 @@ using Mbpc.Api.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 // Add services to the container.
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.PropertyNamingPolicy = null; // Acepta mayúsculas o minúsculas
+    });
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -24,10 +28,13 @@ builder.Services.AddSingleton<IMongoClient>(sp =>
 });
 // ---------------------------------
 
+builder.Services.Configure<OracleDbSettings>(
+    builder.Configuration.GetSection("OracleDbSettings"));
+
 // --- ZONA DE REGISTRO DE SERVICIOS ---
 // Por ahora dejamos los Mock, en el próximo paso actualizamos el ViajeMongoService
-builder.Services.AddSingleton<IViajeService, ViajeMongoService>();
-builder.Services.AddSingleton<ICargaService, CargaMongoService>(); 
+builder.Services.AddSingleton<IViajeService, ViajeManagerService>();
+builder.Services.AddSingleton<ICargaService, CargaManagerService>(); 
 // ------------------------------------------
 
 // Permitimos que el frontend de React se comunique con esta API
