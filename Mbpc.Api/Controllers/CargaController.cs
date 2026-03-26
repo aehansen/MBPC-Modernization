@@ -1,63 +1,83 @@
 using Microsoft.AspNetCore.Mvc;
 using Mbpc.Api.Services;
 using Mbpc.Api.DTOs;
-using System.Collections.Generic;
 
 namespace Mbpc.Api.Controllers
 {
     [ApiController]
-    [Route("api/[controller]")]
+    [Route("api/carga")]
     public class CargaController : ControllerBase
     {
         private readonly ICargaService _cargaService;
+        private readonly ILogger<CargaController> _logger;
 
-        public CargaController(ICargaService cargaService)
+        public CargaController(ICargaService cargaService, ILogger<CargaController> logger)
         {
             _cargaService = cargaService;
+            _logger = logger;
         }
 
-        // Cambiamos int viajeId por string viajeId
         [HttpGet("viaje/{viajeId}")]
         public ActionResult<IEnumerable<CargaDto>> GetCargasPorViaje(string viajeId)
         {
+            if (string.IsNullOrWhiteSpace(viajeId))
+                return BadRequest(new { mensaje = "El identificador de viaje no puede estar vacío." });
+
+            _logger.LogInformation("Buscando cargas para viajeId: {ViajeId}", viajeId);
             var cargas = _cargaService.ObtenerCargasPorViaje(viajeId);
             return Ok(cargas);
         }
 
-        // Cambiamos int id por string id
         [HttpPut("{id}/amarrar")]
         public ActionResult AmarrarBarcaza(string id, [FromQuery] string nuevoMuelle)
         {
-            if (string.IsNullOrWhiteSpace(nuevoMuelle))
-            {
-                return BadRequest("Debe especificar el muelle de destino.");
-            }
+            if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(nuevoMuelle))
+                return BadRequest(new { mensaje = "El ID y el nuevo muelle son requeridos." });
 
             var exito = _cargaService.AmarrarBarcaza(id, nuevoMuelle);
-            if (!exito)
-            {
-                return NotFound($"No se encontró la carga o barcaza con ID {id}.");
-            }
-
-            return Ok(new { Mensaje = $"Barcaza {id} amarrada exitosamente en {nuevoMuelle}." });
+            if (!exito) return NotFound(new { mensaje = $"No se encontró la unidad con ID {id}." });
+            return Ok(new { mensaje = $"Unidad {id} amarrada en {nuevoMuelle}." });
         }
 
-        // Cambiamos int id por string id
         [HttpPut("{id}/fondear")]
         public ActionResult FondearBarcaza(string id, [FromQuery] string zonaFondeo)
         {
-            if (string.IsNullOrWhiteSpace(zonaFondeo))
-            {
-                return BadRequest("Debe especificar la zona de fondeo.");
-            }
+            if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(zonaFondeo))
+                return BadRequest(new { mensaje = "El ID y la zona de fondeo son requeridos." });
 
             var exito = _cargaService.FondearBarcaza(id, zonaFondeo);
-            if (!exito)
-            {
-                return NotFound($"No se encontró la carga o barcaza con ID {id}.");
-            }
+            if (!exito) return NotFound(new { mensaje = $"No se encontró la unidad con ID {id}." });
+            return Ok(new { mensaje = $"Unidad {id} fondeada en {zonaFondeo}." });
+        }
 
-            return Ok(new { Mensaje = $"Barcaza {id} fondeada exitosamente en {zonaFondeo}." });
+        [HttpPut("{id}/cargar")]
+        public ActionResult CargarBarcaza(string id, [FromQuery] double toneladas)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                return BadRequest(new { mensaje = "El ID de la embarcación es requerido." });
+
+            // Permitimos 0 o positivo, la validación dura (que sea mayor al actual) la hace React
+            if (toneladas < 0) 
+                return BadRequest(new { mensaje = "La cantidad de toneladas no puede ser negativa." });
+
+            var exito = _cargaService.CargarBarcaza(id, toneladas);
+            if (!exito) return NotFound(new { mensaje = $"No se encontró la unidad con ID {id}." });
+            return Ok(new { mensaje = $"Carga registrada correctamente." });
+        }
+
+        [HttpPut("{id}/descargar")]
+        public ActionResult DescargarBarcaza(string id, [FromQuery] double toneladas)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                return BadRequest(new { mensaje = "El ID de la embarcación es requerido." });
+
+            // ¡ACÁ ESTABA EL BUG! Ahora permitimos el 0 para que pase a EN LASTRE
+            if (toneladas < 0) 
+                return BadRequest(new { mensaje = "La cantidad de toneladas no puede ser negativa." });
+
+            var exito = _cargaService.DescargarBarcaza(id, toneladas);
+            if (!exito) return NotFound(new { mensaje = $"No se encontró la unidad con ID {id}." });
+            return Ok(new { mensaje = $"Descarga registrada correctamente." });
         }
     }
 }

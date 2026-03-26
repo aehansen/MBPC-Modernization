@@ -50,6 +50,10 @@ namespace Mbpc.Api.Models.Mongo
 
         [BsonElement("UNIDAD")]
         public string Unidad { get; set; } = null!;
+
+        [BsonElement("MUELLE_ACTUAL")]
+        [BsonIgnoreIfNull] // Si no está amarrada, que no lo guarde
+        public string? MuelleActual { get; set; }
     }
 
     [BsonIgnoreExtraElements] // <-- BLINDAJE PARA EL REMOLCADOR

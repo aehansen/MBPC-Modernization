@@ -2,11 +2,16 @@ namespace Mbpc.Api.DTOs
 {
     public class CargaDto
     {
-        public string Id { get; set; }
-        public string ViajeId { get; set; }
+        // El "= null!;" apaga las advertencias amarillas de .NET 8
+        public string Id { get; set; } = null!;
+        public string ViajeId { get; set; } = null!;
+        public string DescripcionLista { get; set; } = null!;
+        public string NivelRiesgo { get; set; } = null!;
         
-        // Formateamos la vista en el DTO para que el frontend solo tenga que pintar datos
-        public string DescripcionLista { get; set; } // Ej: "Soja (5000 tons.)"
-        public string NivelRiesgo { get; set; } // Ej: "Alto" o "Estándar"
+        // Campo para la sincronización CQRS
+        public string? MuelleActual { get; set; }
+
+        // ¡ESTE ES EL CAMPO QUE FALTABA Y ROMPÍA LA COMPILACIÓN!
+        public double Tonelaje { get; set; }
     }
 }

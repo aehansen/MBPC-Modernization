@@ -2,6 +2,8 @@ Listado de rutas de carpetas
 El número de serie del volumen es 92F0-09B7
 C:.
 ¦   .gitignore
+¦   arrancar-backend.bat
+¦   arrancar-frontend.bat
 ¦   estructura_mbpc.txt
 ¦   lista.txt
 ¦   MbpcModernization.sln
@@ -6088,6 +6090,7 @@ C:.
 ¦   ¦   ¦   
 ¦   ¦   +---Config
 ¦   ¦   ¦       MongoDbSettings.cs
+¦   ¦   ¦       OracleDbSettings.cs
 ¦   ¦   ¦       
 ¦   ¦   +---Mongo
 ¦   ¦           ViajeDetalleMongo.cs
@@ -6137,10 +6140,10 @@ C:.
 ¦   ¦       launchSettings.json
 ¦   ¦       
 ¦   +---Services
-¦           CargaMongoService.cs
+¦           CargaManagerService.cs
 ¦           ICargaService.cs
 ¦           IViajeService.cs
-¦           ViajeMongoService.cs
+¦           ViajeManagerService.cs
 ¦           
 +---node-v24.14.0-win-x64
 ¦   ¦   CHANGELOG.md
