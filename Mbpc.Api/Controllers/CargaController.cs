@@ -79,5 +79,51 @@ namespace Mbpc.Api.Controllers
             if (!exito) return NotFound(new { mensaje = $"No se encontró la unidad con ID {id}." });
             return Ok(new { mensaje = $"Descarga registrada correctamente." });
         }
+
+        // ── TAREA 2: AGREGAR CARGA AL VIAJE ─────────────────────────────────
+
+        /// <summary>
+        /// Agrega una nueva carga (Barcaza o Bodega) al manifiesto del buque.
+        /// CQRS: escribe en Oracle (PKG_MBPC_CARGAS.SP_AGREGAR_CARGA) y hace Update.Push
+        /// en el array "barcazas" de la colección details_mbpc para ese nombre de buque.
+        /// El parámetro {viajeNombreBuque} es el VesselName usado como clave en MongoDB.
+        /// </summary>
+        [HttpPost("viaje/{viajeNombreBuque}")]
+        public async Task<ActionResult> AgregarCarga(
+            string viajeNombreBuque,
+            [FromBody] NuevaCargaDto nuevaCarga)
+        {
+            if (string.IsNullOrWhiteSpace(viajeNombreBuque))
+                return BadRequest(new { mensaje = "El nombre del buque no puede estar vacío." });
+
+            if (nuevaCarga == null
+                || string.IsNullOrWhiteSpace(nuevaCarga.Nombre)
+                || string.IsNullOrWhiteSpace(nuevaCarga.Tipo))
+            {
+                return BadRequest(new { mensaje = "Los campos Nombre y Tipo son requeridos." });
+            }
+
+            // Validamos que el tipo sea uno de los dos valores permitidos
+            var tiposValidos = new[] { "Barcaza", "Bodega" };
+            if (!tiposValidos.Contains(nuevaCarga.Tipo, StringComparer.OrdinalIgnoreCase))
+                return BadRequest(new { mensaje = "El tipo debe ser 'Barcaza' o 'Bodega'." });
+
+            if (nuevaCarga.Tonelaje < 0)
+                return BadRequest(new { mensaje = "El tonelaje no puede ser negativo." });
+
+            _logger.LogInformation(
+                "Solicitud de agregar carga '{Nombre}' ({Tipo}, {Tonelaje}tn) al buque '{Buque}'.",
+                nuevaCarga.Nombre, nuevaCarga.Tipo, nuevaCarga.Tonelaje, viajeNombreBuque);
+
+            var exito = await _cargaService.AgregarCargaAsync(viajeNombreBuque, nuevaCarga);
+
+            if (!exito)
+                return StatusCode(500, new { mensaje = $"Error interno al agregar la carga al buque '{viajeNombreBuque}'." });
+
+            return Ok(new
+            {
+                mensaje = $"Carga '{nuevaCarga.Nombre}' ({nuevaCarga.Tipo}) agregada correctamente al buque '{viajeNombreBuque}'."
+            });
+        }
     }
 }

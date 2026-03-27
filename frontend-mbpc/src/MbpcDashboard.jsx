@@ -1,8 +1,11 @@
-// MbpcDashboard.jsx - VERSIÓN MODERNIZADA v0.4.0
-// Cambios v0.4.0: Botonera superior 100% funcional — modales Barcos en Puerto, Histórico,
-//                 Amarrar Barcaza (global), Ver Mapa. Acciones de Barcaza: Cargar/Descargar
-//                 con input de toneladas conectado a los nuevos endpoints de CargaController.
-// Ajuste Reglas de Negocio: Validación estricta de tonelaje y acciones por tipo de embarcación.
+// MbpcDashboard.jsx - VERSIÓN MODERNIZADA v0.5.0
+// Cambios v0.5.0:
+//   TAREA 1 — Tabla de Viajes Activos: 3 botones de estado por fila (Zarpar / Amarrar / Fondear)
+//             que llaman a PUT /api/viajes/{id}/zarpar|amarrar|fondear y recargan la grilla.
+//   TAREA 2 — Manifiesto de Carga: botón "Añadir Carga" que abre un modal para ingresar
+//             Nombre, Tipo (Bodega/Barcaza) y Tonelaje, y llama a POST /api/carga/viaje/{buque}.
+// Versiones anteriores: v0.4.0 — Botonera superior 100% funcional — modales Barcos en Puerto,
+//                 Histórico, Amarrar Barcaza (global), Ver Mapa. Acciones de Barcaza: Cargar/Descargar.
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 
@@ -92,6 +95,13 @@ const NUEVO_VIAJE_INITIAL = {
 
 const HISTORICO_FILTRO_INITIAL = {
     nombre: '', omi: '', matricula: '', origen: '', destino: '', desde: '', hasta: ''
+};
+
+// TAREA 2 — Estado inicial del formulario "Añadir Carga"
+const NUEVA_CARGA_INITIAL = {
+    nombre: '',
+    tipo: 'Barcaza',
+    tonelaje: '',
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -189,6 +199,14 @@ const MbpcDashboard = () => {
     // --- ESTADO MODAL VER MAPA ---
     const [modalMapa, setModalMapa] = useState({ show: false });
 
+    // TAREA 1 — Estado de carga para los botones de cambio de estado por fila
+    const [estadoViajeLoading, setEstadoViajeLoading] = useState({});
+
+    // TAREA 2 — Estado modal "Añadir Carga"
+    const [modalNuevaCarga, setModalNuevaCarga] = useState({ show: false, loading: false });
+    const [nuevaCargaForm, setNuevaCargaForm] = useState(NUEVA_CARGA_INITIAL);
+    const [nuevaCargaErrors, setNuevaCargaErrors] = useState({});
+
     // ── EFECTOS ────────────────────────────────────────────────────────────────
     useEffect(() => { fetchViajes(); }, [paginaActual]);
 
@@ -227,6 +245,23 @@ const MbpcDashboard = () => {
             console.error("Error fetching cargas:", err);
         } finally {
             setLoading(prev => ({ ...prev, cargas: false }));
+        }
+    };
+
+    // ── TAREA 1: CAMBIO DE ESTADO DEL BUQUE ────────────────────────────────────
+    const cambiarEstadoViaje = async (viaje, accion) => {
+        // accion: 'zarpar' | 'amarrar' | 'fondear'
+        const key = `${viaje.id}-${accion}`;
+        setEstadoViajeLoading(prev => ({ ...prev, [key]: true }));
+        try {
+            await api.put(`/viajes/${encodeURIComponent(viaje.id)}/${accion}`);
+            // Recargamos la grilla para reflejar el nuevo estado
+            await fetchViajes();
+        } catch (err) {
+            console.error(`Error al ejecutar '${accion}' para viaje ${viaje.id}:`, err);
+            alert(`No se pudo ejecutar '${accion}' para ${viaje.buque}. Verificá la consola y el Backend.`);
+        } finally {
+            setEstadoViajeLoading(prev => ({ ...prev, [key]: false }));
         }
     };
 
@@ -408,7 +443,7 @@ const MbpcDashboard = () => {
     };
 
     const buscarHistorico = async () => {
-        setModalHistorico(prev => ({ ...prev, loading: true, buscado: false }));
+        setModalHistorico(prev => ({ ...prev, loading: true }));
         try {
             const params = new URLSearchParams();
             if (filtroHistorico.nombre)    params.append('nombre',    filtroHistorico.nombre);
@@ -457,6 +492,61 @@ const MbpcDashboard = () => {
             alert("Falló la operación. Verificá que el ID de la barcaza sea correcto y el Backend esté online.");
         } finally {
             setModalAmarrarGlobal(prev => ({ ...prev, loading: false }));
+        }
+    };
+
+    // ── TAREA 2: MODAL AÑADIR CARGA ────────────────────────────────────────────
+    const abrirModalNuevaCarga = () => {
+        setNuevaCargaForm(NUEVA_CARGA_INITIAL);
+        setNuevaCargaErrors({});
+        setModalNuevaCarga({ show: true, loading: false });
+    };
+
+    const cerrarModalNuevaCarga = () => setModalNuevaCarga({ show: false, loading: false });
+
+    const handleNuevaCargaChange = (e) => {
+        const { name, value } = e.target;
+        setNuevaCargaForm(prev => ({ ...prev, [name]: value }));
+        if (nuevaCargaErrors[name]) setNuevaCargaErrors(prev => ({ ...prev, [name]: null }));
+    };
+
+    const validarNuevaCarga = () => {
+        const errors = {};
+        if (!nuevaCargaForm.nombre.trim()) errors.nombre = "El nombre/ID de la carga es requerido.";
+        if (!nuevaCargaForm.tipo) errors.tipo = "El tipo es requerido.";
+        const tons = parseFloat(nuevaCargaForm.tonelaje);
+        if (isNaN(tons) || tons < 0)
+            errors.tonelaje = "El tonelaje debe ser un número mayor o igual a 0.";
+        return errors;
+    };
+
+    const guardarNuevaCarga = async () => {
+        const errors = validarNuevaCarga();
+        if (Object.keys(errors).length > 0) { setNuevaCargaErrors(errors); return; }
+
+        // Necesitamos el nombre del buque para la URL del endpoint
+        const nombreBuque = viajeSeleccionado?.buque;
+        if (!nombreBuque) {
+            alert("No se puede identificar el buque del viaje seleccionado.");
+            return;
+        }
+
+        setModalNuevaCarga(prev => ({ ...prev, loading: true }));
+        try {
+            const payload = {
+                nombre: nuevaCargaForm.nombre.trim(),
+                tipo: nuevaCargaForm.tipo,
+                tonelaje: parseFloat(nuevaCargaForm.tonelaje),
+            };
+            await api.post(`/carga/viaje/${encodeURIComponent(nombreBuque)}`, payload);
+            // Recargamos el manifiesto para ver la nueva carga
+            await fetchCargas(selectedViajeId);
+            cerrarModalNuevaCarga();
+        } catch (err) {
+            console.error("Error al agregar carga:", err);
+            alert("No se pudo agregar la carga. Verificá la consola y el Backend.");
+        } finally {
+            setModalNuevaCarga(prev => ({ ...prev, loading: false }));
         }
     };
 
@@ -605,6 +695,7 @@ const MbpcDashboard = () => {
                                     <th className="px-5 py-3">Buque</th>
                                     <th className="px-5 py-3">Ruta (Origen - Destino)</th>
                                     <th className="px-5 py-3">Último Estado</th>
+                                    {/* TAREA 1: columna de acciones ampliada */}
                                     <th className="px-5 py-3 text-right">Acciones</th>
                                 </tr>
                             </thead>
@@ -627,15 +718,68 @@ const MbpcDashboard = () => {
                                             </td>
                                             <td className="px-5 py-4 text-gray-600">{viaje.ruta}</td>
                                             <td className="px-5 py-4">
-                                                <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${viaje.estadoActual === 'En Curso' ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'}`}>
+                                                <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${getEstadoBadgeClass(viaje.estadoActual)}`}>
                                                     {viaje.estadoActual}
                                                 </span>
                                                 <span className="text-xs text-gray-400 ml-2">{viaje.fechaEstado}</span>
                                             </td>
-                                            <td className="px-5 py-4 text-right">
-                                                <button className={`text-sm font-semibold ${selectedViajeId === viaje.id ? 'text-[#104a8e]' : 'text-gray-500'}`}>
-                                                    {selectedViajeId === viaje.id ? 'Seleccionado' : 'Ver Cargas'}
-                                                </button>
+                                            {/*
+                                             * TAREA 1 — Botones de cambio de estado del buque.
+                                             * Se detiene la propagación del click (stopPropagation) para no
+                                             * interferir con la selección de fila que carga las cargas.
+                                             */}
+                                            <td className="px-5 py-4 text-right" onClick={e => e.stopPropagation()}>
+                                                <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                                                    {/* Ver Cargas */}
+                                                    <button
+                                                        onClick={() => setSelectedViajeId(viaje.id)}
+                                                        className={`text-xs font-semibold px-2.5 py-1.5 rounded border transition ${selectedViajeId === viaje.id ? 'bg-[#104a8e] text-white border-[#104a8e]' : 'text-gray-500 border-gray-300 hover:bg-gray-100'}`}
+                                                    >
+                                                        {selectedViajeId === viaje.id ? 'Seleccionado' : 'Ver Cargas'}
+                                                    </button>
+
+                                                    {/* Zarpar → PUT /api/viajes/{id}/zarpar */}
+                                                    <button
+                                                        onClick={() => cambiarEstadoViaje(viaje, 'zarpar')}
+                                                        disabled={!!estadoViajeLoading[`${viaje.id}-zarpar`]}
+                                                        title="Hacer zarpar el buque (estado → Navegando)"
+                                                        className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded border border-green-400 text-green-700 bg-green-50 hover:bg-green-100 transition disabled:opacity-50"
+                                                    >
+                                                        {estadoViajeLoading[`${viaje.id}-zarpar`]
+                                                            ? <IconoSpinner />
+                                                            : <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 12h14M12 5l7 7-7 7" /></svg>
+                                                        }
+                                                        Zarpar
+                                                    </button>
+
+                                                    {/* Amarrar → PUT /api/viajes/{id}/amarrar */}
+                                                    <button
+                                                        onClick={() => cambiarEstadoViaje(viaje, 'amarrar')}
+                                                        disabled={!!estadoViajeLoading[`${viaje.id}-amarrar`]}
+                                                        title="Amarrar el buque en puerto (estado → Amarrado)"
+                                                        className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded border border-[#104a8e] text-[#104a8e] bg-blue-50 hover:bg-blue-100 transition disabled:opacity-50"
+                                                    >
+                                                        {estadoViajeLoading[`${viaje.id}-amarrar`]
+                                                            ? <IconoSpinner />
+                                                            : <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                                                        }
+                                                        Amarrar
+                                                    </button>
+
+                                                    {/* Fondear → PUT /api/viajes/{id}/fondear */}
+                                                    <button
+                                                        onClick={() => cambiarEstadoViaje(viaje, 'fondear')}
+                                                        disabled={!!estadoViajeLoading[`${viaje.id}-fondear`]}
+                                                        title="Fondear el buque (estado → Fondeado)"
+                                                        className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded border border-yellow-500 text-yellow-700 bg-yellow-50 hover:bg-yellow-100 transition disabled:opacity-50"
+                                                    >
+                                                        {estadoViajeLoading[`${viaje.id}-fondear`]
+                                                            ? <IconoSpinner />
+                                                            : <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 6h18M3 12h18M3 18h18" /></svg>
+                                                        }
+                                                        Fondear
+                                                    </button>
+                                                </div>
                                             </td>
                                         </tr>
                                     ))}
@@ -658,13 +802,29 @@ const MbpcDashboard = () => {
                                     {viajeSeleccionado?.ruta}
                                 </p>
                             </div>
-                            {loading.cargas && <span className="text-sm text-gray-400">Actualizando...</span>}
+                            <div className="flex items-center gap-3">
+                                {loading.cargas && <span className="text-sm text-gray-400">Actualizando...</span>}
+                                {/* TAREA 2 — Botón "Añadir Carga" */}
+                                <button
+                                    onClick={abrirModalNuevaCarga}
+                                    className="flex items-center gap-1.5 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition shadow-sm"
+                                >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+                                    </svg>
+                                    Añadir Carga
+                                </button>
+                            </div>
                         </div>
 
                         {loading.cargas && cargas.length === 0 ? (
                             <div className="text-center py-10 text-gray-500">Cargando manifiesto...</div>
                         ) : cargas.length === 0 ? (
-                            <div className="text-center py-10 text-gray-500 bg-gray-50 rounded-lg">Este viaje no tiene cargas registradas en Mongo.</div>
+                            <div className="text-center py-10 text-gray-500 bg-gray-50 rounded-lg">
+                                Este viaje no tiene cargas registradas en Mongo.
+                                <br />
+                                <span className="text-xs text-gray-400 mt-1 block">Usá el botón "Añadir Carga" para registrar la primera.</span>
+                            </div>
                         ) : (
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                                 {cargas.map(carga => {
@@ -759,7 +919,7 @@ const MbpcDashboard = () => {
             {/* ── PIE DE PÁGINA ─────────────────────────────────────────── */}
             <footer className="border-t mt-12 p-6 bg-white text-center text-xs text-gray-400">
                 <p>&copy; 2026 Prefectura Naval Argentina - Dirección de Informática y Comunicaciones.</p>
-                <p className="mt-1">Sistema de Gestión de Tráfico Marítimo (MBPC) - Módulo de Modernización - v0.4.0</p>
+                <p className="mt-1">Sistema de Gestión de Tráfico Marítimo (MBPC) - Módulo de Modernización - v0.5.0</p>
             </footer>
 
             {/* ════════════════════════════════════════════════════════════
@@ -1147,7 +1307,6 @@ const MbpcDashboard = () => {
                         onClose={() => setModalMapa({ show: false })}
                     />
                     <div className="p-8 flex flex-col items-center justify-center gap-6 text-center">
-                        {/* Ícono de mapa grande */}
                         <div className="w-24 h-24 bg-blue-50 rounded-full flex items-center justify-center border-2 border-blue-100">
                             <svg className="w-12 h-12 text-[#104a8e]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
@@ -1178,13 +1337,106 @@ const MbpcDashboard = () => {
             )}
 
             {/* ════════════════════════════════════════════════════════════
+                TAREA 2 — MODAL AÑADIR CARGA AL VIAJE
+                POST /api/carga/viaje/{viajeNombreBuque}
+            ════════════════════════════════════════════════════════════ */}
+            {modalNuevaCarga.show && (
+                <Modal onClose={cerrarModalNuevaCarga} maxWidth="max-w-md">
+                    <ModalHeader
+                        titulo="Añadir Carga al Viaje"
+                        subtitulo={`PKG_MBPC_CARGAS.SP_AGREGAR_CARGA — Buque: ${viajeSeleccionado?.buque || '...'}`}
+                        icono={<IconoCarga className="w-6 h-6 text-blue-300" />}
+                        onClose={cerrarModalNuevaCarga}
+                    />
+                    <div className="p-6 space-y-4">
+                        <p className="text-sm text-gray-500">
+                            Registrá una nueva carga en Oracle y sincronizá el array <code className="bg-gray-100 px-1 rounded text-xs">barcazas</code> en MongoDB vía CQRS (Update.Push).
+                        </p>
+
+                        {/* Nombre / ID */}
+                        <Campo label="Nombre o ID de la Carga" required>
+                            <input
+                                name="nombre"
+                                type="text"
+                                placeholder="Ej: BARCAZA SUR VII / BODEGA-01"
+                                className={`${inputCls} ${nuevaCargaErrors.nombre ? 'border-red-400 ring-1 ring-red-300' : ''}`}
+                                value={nuevaCargaForm.nombre}
+                                onChange={handleNuevaCargaChange}
+                                autoFocus
+                            />
+                            {nuevaCargaErrors.nombre && <p className="text-xs text-red-500 mt-1">{nuevaCargaErrors.nombre}</p>}
+                        </Campo>
+
+                        {/* Tipo */}
+                        <Campo label="Tipo de Carga" required>
+                            <select
+                                name="tipo"
+                                className={`${inputCls} ${nuevaCargaErrors.tipo ? 'border-red-400 ring-1 ring-red-300' : ''}`}
+                                value={nuevaCargaForm.tipo}
+                                onChange={handleNuevaCargaChange}
+                            >
+                                <option value="Barcaza">Barcaza</option>
+                                <option value="Bodega">Bodega</option>
+                            </select>
+                            {nuevaCargaErrors.tipo && <p className="text-xs text-red-500 mt-1">{nuevaCargaErrors.tipo}</p>}
+                        </Campo>
+
+                        {/* Tonelaje */}
+                        <Campo label="Tonelaje Inicial (Tn)" required>
+                            <input
+                                name="tonelaje"
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                placeholder="Ej: 1250.00"
+                                className={`${inputCls} ${nuevaCargaErrors.tonelaje ? 'border-red-400 ring-1 ring-red-300' : ''}`}
+                                value={nuevaCargaForm.tonelaje}
+                                onChange={handleNuevaCargaChange}
+                            />
+                            {nuevaCargaErrors.tonelaje && <p className="text-xs text-red-500 mt-1">{nuevaCargaErrors.tonelaje}</p>}
+                        </Campo>
+
+                        {/* Aviso CQRS */}
+                        <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 text-xs text-blue-700">
+                            <strong>CQRS:</strong> Se escribirá en Oracle y se hará un <code>Update.Push</code> en <code>details_mbpc</code> para el buque <strong>{viajeSeleccionado?.buque}</strong>.
+                        </div>
+                    </div>
+                    <div className="sticky bottom-0 bg-gray-50 border-t px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
+                        <button
+                            onClick={cerrarModalNuevaCarga}
+                            disabled={modalNuevaCarga.loading}
+                            className="px-5 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition disabled:opacity-50"
+                        >
+                            Cancelar
+                        </button>
+                        <button
+                            onClick={guardarNuevaCarga}
+                            disabled={modalNuevaCarga.loading}
+                            className="flex items-center gap-2 px-6 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50 shadow-sm"
+                        >
+                            {modalNuevaCarga.loading ? (
+                                <><IconoSpinner /> Guardando...</>
+                            ) : (
+                                <>
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                    Confirmar Carga
+                                </>
+                            )}
+                        </button>
+                    </div>
+                </Modal>
+            )}
+
+            {/* ════════════════════════════════════════════════════════════
                 MODAL NUEVO VIAJE — todos los campos del DTO expandido
             ════════════════════════════════════════════════════════════ */}
             {modalNuevoViaje.show && (
                 <Modal onClose={cerrarNuevoViaje} maxWidth="max-w-3xl">
                     <ModalHeader
                         titulo="Nuevo Viaje"
-                        subtitulo="PKG_MBPC_VIAJES.SP_CREAR_VIAJE"
+                        subtitulo="PKG_MBPC_VIAJES.SP_CREAR_VIAJE — El buque nace con estado 'Amarrado'"
                         icono={
                             <svg className="w-6 h-6 text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />

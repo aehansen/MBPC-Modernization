@@ -52,3 +52,5 @@ C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api\bin\Debug\net8.0\runtimes\linux\lib\net
 C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api\bin\Debug\net8.0\runtimes\osx\lib\net8.0\System.DirectoryServices.Protocols.dll
 C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api\bin\Debug\net8.0\runtimes\win\lib\net8.0\System.DirectoryServices.Protocols.dll
 C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api\bin\Debug\net8.0\runtimes\win\lib\net8.0\System.Security.Cryptography.Pkcs.dll
+C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api\bin\Debug\net8.0\Polly.dll
+C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api\bin\Debug\net8.0\Polly.Core.dll

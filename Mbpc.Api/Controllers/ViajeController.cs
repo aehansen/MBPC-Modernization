@@ -37,8 +37,8 @@ namespace Mbpc.Api.Controllers
             {
                 Id            = p.Id,
                 Buque         = p.VesselName ?? "DESCONOCIDO",
-                // Ruta formateada con coordenadas reales del AIS
-                Ruta          = $"Lat: {Math.Round(p.Latitude, 4)} | Lon: {Math.Round(p.Longitude, 4)} ({Math.Round(p.SpeedOverGround, 1)} nds)",
+                // ¡ACÁ ESTÁ LA MAGIA! Concatenamos Origen, Destino y Coordenadas
+                Ruta          = $"{p.Origin ?? "Sin Origen"} ➔ {p.Destination ?? "Sin Destino"} | Pos: {Math.Round(p.Latitude, 4)}, {Math.Round(p.Longitude, 4)}",
                 FechaInicioFormateada = p.MsgTime.ToString("dd/MM/yyyy HH:mm"),
                 EstadoActual  = p.NavegationStatusDesc ?? "N/A"
             }).ToList();
@@ -111,8 +111,8 @@ namespace Mbpc.Api.Controllers
         /// <summary>
         /// Inicia un nuevo viaje registrando los datos en Oracle.
         /// NOTA CQRS: la escritura va a Oracle; la lectura viene de Mongo.
-        /// El frontend no verá el nuevo viaje en la grilla hasta que Mongo
-        /// se sincronice (próximo paso arquitectónico).
+        /// El frontend verá el nuevo viaje en la grilla de inmediato gracias al Insert en Mongo.
+        /// El buque nace con estado "Amarrado" según regla de negocio.
         /// </summary>
         [HttpPost]
         public async Task<ActionResult> IniciarViaje([FromBody] NuevoViajeDto nuevoViaje)
@@ -138,7 +138,66 @@ namespace Mbpc.Api.Controllers
             if (!exito)
                 return StatusCode(500, new { mensaje = "Error interno al procesar el inicio de viaje." });
 
-            return Ok(new { mensaje = $"Viaje para {nuevoViaje.NombreBuque} iniciado correctamente." });
+            return Ok(new { mensaje = $"Viaje para {nuevoViaje.NombreBuque} iniciado correctamente con estado 'Amarrado'." });
+        }
+
+        // ── TAREA 1: ENDPOINTS DE CAMBIO DE ESTADO DEL BUQUE ────────────────
+
+        /// <summary>
+        /// Hace zarpar el buque: cambia NavegationStatusDesc a "Navegando" en MongoDB.
+        /// CQRS: simula bypass a Oracle. La operación real se registraría en PKG_MBPC_VIAJES.SP_ZARPAR.
+        /// </summary>
+        [HttpPut("{id}/zarpar")]
+        public async Task<ActionResult> ZarparViaje(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                return BadRequest(new { mensaje = "El ID del viaje/buque es requerido." });
+
+            _logger.LogInformation("Solicitud de ZARPAR recibida para: {Id}", id);
+
+            var exito = await _viajeService.ZarparAsync(id);
+            if (!exito)
+                return NotFound(new { mensaje = $"No se encontró el buque/viaje con ID '{id}' en MongoDB." });
+
+            return Ok(new { mensaje = $"Buque '{id}' zarpó correctamente. Estado actualizado a 'Navegando'." });
+        }
+
+        /// <summary>
+        /// Amarra el buque en puerto: cambia NavegationStatusDesc a "Amarrado" en MongoDB.
+        /// CQRS: simula bypass a Oracle. La operación real se registraría en PKG_MBPC_VIAJES.SP_AMARRAR_VIAJE.
+        /// </summary>
+        [HttpPut("{id}/amarrar")]
+        public async Task<ActionResult> AmarrarViaje(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                return BadRequest(new { mensaje = "El ID del viaje/buque es requerido." });
+
+            _logger.LogInformation("Solicitud de AMARRAR VIAJE recibida para: {Id}", id);
+
+            var exito = await _viajeService.AmarrarViajeAsync(id);
+            if (!exito)
+                return NotFound(new { mensaje = $"No se encontró el buque/viaje con ID '{id}' en MongoDB." });
+
+            return Ok(new { mensaje = $"Buque '{id}' amarrado correctamente. Estado actualizado a 'Amarrado'." });
+        }
+
+        /// <summary>
+        /// Fondea el buque: cambia NavegationStatusDesc a "Fondeado" en MongoDB.
+        /// CQRS: simula bypass a Oracle. La operación real se registraría en PKG_MBPC_VIAJES.SP_FONDEAR_VIAJE.
+        /// </summary>
+        [HttpPut("{id}/fondear")]
+        public async Task<ActionResult> FondearViaje(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                return BadRequest(new { mensaje = "El ID del viaje/buque es requerido." });
+
+            _logger.LogInformation("Solicitud de FONDEAR VIAJE recibida para: {Id}", id);
+
+            var exito = await _viajeService.FondearViajeAsync(id);
+            if (!exito)
+                return NotFound(new { mensaje = $"No se encontró el buque/viaje con ID '{id}' en MongoDB." });
+
+            return Ok(new { mensaje = $"Buque '{id}' fondeado correctamente. Estado actualizado a 'Fondeado'." });
         }
     }
 }

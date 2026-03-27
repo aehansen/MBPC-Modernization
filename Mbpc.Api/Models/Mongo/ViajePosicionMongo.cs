@@ -45,6 +45,12 @@ namespace Mbpc.Api.Models.Mongo
         [BsonElement("msgTime")]
         public DateTime MsgTime { get; set; }
 
+        [BsonElement("Origin")]
+        public string? Origin { get; set; }
+
+        [BsonElement("Destination")]
+        public string? Destination { get; set; }
+
         [BsonElement("location")]
         public LocationMongo? Location { get; set; }
     }

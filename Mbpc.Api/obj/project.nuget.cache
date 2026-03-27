@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "P69EtnUj0hs=",
+  "dgSpecHash": "vHzPDj/YZkA=",
   "success": true,
   "projectFilePath": "C:\\proyectos\\MBPC\\prototipoMBPC\\Mbpc.Api\\Mbpc.Api.csproj",
   "expectedPackageFiles": [
@@ -14,6 +14,8 @@
     "C:\\Users\\aehansen\\.nuget\\packages\\mongodb.bson\\3.7.0\\mongodb.bson.3.7.0.nupkg.sha512",
     "C:\\Users\\aehansen\\.nuget\\packages\\mongodb.driver\\3.7.0\\mongodb.driver.3.7.0.nupkg.sha512",
     "C:\\Users\\aehansen\\.nuget\\packages\\oracle.manageddataaccess.core\\23.26.100\\oracle.manageddataaccess.core.23.26.100.nupkg.sha512",
+    "C:\\Users\\aehansen\\.nuget\\packages\\polly\\8.6.6\\polly.8.6.6.nupkg.sha512",
+    "C:\\Users\\aehansen\\.nuget\\packages\\polly.core\\8.6.6\\polly.core.8.6.6.nupkg.sha512",
     "C:\\Users\\aehansen\\.nuget\\packages\\sharpcompress\\0.30.1\\sharpcompress.0.30.1.nupkg.sha512",
     "C:\\Users\\aehansen\\.nuget\\packages\\snappier\\1.0.0\\snappier.1.0.0.nupkg.sha512",
     "C:\\Users\\aehansen\\.nuget\\packages\\swashbuckle.aspnetcore\\6.6.2\\swashbuckle.aspnetcore.6.6.2.nupkg.sha512",

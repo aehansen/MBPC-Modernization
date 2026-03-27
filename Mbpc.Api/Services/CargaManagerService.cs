@@ -362,5 +362,110 @@ namespace Mbpc.Api.Services
 
             return exitoOracle;
         }
+
+        // ── TAREA 2: AGREGAR CARGA AL VIAJE ─────────────────────────────────
+
+        /// <summary>
+        /// Agrega una nueva carga (barcaza o bodega) al array de barcazas del buque.
+        /// CQRS:
+        ///   - Escritura: simula SP en Oracle (PKG_MBPC_CARGAS.SP_AGREGAR_CARGA) con bypass DEV.
+        ///   - Lectura: Update.Push sobre el array "barcazas" en la colección details_mbpc.
+        /// Si el documento del buque no existe en details_mbpc, se crea uno nuevo (upsert).
+        /// </summary>
+        public async Task<bool> AgregarCargaAsync(string nombreBuque, NuevaCargaDto nuevaCarga)
+        {
+            _logger.LogInformation(
+                "Agregando carga '{Nombre}' (tipo: {Tipo}, {Tonelaje}tn) al buque '{Buque}'.",
+                nuevaCarga.Nombre, nuevaCarga.Tipo, nuevaCarga.Tonelaje, nombreBuque);
+
+            bool exitoOracle = false;
+
+            // --- ESCRITURA (Oracle) ---
+            try
+            {
+                using var connection = new OracleConnection(_oracleConnectionString);
+                var parameters = new DynamicParameters();
+                parameters.Add("p_BUQUE",     nombreBuque);
+                parameters.Add("p_NOMBRE",    nuevaCarga.Nombre);
+                parameters.Add("p_TIPO",      nuevaCarga.Tipo);
+                parameters.Add("p_TONELAJE",  nuevaCarga.Tonelaje);
+                parameters.Add("p_RESULTADO", dbType: DbType.Int32, direction: ParameterDirection.Output);
+
+                await connection.ExecuteAsync(
+                    "PKG_MBPC_CARGAS.SP_AGREGAR_CARGA",
+                    parameters,
+                    commandType: CommandType.StoredProcedure);
+
+                exitoOracle = parameters.Get<int>("p_RESULTADO") == 1;
+            }
+            catch (OracleException ex)
+            {
+                if (!_env.IsDevelopment())
+                {
+                    _logger.LogError(ex, "Error de Oracle en producción al agregar carga al buque {Buque}.", nombreBuque);
+                    throw;
+                }
+
+                _logger.LogWarning(
+                    "Oracle no disponible en desarrollo. Bypass DEV activado para agregar carga '{Nombre}' al buque '{Buque}'. Error: {Message}",
+                    nuevaCarga.Nombre, nombreBuque, ex.Message);
+
+                exitoOracle = true; // Bypass de desarrollo
+            }
+
+            // --- INICIO LÓGICA CQRS (Update.Push en MongoDB) ---
+            if (exitoOracle)
+            {
+                try
+                {
+                    _logger.LogInformation(
+                        "Sincronizando nueva carga '{Nombre}' en MongoDB (details_mbpc) para buque '{Buque}'.",
+                        nuevaCarga.Nombre, nombreBuque);
+
+                    // Construimos el sub-documento de barcaza a inyectar
+                    var nuevaBarcazaDoc = new BarcazaMongo
+                    {
+                        Nombre      = nuevaCarga.Nombre,
+                        Carga       = nuevaCarga.Tipo,       // "Barcaza" o "Bodega" — mapea al campo CARGA
+                        Cantidad    = nuevaCarga.Tonelaje,
+                        Unidad      = "Tn",
+                        MuelleActual = null                  // Nace sin muelle asignado
+                    };
+
+                    var filtro = Builders<ViajeDetalleMongo>.Filter.Eq("VesselName", nombreBuque);
+
+                    // Update.Push agrega el nuevo sub-documento al array "barcazas"
+                    var update = Builders<ViajeDetalleMongo>.Update.Push("barcazas", nuevaBarcazaDoc);
+
+                    // Upsert: si el documento no existe en details_mbpc, lo crea
+                    var options = new UpdateOptions { IsUpsert = true };
+
+                    var result = await _detailsCollection.UpdateOneAsync(filtro, update, options);
+
+                    if (result.UpsertedId != null)
+                        _logger.LogInformation(
+                            "¡CQRS Exitoso! Documento creado en details_mbpc para buque '{Buque}' con primera carga '{Nombre}'.",
+                            nombreBuque, nuevaCarga.Nombre);
+                    else if (result.ModifiedCount > 0)
+                        _logger.LogInformation(
+                            "¡CQRS Exitoso! Carga '{Nombre}' inyectada en el array barcazas del buque '{Buque}'.",
+                            nuevaCarga.Nombre, nombreBuque);
+                    else
+                        _logger.LogWarning(
+                            "El Update.Push no modificó ningún documento para el buque '{Buque}'. Verificar colección details_mbpc.",
+                            nombreBuque);
+                }
+                catch (Exception mongoEx)
+                {
+                    _logger.LogError(mongoEx,
+                        "Fallo al sincronizar MongoDB (Push) para la nueva carga '{Nombre}' del buque '{Buque}'.",
+                        nuevaCarga.Nombre, nombreBuque);
+                    // No revertimos exitoOracle — Oracle ya escribió; el batch de Mongo reintentará
+                }
+            }
+            // --- FIN LÓGICA CQRS ---
+
+            return exitoOracle;
+        }
     }
 }
