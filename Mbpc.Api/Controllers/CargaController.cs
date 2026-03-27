@@ -8,14 +8,16 @@ namespace Mbpc.Api.Controllers
     [Route("api/carga")]
     public class CargaController : ControllerBase
     {
-        private readonly ICargaService _cargaService;
+        private readonly ICargaService          _cargaService;
         private readonly ILogger<CargaController> _logger;
 
         public CargaController(ICargaService cargaService, ILogger<CargaController> logger)
         {
             _cargaService = cargaService;
-            _logger = logger;
+            _logger       = logger;
         }
+
+        // ── GET ───────────────────────────────────────────────────────────────
 
         [HttpGet("viaje/{viajeId}")]
         public ActionResult<IEnumerable<CargaDto>> GetCargasPorViaje(string viajeId)
@@ -27,6 +29,8 @@ namespace Mbpc.Api.Controllers
             var cargas = _cargaService.ObtenerCargasPorViaje(viajeId);
             return Ok(cargas);
         }
+
+        // ── PUTs de estado ────────────────────────────────────────────────────
 
         [HttpPut("{id}/amarrar")]
         public ActionResult AmarrarBarcaza(string id, [FromQuery] string nuevoMuelle)
@@ -56,13 +60,12 @@ namespace Mbpc.Api.Controllers
             if (string.IsNullOrWhiteSpace(id))
                 return BadRequest(new { mensaje = "El ID de la embarcación es requerido." });
 
-            // Permitimos 0 o positivo, la validación dura (que sea mayor al actual) la hace React
-            if (toneladas < 0) 
+            if (toneladas < 0)
                 return BadRequest(new { mensaje = "La cantidad de toneladas no puede ser negativa." });
 
             var exito = _cargaService.CargarBarcaza(id, toneladas);
             if (!exito) return NotFound(new { mensaje = $"No se encontró la unidad con ID {id}." });
-            return Ok(new { mensaje = $"Carga registrada correctamente." });
+            return Ok(new { mensaje = "Carga registrada correctamente." });
         }
 
         [HttpPut("{id}/descargar")]
@@ -71,22 +74,20 @@ namespace Mbpc.Api.Controllers
             if (string.IsNullOrWhiteSpace(id))
                 return BadRequest(new { mensaje = "El ID de la embarcación es requerido." });
 
-            // ¡ACÁ ESTABA EL BUG! Ahora permitimos el 0 para que pase a EN LASTRE
-            if (toneladas < 0) 
+            // Permitimos 0 para que pase a EN LASTRE
+            if (toneladas < 0)
                 return BadRequest(new { mensaje = "La cantidad de toneladas no puede ser negativa." });
 
             var exito = _cargaService.DescargarBarcaza(id, toneladas);
             if (!exito) return NotFound(new { mensaje = $"No se encontró la unidad con ID {id}." });
-            return Ok(new { mensaje = $"Descarga registrada correctamente." });
+            return Ok(new { mensaje = "Descarga registrada correctamente." });
         }
 
-        // ── TAREA 2: AGREGAR CARGA AL VIAJE ─────────────────────────────────
+        // ── POST: agregar carga al viaje ──────────────────────────────────────
 
         /// <summary>
         /// Agrega una nueva carga (Barcaza o Bodega) al manifiesto del buque.
-        /// CQRS: escribe en Oracle (PKG_MBPC_CARGAS.SP_AGREGAR_CARGA) y hace Update.Push
-        /// en el array "barcazas" de la colección details_mbpc para ese nombre de buque.
-        /// El parámetro {viajeNombreBuque} es el VesselName usado como clave en MongoDB.
+        /// CQRS: escribe en Oracle y hace Update.Push en MongoDB.
         /// </summary>
         [HttpPost("viaje/{viajeNombreBuque}")]
         public async Task<ActionResult> AgregarCarga(
@@ -103,7 +104,6 @@ namespace Mbpc.Api.Controllers
                 return BadRequest(new { mensaje = "Los campos Nombre y Tipo son requeridos." });
             }
 
-            // Validamos que el tipo sea uno de los dos valores permitidos
             var tiposValidos = new[] { "Barcaza", "Bodega" };
             if (!tiposValidos.Contains(nuevaCarga.Tipo, StringComparer.OrdinalIgnoreCase))
                 return BadRequest(new { mensaje = "El tipo debe ser 'Barcaza' o 'Bodega'." });
@@ -112,7 +112,7 @@ namespace Mbpc.Api.Controllers
                 return BadRequest(new { mensaje = "El tonelaje no puede ser negativo." });
 
             _logger.LogInformation(
-                "Solicitud de agregar carga '{Nombre}' ({Tipo}, {Tonelaje}tn) al buque '{Buque}'.",
+                "Agregar carga '{Nombre}' ({Tipo}, {Tonelaje}tn) al buque '{Buque}'.",
                 nuevaCarga.Nombre, nuevaCarga.Tipo, nuevaCarga.Tonelaje, viajeNombreBuque);
 
             var exito = await _cargaService.AgregarCargaAsync(viajeNombreBuque, nuevaCarga);

@@ -1,6 +1,7 @@
 // IViajeService.cs
-// Interfaz del servicio de viajes — actualizada con los 3 nuevos métodos de cambio de estado (Tarea 1).
-// Agregar este archivo en Mbpc.Api/Services/IViajeService.cs (o donde resida actualmente).
+// Se agrega ReanudarAsync para completar la máquina de estados (EJE 2).
+// Sin ReanudarAsync no existe transición legal desde Fondeado → Navegando.
+// Namespace: Mbpc.Api.Services
 
 using Mbpc.Api.Models.Mongo;
 using Mbpc.Api.DTOs;
@@ -15,17 +16,34 @@ namespace Mbpc.Api.Services
         Task<List<BarcoPuertoDto>> GetBarcosEnPuertoAsync();
         Task<List<ViajeHistoricoDto>> GetHistoricoAsync(FiltroHistoricoDto filtro);
 
+        // ── MAPA (ArcGIS) ────────────────────────────────────────────────────
+        Task<List<MapaViajeDto>> GetMapaViajesAsync(string? mmsi = null, string? nombreBuque = null);
+
         // ── ESCRITURA (Oracle + CQRS) ────────────────────────────────────────
         Task<bool> IniciarViajeAsync(NuevoViajeDto nuevoViaje);
 
-        // ── TAREA 1: CAMBIO DE ESTADO DEL BUQUE ─────────────────────────────
-        /// <summary>Zarpar: establece NavegationStatusDesc = "Navegando" en MongoDB.</summary>
+        // ── MÁQUINA DE ESTADOS (EJE 2) ───────────────────────────────────────
+
+        /// <summary>
+        /// Zarpar: Amarrado/Reanudado → Navegando.
+        /// Transición ilegal si el estado actual es Fondeado.
+        /// </summary>
         Task<bool> ZarparAsync(string id);
 
-        /// <summary>Amarrar viaje: establece NavegationStatusDesc = "Amarrado" en MongoDB.</summary>
+        /// <summary>
+        /// Amarrar: Navegando/Reanudado → Amarrado.
+        /// </summary>
         Task<bool> AmarrarViajeAsync(string id);
 
-        /// <summary>Fondear viaje: establece NavegationStatusDesc = "Fondeado" en MongoDB.</summary>
+        /// <summary>
+        /// Fondear: Navegando/Reanudado → Fondeado.
+        /// </summary>
         Task<bool> FondearViajeAsync(string id);
+
+        /// <summary>
+        /// Reanudar: Fondeado → Reanudado.
+        /// Paso previo OBLIGATORIO para que un buque Fondeado pueda volver a Zarpar.
+        /// </summary>
+        Task<bool> ReanudarViajeAsync(string id);
     }
 }

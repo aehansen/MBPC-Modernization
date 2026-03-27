@@ -1,13 +1,16 @@
-// MbpcDashboard.jsx - VERSIÓN MODERNIZADA v0.5.0
+// MbpcDashboard.jsx - VERSIÓN MODERNIZADA v0.6.0
+// Cambios v0.6.0:
+//   INTEGRACIÓN ARCGIS: Se importó MapaAIS.jsx y se cableó el botón "Ver Mapa" 
+//   para alternar entre la vista de Grilla (Dashboard) y el Mapa Geoespacial.
 // Cambios v0.5.0:
 //   TAREA 1 — Tabla de Viajes Activos: 3 botones de estado por fila (Zarpar / Amarrar / Fondear)
 //             que llaman a PUT /api/viajes/{id}/zarpar|amarrar|fondear y recargan la grilla.
 //   TAREA 2 — Manifiesto de Carga: botón "Añadir Carga" que abre un modal para ingresar
 //             Nombre, Tipo (Bodega/Barcaza) y Tonelaje, y llama a POST /api/carga/viaje/{buque}.
-// Versiones anteriores: v0.4.0 — Botonera superior 100% funcional — modales Barcos en Puerto,
-//                 Histórico, Amarrar Barcaza (global), Ver Mapa. Acciones de Barcaza: Cargar/Descargar.
+
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import MapaAIS from './MapaAIS'; // <-- Importamos nuestro nuevo componente de mapa
 
 // Configuración API - Asegurate de que esto coincida con tu puerto de .NET
 const API_BASE_URL = 'http://localhost:5009/api';
@@ -151,6 +154,9 @@ const ModalHeader = ({ titulo, subtitulo, icono, onClose }) => (
 // COMPONENTE PRINCIPAL
 // ─────────────────────────────────────────────────────────────────────────────
 const MbpcDashboard = () => {
+    // --- ESTADO DE VISTA PRINCIPAL (Dashboard vs Mapa) ---
+    const [vistaActual, setVistaActual] = useState('dashboard');
+
     // --- ESTADOS ORIGINALES ---
     const [viajes, setViajes] = useState([]);
     const [selectedViajeId, setSelectedViajeId] = useState(null);
@@ -195,9 +201,6 @@ const MbpcDashboard = () => {
         show: false, loading: false,
         barcazaId: '', lugarAmarre: '', fechaHora: ''
     });
-
-    // --- ESTADO MODAL VER MAPA ---
-    const [modalMapa, setModalMapa] = useState({ show: false });
 
     // TAREA 1 — Estado de carga para los botones de cambio de estado por fila
     const [estadoViajeLoading, setEstadoViajeLoading] = useState({});
@@ -587,7 +590,7 @@ const MbpcDashboard = () => {
                     />
                     <div>
                         <h1 className="text-2xl font-bold tracking-tight">MBPC - Modernización</h1>
-                        <p className="text-sm text-blue-200">Prefectura Naval Argentina - Gestión de Tráfico Marítimo</p>
+                        <p className="text-sm text-blue-200">Prefectura Naval Argentina - Gestión de Tráfico de Neri</p>
                     </div>
                 </div>
                 <div className="flex items-center gap-2">
@@ -598,15 +601,26 @@ const MbpcDashboard = () => {
 
             {/* ── BOTONERA SUPERIOR ─────────────────────────────────────── */}
             <div className="bg-[#002454] border-t border-blue-800 px-6 py-2 flex items-center gap-2 flex-wrap">
-                {/* Ver Mapa */}
+                {/* BOTON: Ver Mapa / Volver al Dashboard */}
                 <button
-                    onClick={() => setModalMapa({ show: true })}
-                    className="flex items-center gap-1.5 px-4 py-1.5 bg-[#104a8e] hover:bg-[#1a5fa8] text-white text-xs font-semibold rounded transition border border-blue-600"
+                    onClick={() => setVistaActual(vistaActual === 'mapa' ? 'dashboard' : 'mapa')}
+                    className={`flex items-center gap-1.5 px-4 py-1.5 text-white text-xs font-semibold rounded transition border ${vistaActual === 'mapa' ? 'bg-amber-600 hover:bg-amber-700 border-amber-500' : 'bg-[#104a8e] hover:bg-[#1a5fa8] border-blue-600'}`}
                 >
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                    </svg>
-                    Ver Mapa
+                    {vistaActual === 'mapa' ? (
+                        <>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                            </svg>
+                            Volver al Dashboard
+                        </>
+                    ) : (
+                        <>
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                            </svg>
+                            Ver Mapa AIS
+                        </>
+                    )}
                 </button>
 
                 {/* Amarrar Barcaza (global) */}
@@ -655,272 +669,277 @@ const MbpcDashboard = () => {
             </div>
 
             {/* ── CONTENIDO PRINCIPAL ─────────────────────────────────────── */}
-            <main className="flex-grow p-6 md:p-8 space-y-8">
-                {error && (
-                    <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded shadow-sm text-red-800 flex items-center">
-                        <svg className="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        <span>{error}</span>
+            <main className={`flex-grow ${vistaActual === 'mapa' ? '' : 'p-6 md:p-8 space-y-8'}`}>
+                {/* RENDERIZADO DEL MAPA */}
+                {vistaActual === 'mapa' ? (
+                    <div style={{ height: 'calc(100vh - 130px)' }}> 
+                        <MapaAIS />
                     </div>
-                )}
-
-                {/* ── SECCIÓN VIAJES ────────────────────────────────────── */}
-                <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                    <div className="flex items-center justify-between mb-6 gap-4">
-                        <div className="flex items-center">
-                            <IconoBarco />
-                            <h2 className="text-xl font-semibold text-gray-800">Viajes Activos / Recientes</h2>
-                        </div>
-                        <div className="flex items-center gap-3">
-                            <input
-                                type="text"
-                                placeholder="Filtrar por buque o ruta..."
-                                className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-200 focus:border-[#104a8e] transition text-sm w-64 outline-none"
-                                value={filtro}
-                                onChange={(e) => setFiltro(e.target.value)}
-                            />
-                            <div className="flex gap-1">
-                                <button onClick={() => setPaginaActual(p => Math.max(1, p - 1))} className="px-3 py-1.5 border rounded-lg text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-50" disabled={paginaActual === 1}>&lt;</button>
-                                <span className="px-3 py-1.5 text-sm font-medium text-gray-700">Pág. {paginaActual}</span>
-                                <button onClick={() => setPaginaActual(p => p + 1)} className="px-3 py-1.5 border rounded-lg text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-50" disabled={viajes.length < tamanioPagina}>&gt;</button>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-sm text-left">
-                            <thead className="text-xs text-gray-500 uppercase bg-gray-50 rounded-t-lg">
-                                <tr>
-                                    <th className="px-5 py-3">Buque</th>
-                                    <th className="px-5 py-3">Ruta (Origen - Destino)</th>
-                                    <th className="px-5 py-3">Último Estado</th>
-                                    {/* TAREA 1: columna de acciones ampliada */}
-                                    <th className="px-5 py-3 text-right">Acciones</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-100">
-                                {loading.viajes ? (
-                                    <tr><td colSpan="4" className="text-center py-10 text-gray-500">Cargando viajes desde MongoDB...</td></tr>
-                                ) : viajes.length === 0 ? (
-                                    <tr><td colSpan="4" className="text-center py-10 text-gray-500">No se encontraron viajes.</td></tr>
-                                ) : viajes
-                                    .filter(v => filtro === "" || v.buque?.toLowerCase().includes(filtro.toLowerCase()) || v.ruta?.toLowerCase().includes(filtro.toLowerCase()))
-                                    .map(viaje => (
-                                        <tr
-                                            key={viaje.id}
-                                            className={`hover:bg-blue-50 transition cursor-pointer ${selectedViajeId === viaje.id ? 'bg-blue-50' : ''}`}
-                                            onClick={() => setSelectedViajeId(viaje.id)}
-                                        >
-                                            <td className="px-5 py-4 font-medium text-[#002454] flex items-center">
-                                                <IconoBarco />
-                                                {viaje.buque}
-                                            </td>
-                                            <td className="px-5 py-4 text-gray-600">{viaje.ruta}</td>
-                                            <td className="px-5 py-4">
-                                                <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${getEstadoBadgeClass(viaje.estadoActual)}`}>
-                                                    {viaje.estadoActual}
-                                                </span>
-                                                <span className="text-xs text-gray-400 ml-2">{viaje.fechaEstado}</span>
-                                            </td>
-                                            {/*
-                                             * TAREA 1 — Botones de cambio de estado del buque.
-                                             * Se detiene la propagación del click (stopPropagation) para no
-                                             * interferir con la selección de fila que carga las cargas.
-                                             */}
-                                            <td className="px-5 py-4 text-right" onClick={e => e.stopPropagation()}>
-                                                <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                                                    {/* Ver Cargas */}
-                                                    <button
-                                                        onClick={() => setSelectedViajeId(viaje.id)}
-                                                        className={`text-xs font-semibold px-2.5 py-1.5 rounded border transition ${selectedViajeId === viaje.id ? 'bg-[#104a8e] text-white border-[#104a8e]' : 'text-gray-500 border-gray-300 hover:bg-gray-100'}`}
-                                                    >
-                                                        {selectedViajeId === viaje.id ? 'Seleccionado' : 'Ver Cargas'}
-                                                    </button>
-
-                                                    {/* Zarpar → PUT /api/viajes/{id}/zarpar */}
-                                                    <button
-                                                        onClick={() => cambiarEstadoViaje(viaje, 'zarpar')}
-                                                        disabled={!!estadoViajeLoading[`${viaje.id}-zarpar`]}
-                                                        title="Hacer zarpar el buque (estado → Navegando)"
-                                                        className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded border border-green-400 text-green-700 bg-green-50 hover:bg-green-100 transition disabled:opacity-50"
-                                                    >
-                                                        {estadoViajeLoading[`${viaje.id}-zarpar`]
-                                                            ? <IconoSpinner />
-                                                            : <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 12h14M12 5l7 7-7 7" /></svg>
-                                                        }
-                                                        Zarpar
-                                                    </button>
-
-                                                    {/* Amarrar → PUT /api/viajes/{id}/amarrar */}
-                                                    <button
-                                                        onClick={() => cambiarEstadoViaje(viaje, 'amarrar')}
-                                                        disabled={!!estadoViajeLoading[`${viaje.id}-amarrar`]}
-                                                        title="Amarrar el buque en puerto (estado → Amarrado)"
-                                                        className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded border border-[#104a8e] text-[#104a8e] bg-blue-50 hover:bg-blue-100 transition disabled:opacity-50"
-                                                    >
-                                                        {estadoViajeLoading[`${viaje.id}-amarrar`]
-                                                            ? <IconoSpinner />
-                                                            : <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                                                        }
-                                                        Amarrar
-                                                    </button>
-
-                                                    {/* Fondear → PUT /api/viajes/{id}/fondear */}
-                                                    <button
-                                                        onClick={() => cambiarEstadoViaje(viaje, 'fondear')}
-                                                        disabled={!!estadoViajeLoading[`${viaje.id}-fondear`]}
-                                                        title="Fondear el buque (estado → Fondeado)"
-                                                        className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded border border-yellow-500 text-yellow-700 bg-yellow-50 hover:bg-yellow-100 transition disabled:opacity-50"
-                                                    >
-                                                        {estadoViajeLoading[`${viaje.id}-fondear`]
-                                                            ? <IconoSpinner />
-                                                            : <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 6h18M3 12h18M3 18h18" /></svg>
-                                                        }
-                                                        Fondear
-                                                    </button>
-                                                </div>
-                                            </td>
-                                        </tr>
-                                    ))}
-                            </tbody>
-                        </table>
-                    </div>
-                </section>
-
-                {/* ── SECCIÓN CARGAS ────────────────────────────────────── */}
-                {selectedViajeId && (
-                    <section className="bg-white rounded-xl shadow-lg border border-gray-100 border-t-4 border-t-[#104a8e] p-6 fade-in">
-                        <div className="flex items-center justify-between mb-6 pb-4 border-b">
-                            <div>
-                                <h3 className="text-lg font-bold text-gray-800 flex items-center">
-                                    <IconoCarga />
-                                    Manifiesto de Carga - {viajeSeleccionado?.buque || 'Cargando...'}
-                                </h3>
-                                <p className="text-sm text-gray-500 flex items-center mt-1">
-                                    <IconoUbicacion />
-                                    {viajeSeleccionado?.ruta}
-                                </p>
-                            </div>
-                            <div className="flex items-center gap-3">
-                                {loading.cargas && <span className="text-sm text-gray-400">Actualizando...</span>}
-                                {/* TAREA 2 — Botón "Añadir Carga" */}
-                                <button
-                                    onClick={abrirModalNuevaCarga}
-                                    className="flex items-center gap-1.5 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition shadow-sm"
-                                >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
-                                    </svg>
-                                    Añadir Carga
-                                </button>
-                            </div>
-                        </div>
-
-                        {loading.cargas && cargas.length === 0 ? (
-                            <div className="text-center py-10 text-gray-500">Cargando manifiesto...</div>
-                        ) : cargas.length === 0 ? (
-                            <div className="text-center py-10 text-gray-500 bg-gray-50 rounded-lg">
-                                Este viaje no tiene cargas registradas en Mongo.
-                                <br />
-                                <span className="text-xs text-gray-400 mt-1 block">Usá el botón "Añadir Carga" para registrar la primera.</span>
-                            </div>
-                        ) : (
-                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                {cargas.map(carga => {
-                                    const barcaza = esBarcaza(carga);
-                                    return (
-                                        <div key={carga.id} className="border border-gray-100 rounded-xl p-5 hover:shadow-md transition bg-gray-50/50 space-y-4">
-                                            <div className="flex justify-between items-start">
-                                                <div>
-                                                    <p className="font-semibold text-gray-800 text-base">{carga.descripcionLista}</p>
-                                                    <p className="text-xs text-gray-400 font-mono">ID: {carga.id}</p>
-                                                    <span className={`inline-block mt-1 px-2 py-0.5 text-xs font-medium rounded-full ${barcaza ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}`}>
-                                                        {barcaza ? 'Barcaza' : 'Remolcador / Buque'}
-                                                    </span>
-                                                </div>
-                                                <div dangerouslySetInnerHTML={{ __html: getRiesgoBadge(carga.nivelRiesgo) }} />
-                                            </div>
-
-                                            <div className="flex items-center justify-between text-sm bg-white p-3 rounded-lg border">
-                                                <span className="text-gray-500">Tonelaje Actual:</span>
-                                                <span className="font-bold text-gray-800">{carga.tonelaje} Tn</span>
-                                            </div>
-
-                                            <div className="flex items-center text-sm text-gray-600">
-                                                <IconoUbicacion />
-                                                <span>Estado: <strong className="text-[#002454]">{carga.muelleActual || 'Navegando / Fondeado'}</strong></span>
-                                            </div>
-
-                                            {/* ── BOTONES DIFERENCIADOS POR TIPO ── */}
-                                            {barcaza ? (
-                                                <div className="flex gap-2 pt-2 flex-wrap">
-                                                    <button
-                                                        onClick={() => abrirModalAccion(carga, 'cargar')}
-                                                        className="flex-1 text-center bg-green-600 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-green-700 transition"
-                                                    >
-                                                        Cargar
-                                                    </button>
-                                                    <button
-                                                        onClick={() => abrirModalAccion(carga, 'descargar')}
-                                                        className="flex-1 text-center bg-amber-500 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-amber-600 transition"
-                                                    >
-                                                        Descargar
-                                                    </button>
-                                                    <button
-                                                        onClick={() => abrirModalAccion(carga, 'amarrar_barcaza')}
-                                                        className="flex-1 text-center bg-[#104a8e] text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-[#002454] transition"
-                                                    >
-                                                        Amarrar
-                                                    </button>
-                                                </div>
-                                            ) : (
-                                                <div className="flex flex-col gap-2 pt-2">
-                                                    <div className="flex gap-2">
-                                                        <button 
-                                                            onClick={() => abrirModalAccion(carga, 'cargar')}
-                                                            className="flex-1 text-center bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-700 transition"
-                                                        >
-                                                            Cargar
-                                                        </button>
-                                                        <button 
-                                                            onClick={() => abrirModalAccion(carga, 'descargar')}
-                                                            className="flex-1 text-center bg-amber-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-amber-600 transition"
-                                                        >
-                                                            Descargar
-                                                        </button>
-                                                    </div>
-                                                    <div className="flex gap-2">
-                                                        <button 
-                                                            onClick={() => abrirModalAccion(carga, 'amarrar_buque')}
-                                                            className="flex-1 text-center bg-[#104a8e] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#002454] transition disabled:opacity-50"
-                                                            disabled={!!carga.muelleActual}
-                                                        >
-                                                            Amarrar
-                                                        </button>
-                                                        <button 
-                                                            onClick={() => abrirModalAccion(carga, 'fondear_buque')}
-                                                            className="flex-1 text-center bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-cyan-700 transition"
-                                                        >
-                                                            Fondear
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
-                                    );
-                                })}
+                ) : (
+                    <>
+                        {/* RENDERIZADO DEL DASHBOARD ORIGINAL */}
+                        {error && (
+                            <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded shadow-sm text-red-800 flex items-center">
+                                <svg className="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                </svg>
+                                <span>{error}</span>
                             </div>
                         )}
-                    </section>
+
+                        {/* ── SECCIÓN VIAJES ────────────────────────────────────── */}
+                        <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                            <div className="flex items-center justify-between mb-6 gap-4">
+                                <div className="flex items-center">
+                                    <IconoBarco />
+                                    <h2 className="text-xl font-semibold text-gray-800">Viajes Activos / Recientes</h2>
+                                </div>
+                                <div className="flex items-center gap-3">
+                                    <input
+                                        type="text"
+                                        placeholder="Filtrar por buque o ruta..."
+                                        className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-200 focus:border-[#104a8e] transition text-sm w-64 outline-none"
+                                        value={filtro}
+                                        onChange={(e) => setFiltro(e.target.value)}
+                                    />
+                                    <div className="flex gap-1">
+                                        <button onClick={() => setPaginaActual(p => Math.max(1, p - 1))} className="px-3 py-1.5 border rounded-lg text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-50" disabled={paginaActual === 1}>&lt;</button>
+                                        <span className="px-3 py-1.5 text-sm font-medium text-gray-700">Pág. {paginaActual}</span>
+                                        <button onClick={() => setPaginaActual(p => p + 1)} className="px-3 py-1.5 border rounded-lg text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-50" disabled={viajes.length < tamanioPagina}>&gt;</button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm text-left">
+                                    <thead className="text-xs text-gray-500 uppercase bg-gray-50 rounded-t-lg">
+                                        <tr>
+                                            <th className="px-5 py-3">Buque</th>
+                                            <th className="px-5 py-3">Ruta (Origen - Destino)</th>
+                                            <th className="px-5 py-3">Último Estado</th>
+                                            <th className="px-5 py-3 text-right">Acciones</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-100">
+                                        {loading.viajes ? (
+                                            <tr><td colSpan="4" className="text-center py-10 text-gray-500">Cargando viajes desde MongoDB...</td></tr>
+                                        ) : viajes.length === 0 ? (
+                                            <tr><td colSpan="4" className="text-center py-10 text-gray-500">No se encontraron viajes.</td></tr>
+                                        ) : viajes
+                                            .filter(v => filtro === "" || v.buque?.toLowerCase().includes(filtro.toLowerCase()) || v.ruta?.toLowerCase().includes(filtro.toLowerCase()))
+                                            .map(viaje => (
+                                                <tr
+                                                    key={viaje.id}
+                                                    className={`hover:bg-blue-50 transition cursor-pointer ${selectedViajeId === viaje.id ? 'bg-blue-50' : ''}`}
+                                                    onClick={() => setSelectedViajeId(viaje.id)}
+                                                >
+                                                    <td className="px-5 py-4 font-medium text-[#002454] flex items-center">
+                                                        <IconoBarco />
+                                                        {viaje.buque}
+                                                    </td>
+                                                    <td className="px-5 py-4 text-gray-600">{viaje.ruta}</td>
+                                                    <td className="px-5 py-4">
+                                                        <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${getEstadoBadgeClass(viaje.estadoActual)}`}>
+                                                            {viaje.estadoActual}
+                                                        </span>
+                                                        <span className="text-xs text-gray-400 ml-2">{viaje.fechaEstado}</span>
+                                                    </td>
+                                                    <td className="px-5 py-4 text-right" onClick={e => e.stopPropagation()}>
+                                                        <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                                                            {/* Ver Cargas */}
+                                                            <button
+                                                                onClick={() => setSelectedViajeId(viaje.id)}
+                                                                className={`text-xs font-semibold px-2.5 py-1.5 rounded border transition ${selectedViajeId === viaje.id ? 'bg-[#104a8e] text-white border-[#104a8e]' : 'text-gray-500 border-gray-300 hover:bg-gray-100'}`}
+                                                            >
+                                                                {selectedViajeId === viaje.id ? 'Seleccionado' : 'Ver Cargas'}
+                                                            </button>
+
+                                                            {/* Zarpar */}
+                                                            <button
+                                                                onClick={() => cambiarEstadoViaje(viaje, 'zarpar')}
+                                                                disabled={!!estadoViajeLoading[`${viaje.id}-zarpar`]}
+                                                                title="Hacer zarpar el buque (estado → Navegando)"
+                                                                className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded border border-green-400 text-green-700 bg-green-50 hover:bg-green-100 transition disabled:opacity-50"
+                                                            >
+                                                                {estadoViajeLoading[`${viaje.id}-zarpar`]
+                                                                    ? <IconoSpinner />
+                                                                    : <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 12h14M12 5l7 7-7 7" /></svg>
+                                                                }
+                                                                Zarpar
+                                                            </button>
+
+                                                            {/* Amarrar */}
+                                                            <button
+                                                                onClick={() => cambiarEstadoViaje(viaje, 'amarrar')}
+                                                                disabled={!!estadoViajeLoading[`${viaje.id}-amarrar`]}
+                                                                title="Amarrar el buque en puerto (estado → Amarrado)"
+                                                                className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded border border-[#104a8e] text-[#104a8e] bg-blue-50 hover:bg-blue-100 transition disabled:opacity-50"
+                                                            >
+                                                                {estadoViajeLoading[`${viaje.id}-amarrar`]
+                                                                    ? <IconoSpinner />
+                                                                    : <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                                                                }
+                                                                Amarrar
+                                                            </button>
+
+                                                            {/* Fondear */}
+                                                            <button
+                                                                onClick={() => cambiarEstadoViaje(viaje, 'fondear')}
+                                                                disabled={!!estadoViajeLoading[`${viaje.id}-fondear`]}
+                                                                title="Fondear el buque (estado → Fondeado)"
+                                                                className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded border border-yellow-500 text-yellow-700 bg-yellow-50 hover:bg-yellow-100 transition disabled:opacity-50"
+                                                            >
+                                                                {estadoViajeLoading[`${viaje.id}-fondear`]
+                                                                    ? <IconoSpinner />
+                                                                    : <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 6h18M3 12h18M3 18h18" /></svg>
+                                                                }
+                                                                Fondear
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </section>
+
+                        {/* ── SECCIÓN CARGAS ────────────────────────────────────── */}
+                        {selectedViajeId && (
+                            <section className="bg-white rounded-xl shadow-lg border border-gray-100 border-t-4 border-t-[#104a8e] p-6 fade-in">
+                                <div className="flex items-center justify-between mb-6 pb-4 border-b">
+                                    <div>
+                                        <h3 className="text-lg font-bold text-gray-800 flex items-center">
+                                            <IconoCarga />
+                                            Manifiesto de Carga - {viajeSeleccionado?.buque || 'Cargando...'}
+                                        </h3>
+                                        <p className="text-sm text-gray-500 flex items-center mt-1">
+                                            <IconoUbicacion />
+                                            {viajeSeleccionado?.ruta}
+                                        </p>
+                                    </div>
+                                    <div className="flex items-center gap-3">
+                                        {loading.cargas && <span className="text-sm text-gray-400">Actualizando...</span>}
+                                        <button
+                                            onClick={abrirModalNuevaCarga}
+                                            className="flex items-center gap-1.5 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition shadow-sm"
+                                        >
+                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
+                                            </svg>
+                                            Añadir Carga
+                                        </button>
+                                    </div>
+                                </div>
+
+                                {loading.cargas && cargas.length === 0 ? (
+                                    <div className="text-center py-10 text-gray-500">Cargando manifiesto...</div>
+                                ) : cargas.length === 0 ? (
+                                    <div className="text-center py-10 text-gray-500 bg-gray-50 rounded-lg">
+                                        Este viaje no tiene cargas registradas en Mongo.
+                                        <br />
+                                        <span className="text-xs text-gray-400 mt-1 block">Usá el botón "Añadir Carga" para registrar la primera.</span>
+                                    </div>
+                                ) : (
+                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                        {cargas.map(carga => {
+                                            const barcaza = esBarcaza(carga);
+                                            return (
+                                                <div key={carga.id} className="border border-gray-100 rounded-xl p-5 hover:shadow-md transition bg-gray-50/50 space-y-4">
+                                                    <div className="flex justify-between items-start">
+                                                        <div>
+                                                            <p className="font-semibold text-gray-800 text-base">{carga.descripcionLista}</p>
+                                                            <p className="text-xs text-gray-400 font-mono">ID: {carga.id}</p>
+                                                            <span className={`inline-block mt-1 px-2 py-0.5 text-xs font-medium rounded-full ${barcaza ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}`}>
+                                                                {barcaza ? 'Barcaza' : 'Remolcador / Buque'}
+                                                            </span>
+                                                        </div>
+                                                        <div dangerouslySetInnerHTML={{ __html: getRiesgoBadge(carga.nivelRiesgo) }} />
+                                                    </div>
+
+                                                    <div className="flex items-center justify-between text-sm bg-white p-3 rounded-lg border">
+                                                        <span className="text-gray-500">Tonelaje Actual:</span>
+                                                        <span className="font-bold text-gray-800">{carga.tonelaje} Tn</span>
+                                                    </div>
+
+                                                    <div className="flex items-center text-sm text-gray-600">
+                                                        <IconoUbicacion />
+                                                        <span>Estado: <strong className="text-[#002454]">{carga.muelleActual || 'Navegando / Fondeado'}</strong></span>
+                                                    </div>
+
+                                                    {/* ── BOTONES DIFERENCIADOS POR TIPO ── */}
+                                                    {barcaza ? (
+                                                        <div className="flex gap-2 pt-2 flex-wrap">
+                                                            <button
+                                                                onClick={() => abrirModalAccion(carga, 'cargar')}
+                                                                className="flex-1 text-center bg-green-600 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-green-700 transition"
+                                                            >
+                                                                Cargar
+                                                            </button>
+                                                            <button
+                                                                onClick={() => abrirModalAccion(carga, 'descargar')}
+                                                                className="flex-1 text-center bg-amber-500 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-amber-600 transition"
+                                                            >
+                                                                Descargar
+                                                            </button>
+                                                            <button
+                                                                onClick={() => abrirModalAccion(carga, 'amarrar_barcaza')}
+                                                                className="flex-1 text-center bg-[#104a8e] text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-[#002454] transition"
+                                                            >
+                                                                Amarrar
+                                                            </button>
+                                                        </div>
+                                                    ) : (
+                                                        <div className="flex flex-col gap-2 pt-2">
+                                                            <div className="flex gap-2">
+                                                                <button 
+                                                                    onClick={() => abrirModalAccion(carga, 'cargar')}
+                                                                    className="flex-1 text-center bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-700 transition"
+                                                                >
+                                                                    Cargar
+                                                                </button>
+                                                                <button 
+                                                                    onClick={() => abrirModalAccion(carga, 'descargar')}
+                                                                    className="flex-1 text-center bg-amber-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-amber-600 transition"
+                                                                >
+                                                                    Descargar
+                                                                </button>
+                                                            </div>
+                                                            <div className="flex gap-2">
+                                                                <button 
+                                                                    onClick={() => abrirModalAccion(carga, 'amarrar_buque')}
+                                                                    className="flex-1 text-center bg-[#104a8e] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#002454] transition disabled:opacity-50"
+                                                                    disabled={!!carga.muelleActual}
+                                                                >
+                                                                    Amarrar
+                                                                </button>
+                                                                <button 
+                                                                    onClick={() => abrirModalAccion(carga, 'fondear_buque')}
+                                                                    className="flex-1 text-center bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-cyan-700 transition"
+                                                                >
+                                                                    Fondear
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                )}
+                            </section>
+                        )}
+                    </>
                 )}
             </main>
 
             {/* ── PIE DE PÁGINA ─────────────────────────────────────────── */}
-            <footer className="border-t mt-12 p-6 bg-white text-center text-xs text-gray-400">
-                <p>&copy; 2026 Prefectura Naval Argentina - Dirección de Informática y Comunicaciones.</p>
-                <p className="mt-1">Sistema de Gestión de Tráfico Marítimo (MBPC) - Módulo de Modernización - v0.5.0</p>
-            </footer>
+            {vistaActual === 'dashboard' && (
+                <footer className="border-t mt-12 p-6 bg-white text-center text-xs text-gray-400">
+                    <p>&copy; 2026 Prefectura Naval Argentina - Dirección de Informática y Comunicaciones.</p>
+                    <p className="mt-1">Sistema de Gestión de Tráfico Marítimo (MBPC) - Módulo de Modernización - v0.6.0</p>
+                </footer>
+            )}
 
             {/* ════════════════════════════════════════════════════════════
                 MODAL ACCIONES DE CARGA (amarrar/fondear/cargar/descargar)
@@ -1286,51 +1305,6 @@ const MbpcDashboard = () => {
                             className="px-5 py-2 border border-gray-300 text-sm font-medium text-gray-700 rounded-lg hover:bg-gray-100 transition"
                         >
                             Cancelar
-                        </button>
-                    </div>
-                </Modal>
-            )}
-
-            {/* ════════════════════════════════════════════════════════════
-                MODAL VER MAPA (placeholder ArcGIS)
-            ════════════════════════════════════════════════════════════ */}
-            {modalMapa.show && (
-                <Modal onClose={() => setModalMapa({ show: false })} maxWidth="max-w-lg">
-                    <ModalHeader
-                        titulo="Visualización de Mapa"
-                        subtitulo="Integración ArcGIS — Módulo pendiente"
-                        icono={
-                            <svg className="w-6 h-6 text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                            </svg>
-                        }
-                        onClose={() => setModalMapa({ show: false })}
-                    />
-                    <div className="p-8 flex flex-col items-center justify-center gap-6 text-center">
-                        <div className="w-24 h-24 bg-blue-50 rounded-full flex items-center justify-center border-2 border-blue-100">
-                            <svg className="w-12 h-12 text-[#104a8e]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                            </svg>
-                        </div>
-                        <div>
-                            <h3 className="text-lg font-bold text-gray-800">Integración con ArcGIS</h3>
-                            <p className="text-sm text-gray-500 mt-2 max-w-sm">
-                                La visualización geoespacial de posiciones AIS en ArcGIS Online está planificada para la próxima iteración del módulo de modernización MBPC.
-                            </p>
-                        </div>
-                        <div className="bg-amber-50 border border-amber-200 rounded-xl px-6 py-4 text-sm text-amber-800 text-left w-full">
-                            <p className="font-semibold mb-1">🗓 Próximos pasos planificados:</p>
-                            <ul className="list-disc list-inside space-y-1 text-xs">
-                                <li>Publicar capa de posiciones AIS desde MongoDB vía GeoServer</li>
-                                <li>Integrar WebMap de ArcGIS Online en iframe autenticado</li>
-                                <li>Habilitar selección de buques por clic en mapa</li>
-                                <li>Tiempo estimado: Sprint 4 — Q3 2026</li>
-                            </ul>
-                        </div>
-                    </div>
-                    <div className="bg-gray-50 px-6 py-4 flex justify-end rounded-b-2xl">
-                        <button onClick={() => setModalMapa({ show: false })} className="px-5 py-2 border border-gray-300 text-sm font-medium text-gray-700 rounded-lg hover:bg-gray-100 transition">
-                            Cerrar
                         </button>
                     </div>
                 </Modal>

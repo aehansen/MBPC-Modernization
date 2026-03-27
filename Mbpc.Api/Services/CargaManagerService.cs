@@ -2,6 +2,7 @@ using Dapper;
 using Oracle.ManagedDataAccess.Client;
 using MongoDB.Driver;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Caching.Memory;
 using Mbpc.Api.Models.Config;
 using Mbpc.Api.Models.Mongo;
 using Mbpc.Api.DTOs;
@@ -11,22 +12,26 @@ namespace Mbpc.Api.Services
 {
     public class CargaManagerService : ICargaService
     {
-        // Motor de Lectura (MongoDB)
+        // ── Dependencias de Datos ────────────────────────────────────────────
         private readonly IMongoCollection<ViajeDetalleMongo> _detailsCollection;
         private readonly IMongoCollection<ViajePosicionMongo> _viajesCollection;
-
-        // Motor de Escritura (Oracle)
         private readonly string _oracleConnectionString;
-
+        
+        // ── Utilidades ───────────────────────────────────────────────────────
         private readonly ILogger<CargaManagerService> _logger;
         private readonly IWebHostEnvironment _env;
+        private readonly IMemoryCache _cache; // Inyectado para la Misión 1 (Consistencia)
+
+        // ── Claves de Caché ──────────────────────────────────────────────────
+        private const string CacheKeyPrefixCargas = "cargas_viaje_";
 
         public CargaManagerService(
             IMongoClient mongoClient,
             IOptions<MongoDbSettings> mongoSettings,
             IOptions<OracleDbSettings> oracleSettings,
             ILogger<CargaManagerService> logger,
-            IWebHostEnvironment env)
+            IWebHostEnvironment env,
+            IMemoryCache cache)
         {
             var database = mongoClient.GetDatabase(mongoSettings.Value.DatabaseName);
             _detailsCollection  = database.GetCollection<ViajeDetalleMongo>(mongoSettings.Value.DetailsMbpcCollectionName);
@@ -34,13 +39,22 @@ namespace Mbpc.Api.Services
             _oracleConnectionString = oracleSettings.Value.ConnectionString;
             _logger = logger;
             _env    = env;
+            _cache  = cache;
         }
 
-        // ── LECTURA (MongoDB) ────────────────────────────────────────────────
+        // ── LECTURA (MongoDB + Caché) ────────────────────────────────────────
 
         public IEnumerable<CargaDto> ObtenerCargasPorViaje(string parametroBusqueda)
         {
-            _logger.LogInformation("Buscando cargas para parámetro: {Parametro}", parametroBusqueda);
+            // 1. Verificamos si la lista ya está en la memoria Caché
+            var cacheKey = $"{CacheKeyPrefixCargas}{parametroBusqueda}";
+            if (_cache.TryGetValue(cacheKey, out IEnumerable<CargaDto>? cachedCargas) && cachedCargas != null)
+            {
+                _logger.LogDebug("CACHE HIT — Devolviendo cargas para parámetro: {Parametro}", parametroBusqueda);
+                return cachedCargas;
+            }
+
+            _logger.LogInformation("CACHE MISS — Buscando cargas en MongoDB para parámetro: {Parametro}", parametroBusqueda);
 
             string nombreBuque = parametroBusqueda;
 
@@ -73,7 +87,7 @@ namespace Mbpc.Api.Services
                 "{Count} barcazas encontradas para: {NombreBuque}",
                 detalleConCargas.Barcazas!.Count, nombreBuque);
 
-            return detalleConCargas.Barcazas.Select(b => new CargaDto
+            var resultado = detalleConCargas.Barcazas.Select(b => new CargaDto
             {
                 Id               = b.Nombre ?? Guid.NewGuid().ToString(),
                 ViajeId          = nombreBuque,
@@ -81,10 +95,20 @@ namespace Mbpc.Api.Services
                 NivelRiesgo      = "Bajo",
                 MuelleActual     = b.MuelleActual,
                 Tonelaje         = b.Cantidad 
-            });
+            }).ToList();
+
+            // 2. Guardamos el resultado en Caché
+            var cacheOptions = new MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5),
+                SlidingExpiration               = TimeSpan.FromMinutes(2)
+            };
+            _cache.Set(cacheKey, resultado, cacheOptions);
+
+            return resultado;
         }
 
-        // ── ESCRITURA (Oracle) ───────────────────────────────────────────────
+        // ── ESCRITURA (Oracle + CQRS Mongo + Invalidación Caché) ─────────────
 
         public bool AmarrarBarcaza(string id, string nuevoMuelle)
         {
@@ -136,6 +160,7 @@ namespace Mbpc.Api.Services
                     if (result.ModifiedCount > 0)
                     {
                         _logger.LogInformation("¡CQRS Exitoso! Mongo actualizado para la barcaza {Id}.", id);
+                        InvalidarCacheViajePorBarcaza(id); // Limpiar caché
                     }
                     else
                     {
@@ -187,7 +212,6 @@ namespace Mbpc.Api.Services
                 exitoOracle = true; // Bypass de desarrollo
             }
 
-            // --- INICIO LÓGICA CQRS (ACTUALIZACIÓN DUAL) ---
             if (exitoOracle)
             {
                 try 
@@ -204,6 +228,7 @@ namespace Mbpc.Api.Services
                     if (result.ModifiedCount > 0)
                     {
                         _logger.LogInformation("¡CQRS Exitoso! Mongo actualizado (Barcaza {Id} fondeada).", id);
+                        InvalidarCacheViajePorBarcaza(id); // Limpiar caché
                     }
                     else
                     {
@@ -215,15 +240,10 @@ namespace Mbpc.Api.Services
                     _logger.LogError(mongoEx, "Fallo al sincronizar MongoDB para el fondeo de la barcaza {Id}.", id);
                 }
             }
-            // --- FIN LÓGICA CQRS ---
 
             return exitoOracle;
         }
 
-        /// <summary>
-        /// Registra la carga de toneladas en una embarcación.
-        /// Lógica CQRS: escribe en Oracle (o simula en DEV) y establece CANTIDAD final en MongoDB.
-        /// </summary>
         public bool CargarBarcaza(string id, double toneladas)
         {
             _logger.LogInformation("Registrando tonelaje final de {Toneladas}tn en embarcación {Id}", toneladas, id);
@@ -259,7 +279,6 @@ namespace Mbpc.Api.Services
                 exitoOracle = true; // Bypass de desarrollo
             }
 
-            // --- INICIO LÓGICA CQRS (ACTUALIZACIÓN DUAL) ---
             if (exitoOracle)
             {
                 try
@@ -267,31 +286,28 @@ namespace Mbpc.Api.Services
                     _logger.LogInformation("Sincronizando CANTIDAD EXACTA ({Toneladas}) en MongoDB para embarcación {Id}", toneladas, id);
 
                     var filter = Builders<ViajeDetalleMongo>.Filter.Eq("barcazas.BARCAZA", id);
-
-                    // Set con valor absoluto para reflejar el tonelaje final
                     var update = Builders<ViajeDetalleMongo>.Update.Set("barcazas.$.CANTIDAD", toneladas);
-
                     var result = _detailsCollection.UpdateOne(filter, update);
 
                     if (result.ModifiedCount > 0)
+                    {
                         _logger.LogInformation("¡CQRS Exitoso! CANTIDAD actualizada en Mongo para embarcación {Id}.", id);
+                        InvalidarCacheViajePorBarcaza(id); // Limpiar caché
+                    }
                     else
+                    {
                         _logger.LogWarning("Mongo no encontró la embarcación '{Id}' para actualizar la carga.", id);
+                    }
                 }
                 catch (Exception mongoEx)
                 {
                     _logger.LogError(mongoEx, "Fallo al sincronizar MongoDB (carga) para la embarcación {Id}.", id);
                 }
             }
-            // --- FIN LÓGICA CQRS ---
 
             return exitoOracle;
         }
 
-        /// <summary>
-        /// Registra la descarga de toneladas en una embarcación.
-        /// Lógica CQRS: escribe en Oracle (o simula en DEV) y establece CANTIDAD final en MongoDB.
-        /// </summary>
         public bool DescargarBarcaza(string id, double toneladas)
         {
             _logger.LogInformation("Registrando descarga a {Toneladas}tn finales de embarcación {Id}", toneladas, id);
@@ -327,7 +343,6 @@ namespace Mbpc.Api.Services
                 exitoOracle = true; // Bypass de desarrollo
             }
 
-            // --- INICIO LÓGICA CQRS (ACTUALIZACIÓN DUAL) ---
             if (exitoOracle)
             {
                 try
@@ -335,11 +350,8 @@ namespace Mbpc.Api.Services
                     _logger.LogInformation("Sincronizando CANTIDAD EXACTA ({Toneladas}) en MongoDB para embarcación {Id}", toneladas, id);
 
                     var filter = Builders<ViajeDetalleMongo>.Filter.Eq("barcazas.BARCAZA", id);
-
-                    // Set con valor absoluto para reflejar el tonelaje final
                     var update = Builders<ViajeDetalleMongo>.Update.Set("barcazas.$.CANTIDAD", toneladas);
 
-                    // Regla de Negocio: Si la carga llega a 0, mutar el estado a "EN LASTRE"
                     if (toneladas == 0)
                     {
                         update = update.Set("barcazas.$.CARGA", "EN LASTRE");
@@ -349,29 +361,24 @@ namespace Mbpc.Api.Services
                     var result = _detailsCollection.UpdateOne(filter, update);
 
                     if (result.ModifiedCount > 0)
+                    {
                         _logger.LogInformation("¡CQRS Exitoso! CANTIDAD actualizada en Mongo para embarcación {Id}.", id);
+                        InvalidarCacheViajePorBarcaza(id); // Limpiar caché
+                    }
                     else
+                    {
                         _logger.LogWarning("Mongo no encontró la embarcación '{Id}' para actualizar la descarga.", id);
+                    }
                 }
                 catch (Exception mongoEx)
                 {
                     _logger.LogError(mongoEx, "Fallo al sincronizar MongoDB (descarga) para la embarcación {Id}.", id);
                 }
             }
-            // --- FIN LÓGICA CQRS ---
 
             return exitoOracle;
         }
 
-        // ── TAREA 2: AGREGAR CARGA AL VIAJE ─────────────────────────────────
-
-        /// <summary>
-        /// Agrega una nueva carga (barcaza o bodega) al array de barcazas del buque.
-        /// CQRS:
-        ///   - Escritura: simula SP en Oracle (PKG_MBPC_CARGAS.SP_AGREGAR_CARGA) con bypass DEV.
-        ///   - Lectura: Update.Push sobre el array "barcazas" en la colección details_mbpc.
-        /// Si el documento del buque no existe en details_mbpc, se crea uno nuevo (upsert).
-        /// </summary>
         public async Task<bool> AgregarCargaAsync(string nombreBuque, NuevaCargaDto nuevaCarga)
         {
             _logger.LogInformation(
@@ -380,7 +387,6 @@ namespace Mbpc.Api.Services
 
             bool exitoOracle = false;
 
-            // --- ESCRITURA (Oracle) ---
             try
             {
                 using var connection = new OracleConnection(_oracleConnectionString);
@@ -413,7 +419,6 @@ namespace Mbpc.Api.Services
                 exitoOracle = true; // Bypass de desarrollo
             }
 
-            // --- INICIO LÓGICA CQRS (Update.Push en MongoDB) ---
             if (exitoOracle)
             {
                 try
@@ -422,50 +427,66 @@ namespace Mbpc.Api.Services
                         "Sincronizando nueva carga '{Nombre}' en MongoDB (details_mbpc) para buque '{Buque}'.",
                         nuevaCarga.Nombre, nombreBuque);
 
-                    // Construimos el sub-documento de barcaza a inyectar
                     var nuevaBarcazaDoc = new BarcazaMongo
                     {
                         Nombre      = nuevaCarga.Nombre,
-                        Carga       = nuevaCarga.Tipo,       // "Barcaza" o "Bodega" — mapea al campo CARGA
+                        Carga       = nuevaCarga.Tipo,
                         Cantidad    = nuevaCarga.Tonelaje,
                         Unidad      = "Tn",
-                        MuelleActual = null                  // Nace sin muelle asignado
+                        MuelleActual = null
                     };
 
                     var filtro = Builders<ViajeDetalleMongo>.Filter.Eq("VesselName", nombreBuque);
-
-                    // Update.Push agrega el nuevo sub-documento al array "barcazas"
                     var update = Builders<ViajeDetalleMongo>.Update.Push("barcazas", nuevaBarcazaDoc);
-
-                    // Upsert: si el documento no existe en details_mbpc, lo crea
                     var options = new UpdateOptions { IsUpsert = true };
 
                     var result = await _detailsCollection.UpdateOneAsync(filtro, update, options);
 
-                    if (result.UpsertedId != null)
-                        _logger.LogInformation(
-                            "¡CQRS Exitoso! Documento creado en details_mbpc para buque '{Buque}' con primera carga '{Nombre}'.",
-                            nombreBuque, nuevaCarga.Nombre);
-                    else if (result.ModifiedCount > 0)
-                        _logger.LogInformation(
-                            "¡CQRS Exitoso! Carga '{Nombre}' inyectada en el array barcazas del buque '{Buque}'.",
-                            nuevaCarga.Nombre, nombreBuque);
-                    else
-                        _logger.LogWarning(
-                            "El Update.Push no modificó ningún documento para el buque '{Buque}'. Verificar colección details_mbpc.",
-                            nombreBuque);
+                    if (result.UpsertedId != null || result.ModifiedCount > 0)
+                    {
+                        _logger.LogInformation("¡CQRS Exitoso! Carga inyectada para buque '{Buque}'.", nombreBuque);
+                        
+                        // En este caso ya tenemos el nombre del buque directo para invalidar la caché
+                        _cache.Remove($"{CacheKeyPrefixCargas}{nombreBuque}");
+                    }
                 }
                 catch (Exception mongoEx)
                 {
                     _logger.LogError(mongoEx,
                         "Fallo al sincronizar MongoDB (Push) para la nueva carga '{Nombre}' del buque '{Buque}'.",
                         nuevaCarga.Nombre, nombreBuque);
-                    // No revertimos exitoOracle — Oracle ya escribió; el batch de Mongo reintentará
                 }
             }
-            // --- FIN LÓGICA CQRS ---
 
             return exitoOracle;
+        }
+
+        // ── Helper Privado: Invalidación Inteligente de Caché ────────────────
+        
+        /// <summary>
+        /// Busca a qué buque pertenece la barcaza recién actualizada y elimina 
+        /// la lista completa de cargas de ese buque de la memoria caché.
+        /// De esta forma, el próximo GET leerá los datos frescos desde Mongo.
+        /// </summary>
+        private void InvalidarCacheViajePorBarcaza(string idBarcaza)
+        {
+            try
+            {
+                // Buscamos a qué buque pertenece la barcaza
+                var filter = Builders<ViajeDetalleMongo>.Filter.Eq("barcazas.BARCAZA", idBarcaza);
+                var buqueDoc = _detailsCollection.Find(filter).FirstOrDefault();
+
+                if (buqueDoc != null && !string.IsNullOrWhiteSpace(buqueDoc.VesselName))
+                {
+                    var cacheKey = $"{CacheKeyPrefixCargas}{buqueDoc.VesselName}";
+                    _cache.Remove(cacheKey);
+                    _logger.LogInformation("Caché invalidada exitosamente para el viaje: {Viaje}", buqueDoc.VesselName);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "No se pudo limpiar la caché del viaje tras actualizar la barcaza {Id}", idBarcaza);
+            }
         }
     }
 }
