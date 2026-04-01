@@ -1,18 +1,19 @@
-// MbpcDashboard.jsx - VERSIÓN MODERNIZADA v0.6.0
+// MbpcDashboard.jsx - VERSIÓN MODERNIZADA v0.7.0
+// Cambios v0.7.0:
+//   REFACTOR — Se eliminaron los botones Zarpar/Amarrar/Fondear en línea de la tabla.
+//              La columna Acciones conserva SOLO el botón "Ver Cargas".
+//              Se integró <ControlesEstadoBuque> en la sección de Manifiesto de Carga.
+//              Se añadió handleEstadoCambiado como callback que recarga la grilla.
 // Cambios v0.6.0:
-//   INTEGRACIÓN ARCGIS: Se importó MapaAIS.jsx y se cableó el botón "Ver Mapa" 
+//   INTEGRACIÓN ARCGIS: Se importó MapaAIS.jsx y se cableó el botón "Ver Mapa"
 //   para alternar entre la vista de Grilla (Dashboard) y el Mapa Geoespacial.
-// Cambios v0.5.0:
-//   TAREA 1 — Tabla de Viajes Activos: 3 botones de estado por fila (Zarpar / Amarrar / Fondear)
-//             que llaman a PUT /api/viajes/{id}/zarpar|amarrar|fondear y recargan la grilla.
-//   TAREA 2 — Manifiesto de Carga: botón "Añadir Carga" que abre un modal para ingresar
-//             Nombre, Tipo (Bodega/Barcaza) y Tonelaje, y llama a POST /api/carga/viaje/{buque}.
 
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
-import MapaAIS from './MapaAIS'; // <-- Importamos nuestro nuevo componente de mapa
+import MapaAIS from './MapaAIS';
+import ControlesEstadoBuque from './ControlesEstadoBuque';
 
-// Configuración API - Asegurate de que esto coincida con tu puerto de .NET
+// Configuración API
 const API_BASE_URL = 'http://localhost:5009/api';
 
 const api = axios.create({
@@ -21,34 +22,33 @@ const api = axios.create({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// DATOS DEL ENUM DeclaracionMalvinasEnum — mapeados 1:1 al C# para el select
+// DATOS DEL ENUM DeclaracionMalvinasEnum — mapeados 1:1 al C#
 // ─────────────────────────────────────────────────────────────────────────────
 const DECLARACION_MALVINAS_OPTIONS = [
-    { value: 'NoVieneDeMalvinas_L',                              label: 'No viene de Malvinas (L)' },
-    { value: 'VieneDeMalvinas_AutorizadoCPER_M',                 label: 'Viene de Malvinas: Autorizado por la CPER (M)' },
-    { value: 'VieneDeMalvinas_NoAutorizado_Infraccion_Extranjero_W', label: 'Viene de Malvinas: No autorizado - Se labró infracción - Va al extranjero (W)' },
-    { value: 'VieneDeMalvinas_NoSolicitoAutorizacion_Amarra_Y',  label: 'Viene de Malvinas: No solicitó autorización (Amarra en el país) (Y)' },
-    { value: 'VieneDeMalvinas_SolicitoAutorizacion_Amarra_V',    label: 'Viene de Malvinas: Solicitó autorización (Amarra en el país) (V)' },
-    { value: 'NoVaAMalvinas_Exceptuado_MilitarOGC_D',            label: 'No va a Malvinas: Exceptuado, Militar o GC - Cualquier bandera (D)' },
-    { value: 'NoVaAMalvinas_Exceptuado_NoNavegacionMaritima_F',  label: 'No va a Malvinas: Exceptuado, no realiza navegación marítima (F)' },
-    { value: 'NoVaAMalvinas_B',                                  label: 'No va a Malvinas (B)' },
-    { value: 'NoVaAMalvinas_Exceptuado_GiroInteriorPuerto_G',    label: 'No va a Malvinas: Exceptuado, giro interior puerto - misma jurisdicción (G)' },
-    { value: 'NoVaAMalvinas_Exceptuado_NavegacionRadaRiaCostera_E', label: 'No va a Malvinas: Exceptuado, navegación Rada-Ría o Costera (E)' },
-    { value: 'NoVaAMalvinas_Exceptuado_OtrosMotivos_X',          label: 'No va a Malvinas: Exceptuado, por otros motivos (X)' },
-    { value: 'NoVaAMalvinas_NoPresentoDeclaracion_N',            label: 'No va a Malvinas: No presentó Declaración Jurada (N)' },
-    { value: 'NoVaAMalvinas_PresentoDeclaracion_J',              label: 'No va a Malvinas: Presentó Declaración Jurada (J)' },
+    { value: 'NoVieneDeMalvinas_L',                                    label: 'No viene de Malvinas (L)' },
+    { value: 'VieneDeMalvinas_AutorizadoCPER_M',                       label: 'Viene de Malvinas: Autorizado por la CPER (M)' },
+    { value: 'VieneDeMalvinas_NoAutorizado_Infraccion_Extranjero_W',   label: 'Viene de Malvinas: No autorizado - Se labró infracción - Va al extranjero (W)' },
+    { value: 'VieneDeMalvinas_NoSolicitoAutorizacion_Amarra_Y',        label: 'Viene de Malvinas: No solicitó autorización (Amarra en el país) (Y)' },
+    { value: 'VieneDeMalvinas_SolicitoAutorizacion_Amarra_V',          label: 'Viene de Malvinas: Solicitó autorización (Amarra en el país) (V)' },
+    { value: 'NoVaAMalvinas_Exceptuado_MilitarOGC_D',                  label: 'No va a Malvinas: Exceptuado, Militar o GC - Cualquier bandera (D)' },
+    { value: 'NoVaAMalvinas_Exceptuado_NoNavegacionMaritima_F',        label: 'No va a Malvinas: Exceptuado, no realiza navegación marítima (F)' },
+    { value: 'NoVaAMalvinas_B',                                        label: 'No va a Malvinas (B)' },
+    { value: 'NoVaAMalvinas_Exceptuado_GiroInteriorPuerto_G',          label: 'No va a Malvinas: Exceptuado, giro interior puerto - misma jurisdicción (G)' },
+    { value: 'NoVaAMalvinas_Exceptuado_NavegacionRadaRiaCostera_E',    label: 'No va a Malvinas: Exceptuado, navegación Rada-Ría o Costera (E)' },
+    { value: 'NoVaAMalvinas_Exceptuado_OtrosMotivos_X',                label: 'No va a Malvinas: Exceptuado, por otros motivos (X)' },
+    { value: 'NoVaAMalvinas_NoPresentoDeclaracion_N',                  label: 'No va a Malvinas: No presentó Declaración Jurada (N)' },
+    { value: 'NoVaAMalvinas_PresentoDeclaracion_J',                    label: 'No va a Malvinas: Presentó Declaración Jurada (J)' },
     { value: 'NoVaAMalvinas_ReiniciaNavegacion_PresentoDeclaracion_K', label: 'No va a Malvinas: Reinicia navegación - Presentó Declaración Jurada (K)' },
-    { value: 'VaAMalvinas_Exceptuado_MilitarOGC_Q',              label: 'Va a Malvinas: Exceptuado, Militar o GC - Cualquier bandera (Q)' },
-    { value: 'VaAMalvinas_AutorizadoCPER_A',                     label: 'Va a Malvinas: Autorizado por la CPER (A)' },
-    { value: 'VaAMalvinas_AutorizadoCPER_ReiniciaNavegacion_R',  label: 'Va a Malvinas: Autorizado por la CPER - Reinicia navegación (R)' },
-    { value: 'VaAMalvinas_NoAutorizadoCPER_Z',                   label: 'Va a Malvinas: No autorizado por la CPER (Z)' },
-    { value: 'VaAMalvinas_NoAutorizadoCPER_Fondeo_P',            label: 'Va a Malvinas: No autorizado por la CPER - Se ordenó fondeo (P)' },
+    { value: 'VaAMalvinas_Exceptuado_MilitarOGC_Q',                    label: 'Va a Malvinas: Exceptuado, Militar o GC - Cualquier bandera (Q)' },
+    { value: 'VaAMalvinas_AutorizadoCPER_A',                           label: 'Va a Malvinas: Autorizado por la CPER (A)' },
+    { value: 'VaAMalvinas_AutorizadoCPER_ReiniciaNavegacion_R',        label: 'Va a Malvinas: Autorizado por la CPER - Reinicia navegación (R)' },
+    { value: 'VaAMalvinas_NoAutorizadoCPER_Z',                         label: 'Va a Malvinas: No autorizado por la CPER (Z)' },
+    { value: 'VaAMalvinas_NoAutorizadoCPER_Fondeo_P',                  label: 'Va a Malvinas: No autorizado por la CPER - Se ordenó fondeo (P)' },
 ];
 
-// Opciones de Próximo Punto de Control
 const PUNTOS_CONTROL_OPTIONS = [
-    { value: 'RPNA_AMARR_ELDO', label: 'Río Paraná - AMARR ELDO' },
-    { value: 'RPNA_PREFECT_ROS', label: 'Río Paraná - Prefectura Rosario' },
+    { value: 'RPNA_AMARR_ELDO',   label: 'Río Paraná - AMARR ELDO' },
+    { value: 'RPNA_PREFECT_ROS',  label: 'Río Paraná - Prefectura Rosario' },
     { value: 'RPLATA_CANAL_MITRE', label: 'Río de la Plata - Canal Mitre KM 0' },
 ];
 
@@ -88,7 +88,7 @@ const IconoSpinner = () => (
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ESTADO INICIAL DEL FORMULARIO "NUEVO VIAJE"
+// ESTADO INICIAL DE FORMULARIOS
 // ─────────────────────────────────────────────────────────────────────────────
 const NUEVO_VIAJE_INITIAL = {
     nombreBuque: '', origen: '', destino: '', muelleSalida: '',
@@ -100,7 +100,6 @@ const HISTORICO_FILTRO_INITIAL = {
     nombre: '', omi: '', matricula: '', origen: '', destino: '', desde: '', hasta: ''
 };
 
-// TAREA 2 — Estado inicial del formulario "Añadir Carga"
 const NUEVA_CARGA_INITIAL = {
     nombre: '',
     tipo: 'Barcaza',
@@ -122,7 +121,7 @@ const Campo = ({ label, required, children }) => (
 const inputCls = "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-200 focus:border-[#104a8e] transition outline-none";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// COMPONENTE MODAL GENÉRICO — overlay + contenedor centrado
+// COMPONENTE MODAL GENÉRICO
 // ─────────────────────────────────────────────────────────────────────────────
 const Modal = ({ onClose, children, maxWidth = "max-w-2xl" }) => (
     <div className="fixed inset-0 z-50 overflow-y-auto" role="dialog" aria-modal="true">
@@ -170,16 +169,8 @@ const MbpcDashboard = () => {
 
     // --- ESTADO MODAL ACCIONES DE CARGA ---
     const [modalState, setModalState] = useState({
-        show: false,
-        tipo: null,         
-        cargaId: null,
-        tonelajeActual: 0,
-        muelle: '',
-        zona: '',
-        fechaHora: '',
-        posicion: '',
-        toneladas: '',      
-        loading: false
+        show: false, tipo: null, cargaId: null, tonelajeActual: 0,
+        muelle: '', zona: '', fechaHora: '', posicion: '', toneladas: '', loading: false
     });
 
     // --- ESTADO MODAL NUEVO VIAJE ---
@@ -202,10 +193,7 @@ const MbpcDashboard = () => {
         barcazaId: '', lugarAmarre: '', fechaHora: ''
     });
 
-    // TAREA 1 — Estado de carga para los botones de cambio de estado por fila
-    const [estadoViajeLoading, setEstadoViajeLoading] = useState({});
-
-    // TAREA 2 — Estado modal "Añadir Carga"
+    // --- ESTADO MODAL AÑADIR CARGA ---
     const [modalNuevaCarga, setModalNuevaCarga] = useState({ show: false, loading: false });
     const [nuevaCargaForm, setNuevaCargaForm] = useState(NUEVA_CARGA_INITIAL);
     const [nuevaCargaErrors, setNuevaCargaErrors] = useState({});
@@ -251,28 +239,19 @@ const MbpcDashboard = () => {
         }
     };
 
-    // ── TAREA 1: CAMBIO DE ESTADO DEL BUQUE ────────────────────────────────────
-    const cambiarEstadoViaje = async (viaje, accion) => {
-        // accion: 'zarpar' | 'amarrar' | 'fondear'
-        const key = `${viaje.id}-${accion}`;
-        setEstadoViajeLoading(prev => ({ ...prev, [key]: true }));
-        try {
-            await api.put(`/viajes/${encodeURIComponent(viaje.id)}/${accion}`);
-            // Recargamos la grilla para reflejar el nuevo estado
-            await fetchViajes();
-        } catch (err) {
-            console.error(`Error al ejecutar '${accion}' para viaje ${viaje.id}:`, err);
-            alert(`No se pudo ejecutar '${accion}' para ${viaje.buque}. Verificá la consola y el Backend.`);
-        } finally {
-            setEstadoViajeLoading(prev => ({ ...prev, [key]: false }));
-        }
+    // ── CALLBACK DEL PANEL DE ESTADO DEL BUQUE ─────────────────────────────────
+    // Invocado por <ControlesEstadoBuque> cuando una transición tiene éxito.
+    // Recarga la grilla de viajes para reflejar el nuevo estado.
+    const handleEstadoCambiado = async (accion, mensajeExito) => {
+        console.info(`[handleEstadoCambiado] Acción: '${accion}' — ${mensajeExito}`);
+        await fetchViajes();
     };
 
     // ── MODAL ACCIONES DE CARGA ─────────────────────────────────────────────────
     const abrirModalAccion = (carga, tipo) => {
         setModalState({
-            show: true, 
-            tipo, 
+            show: true,
+            tipo,
             cargaId: carga.id,
             tonelajeActual: carga.tonelaje || 0,
             muelle: '', zona: '', fechaHora: '', posicion: '', toneladas: '', loading: false
@@ -287,7 +266,6 @@ const MbpcDashboard = () => {
     };
 
     const ejecutarAccionCarga = async () => {
-        // Validaciones por tipo
         if (modalState.tipo === 'amarrar_buque' && !modalState.muelle.trim()) {
             alert("Por favor, ingrese el nombre del muelle."); return;
         }
@@ -298,8 +276,6 @@ const MbpcDashboard = () => {
             if (!modalState.fechaHora) { alert("Por favor, ingrese la fecha y hora de amarre."); return; }
             if (!modalState.posicion.trim()) { alert("Por favor, ingrese la posición."); return; }
         }
-        
-        // ¡ESTAS SON TUS REGLAS DE NEGOCIO ESTRICTAS!
         if (modalState.tipo === 'cargar') {
             const tons = parseFloat(modalState.toneladas);
             if (isNaN(tons) || tons <= modalState.tonelajeActual) {
@@ -317,7 +293,6 @@ const MbpcDashboard = () => {
         try {
             const cargaIdSeguro = encodeURIComponent(modalState.cargaId);
             let url = '';
-
             switch (modalState.tipo) {
                 case 'amarrar_buque':
                     url = `/carga/${cargaIdSeguro}/amarrar?nuevoMuelle=${encodeURIComponent(modalState.muelle)}`;
@@ -337,9 +312,8 @@ const MbpcDashboard = () => {
                 default:
                     url = `/carga/${cargaIdSeguro}/fondear?zonaFondeo=Zona_General`;
             }
-
             await api.put(url);
-            await fetchCargas(selectedViajeId); // Recarga para ver el nuevo peso
+            await fetchCargas(selectedViajeId);
             cerrarModal();
         } catch (err) {
             console.error(`Error al ejecutar acción ${modalState.tipo}:`, err);
@@ -393,17 +367,17 @@ const MbpcDashboard = () => {
         setModalNuevoViaje(prev => ({ ...prev, loading: true }));
         try {
             const payload = {
-                nombreBuque: nuevoViajeForm.nombreBuque,
-                origen: nuevoViajeForm.origen,
-                destino: nuevoViajeForm.destino,
-                muelleSalida: nuevoViajeForm.muelleSalida || null,
-                proximoPuntoControl: nuevoViajeForm.proximoPuntoControl,
-                fechaPartida: nuevoViajeForm.fechaPartida,
-                eta: nuevoViajeForm.eta,
-                zoe: nuevoViajeForm.zoe || null,
-                posicion: nuevoViajeForm.posicion || null,
-                rioCanalKmPar: nuevoViajeForm.rioCanalKmPar ? parseFloat(nuevoViajeForm.rioCanalKmPar) : null,
-                declaracionMalvinas: nuevoViajeForm.declaracionMalvinas,
+                nombreBuque:          nuevoViajeForm.nombreBuque,
+                origen:               nuevoViajeForm.origen,
+                destino:              nuevoViajeForm.destino,
+                muelleSalida:         nuevoViajeForm.muelleSalida || null,
+                proximoPuntoControl:  nuevoViajeForm.proximoPuntoControl,
+                fechaPartida:         nuevoViajeForm.fechaPartida,
+                eta:                  nuevoViajeForm.eta,
+                zoe:                  nuevoViajeForm.zoe || null,
+                posicion:             nuevoViajeForm.posicion || null,
+                rioCanalKmPar:        nuevoViajeForm.rioCanalKmPar ? parseFloat(nuevoViajeForm.rioCanalKmPar) : null,
+                declaracionMalvinas:  nuevoViajeForm.declaracionMalvinas,
             };
             await api.post('/viajes', payload);
             await fetchViajes();
@@ -456,11 +430,8 @@ const MbpcDashboard = () => {
             if (filtroHistorico.destino)   params.append('destino',   filtroHistorico.destino);
             if (filtroHistorico.desde)     params.append('desde',     filtroHistorico.desde);
             if (filtroHistorico.hasta)     params.append('hasta',     filtroHistorico.hasta);
-
             const response = await api.get(`/viajes/historico?${params.toString()}`);
-            setModalHistorico(prev => ({
-                ...prev, loading: false, resultados: response.data, buscado: true
-            }));
+            setModalHistorico(prev => ({ ...prev, loading: false, resultados: response.data, buscado: true }));
         } catch (err) {
             console.error("Error fetching histórico:", err);
             setModalHistorico(prev => ({ ...prev, loading: false, buscado: true, resultados: [] }));
@@ -480,14 +451,12 @@ const MbpcDashboard = () => {
         if (!modalAmarrarGlobal.barcazaId.trim()) { alert("Ingrese el nombre o ID de la barcaza."); return; }
         if (!modalAmarrarGlobal.lugarAmarre.trim()) { alert("Ingrese el lugar de amarre."); return; }
         if (!modalAmarrarGlobal.fechaHora) { alert("Ingrese la fecha y hora de amarre."); return; }
-
         setModalAmarrarGlobal(prev => ({ ...prev, loading: true }));
         try {
-            const idSeguro  = encodeURIComponent(modalAmarrarGlobal.barcazaId.trim());
+            const idSeguro     = encodeURIComponent(modalAmarrarGlobal.barcazaId.trim());
             const muelleSeguro = encodeURIComponent(modalAmarrarGlobal.lugarAmarre.trim());
             await api.put(`/carga/${idSeguro}/amarrar?nuevoMuelle=${muelleSeguro}`);
             cerrarAmarrarGlobal();
-            // Recargamos cargas si hay un viaje seleccionado
             if (selectedViajeId) await fetchCargas(selectedViajeId);
             alert(`Barcaza "${modalAmarrarGlobal.barcazaId}" amarrada exitosamente en "${modalAmarrarGlobal.lugarAmarre}".`);
         } catch (err) {
@@ -498,7 +467,7 @@ const MbpcDashboard = () => {
         }
     };
 
-    // ── TAREA 2: MODAL AÑADIR CARGA ────────────────────────────────────────────
+    // ── MODAL AÑADIR CARGA ─────────────────────────────────────────────────────
     const abrirModalNuevaCarga = () => {
         setNuevaCargaForm(NUEVA_CARGA_INITIAL);
         setNuevaCargaErrors({});
@@ -526,23 +495,16 @@ const MbpcDashboard = () => {
     const guardarNuevaCarga = async () => {
         const errors = validarNuevaCarga();
         if (Object.keys(errors).length > 0) { setNuevaCargaErrors(errors); return; }
-
-        // Necesitamos el nombre del buque para la URL del endpoint
         const nombreBuque = viajeSeleccionado?.buque;
-        if (!nombreBuque) {
-            alert("No se puede identificar el buque del viaje seleccionado.");
-            return;
-        }
-
+        if (!nombreBuque) { alert("No se puede identificar el buque del viaje seleccionado."); return; }
         setModalNuevaCarga(prev => ({ ...prev, loading: true }));
         try {
             const payload = {
-                nombre: nuevaCargaForm.nombre.trim(),
-                tipo: nuevaCargaForm.tipo,
+                nombre:   nuevaCargaForm.nombre.trim(),
+                tipo:     nuevaCargaForm.tipo,
                 tonelaje: parseFloat(nuevaCargaForm.tonelaje),
             };
             await api.post(`/carga/viaje/${encodeURIComponent(nombreBuque)}`, payload);
-            // Recargamos el manifiesto para ver la nueva carga
             await fetchCargas(selectedViajeId);
             cerrarModalNuevaCarga();
         } catch (err) {
@@ -601,7 +563,7 @@ const MbpcDashboard = () => {
 
             {/* ── BOTONERA SUPERIOR ─────────────────────────────────────── */}
             <div className="bg-[#002454] border-t border-blue-800 px-6 py-2 flex items-center gap-2 flex-wrap">
-                {/* BOTON: Ver Mapa / Volver al Dashboard */}
+                {/* Ver Mapa / Volver al Dashboard */}
                 <button
                     onClick={() => setVistaActual(vistaActual === 'mapa' ? 'dashboard' : 'mapa')}
                     className={`flex items-center gap-1.5 px-4 py-1.5 text-white text-xs font-semibold rounded transition border ${vistaActual === 'mapa' ? 'bg-amber-600 hover:bg-amber-700 border-amber-500' : 'bg-[#104a8e] hover:bg-[#1a5fa8] border-blue-600'}`}
@@ -670,14 +632,12 @@ const MbpcDashboard = () => {
 
             {/* ── CONTENIDO PRINCIPAL ─────────────────────────────────────── */}
             <main className={`flex-grow ${vistaActual === 'mapa' ? '' : 'p-6 md:p-8 space-y-8'}`}>
-                {/* RENDERIZADO DEL MAPA */}
                 {vistaActual === 'mapa' ? (
-                    <div style={{ height: 'calc(100vh - 130px)' }}> 
+                    <div style={{ height: 'calc(100vh - 130px)' }}>
                         <MapaAIS />
                     </div>
                 ) : (
                     <>
-                        {/* RENDERIZADO DEL DASHBOARD ORIGINAL */}
                         {error && (
                             <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded shadow-sm text-red-800 flex items-center">
                                 <svg className="w-6 h-6 mr-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -744,58 +704,14 @@ const MbpcDashboard = () => {
                                                         </span>
                                                         <span className="text-xs text-gray-400 ml-2">{viaje.fechaEstado}</span>
                                                     </td>
+                                                    {/* ── COLUMNA ACCIONES: solo "Ver Cargas" ── */}
                                                     <td className="px-5 py-4 text-right" onClick={e => e.stopPropagation()}>
-                                                        <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                                                            {/* Ver Cargas */}
-                                                            <button
-                                                                onClick={() => setSelectedViajeId(viaje.id)}
-                                                                className={`text-xs font-semibold px-2.5 py-1.5 rounded border transition ${selectedViajeId === viaje.id ? 'bg-[#104a8e] text-white border-[#104a8e]' : 'text-gray-500 border-gray-300 hover:bg-gray-100'}`}
-                                                            >
-                                                                {selectedViajeId === viaje.id ? 'Seleccionado' : 'Ver Cargas'}
-                                                            </button>
-
-                                                            {/* Zarpar */}
-                                                            <button
-                                                                onClick={() => cambiarEstadoViaje(viaje, 'zarpar')}
-                                                                disabled={!!estadoViajeLoading[`${viaje.id}-zarpar`]}
-                                                                title="Hacer zarpar el buque (estado → Navegando)"
-                                                                className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded border border-green-400 text-green-700 bg-green-50 hover:bg-green-100 transition disabled:opacity-50"
-                                                            >
-                                                                {estadoViajeLoading[`${viaje.id}-zarpar`]
-                                                                    ? <IconoSpinner />
-                                                                    : <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 12h14M12 5l7 7-7 7" /></svg>
-                                                                }
-                                                                Zarpar
-                                                            </button>
-
-                                                            {/* Amarrar */}
-                                                            <button
-                                                                onClick={() => cambiarEstadoViaje(viaje, 'amarrar')}
-                                                                disabled={!!estadoViajeLoading[`${viaje.id}-amarrar`]}
-                                                                title="Amarrar el buque en puerto (estado → Amarrado)"
-                                                                className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded border border-[#104a8e] text-[#104a8e] bg-blue-50 hover:bg-blue-100 transition disabled:opacity-50"
-                                                            >
-                                                                {estadoViajeLoading[`${viaje.id}-amarrar`]
-                                                                    ? <IconoSpinner />
-                                                                    : <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                                                                }
-                                                                Amarrar
-                                                            </button>
-
-                                                            {/* Fondear */}
-                                                            <button
-                                                                onClick={() => cambiarEstadoViaje(viaje, 'fondear')}
-                                                                disabled={!!estadoViajeLoading[`${viaje.id}-fondear`]}
-                                                                title="Fondear el buque (estado → Fondeado)"
-                                                                className="flex items-center gap-1 text-xs font-semibold px-2.5 py-1.5 rounded border border-yellow-500 text-yellow-700 bg-yellow-50 hover:bg-yellow-100 transition disabled:opacity-50"
-                                                            >
-                                                                {estadoViajeLoading[`${viaje.id}-fondear`]
-                                                                    ? <IconoSpinner />
-                                                                    : <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 6h18M3 12h18M3 18h18" /></svg>
-                                                                }
-                                                                Fondear
-                                                            </button>
-                                                        </div>
+                                                        <button
+                                                            onClick={() => setSelectedViajeId(viaje.id)}
+                                                            className={`text-xs font-semibold px-4 py-1.5 rounded border transition ${selectedViajeId === viaje.id ? 'bg-[#104a8e] text-white border-[#104a8e]' : 'text-gray-500 border-gray-300 hover:bg-gray-100'}`}
+                                                        >
+                                                            {selectedViajeId === viaje.id ? 'Seleccionado' : 'Ver Detalles y Cargas'}
+                                                        </button>
                                                     </td>
                                                 </tr>
                                             ))}
@@ -804,7 +720,7 @@ const MbpcDashboard = () => {
                             </div>
                         </section>
 
-                        {/* ── SECCIÓN CARGAS ────────────────────────────────────── */}
+                        {/* ── SECCIÓN MANIFIESTO DE CARGA + CONTROLES DE ESTADO ── */}
                         {selectedViajeId && (
                             <section className="bg-white rounded-xl shadow-lg border border-gray-100 border-t-4 border-t-[#104a8e] p-6 fade-in">
                                 <div className="flex items-center justify-between mb-6 pb-4 border-b">
@@ -832,101 +748,113 @@ const MbpcDashboard = () => {
                                     </div>
                                 </div>
 
-                                {loading.cargas && cargas.length === 0 ? (
-                                    <div className="text-center py-10 text-gray-500">Cargando manifiesto...</div>
-                                ) : cargas.length === 0 ? (
-                                    <div className="text-center py-10 text-gray-500 bg-gray-50 rounded-lg">
-                                        Este viaje no tiene cargas registradas en Mongo.
-                                        <br />
-                                        <span className="text-xs text-gray-400 mt-1 block">Usá el botón "Añadir Carga" para registrar la primera.</span>
-                                    </div>
-                                ) : (
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                        {cargas.map(carga => {
-                                            const barcaza = esBarcaza(carga);
-                                            return (
-                                                <div key={carga.id} className="border border-gray-100 rounded-xl p-5 hover:shadow-md transition bg-gray-50/50 space-y-4">
-                                                    <div className="flex justify-between items-start">
-                                                        <div>
-                                                            <p className="font-semibold text-gray-800 text-base">{carga.descripcionLista}</p>
-                                                            <p className="text-xs text-gray-400 font-mono">ID: {carga.id}</p>
-                                                            <span className={`inline-block mt-1 px-2 py-0.5 text-xs font-medium rounded-full ${barcaza ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}`}>
-                                                                {barcaza ? 'Barcaza' : 'Remolcador / Buque'}
-                                                            </span>
+                                {/* ── PANEL DE ESTADO DEL BUQUE ───────────────────── */}
+                                {viajeSeleccionado && (
+                                    <ControlesEstadoBuque
+                                        viajeId={viajeSeleccionado.id}
+                                        estadoActual={viajeSeleccionado.estadoActual}
+                                        onEstadoCambiado={handleEstadoCambiado}
+                                    />
+                                )}
+
+                                {/* ── GRILLA DE CARGAS ─────────────────────────────── */}
+                                <div className="mt-6">
+                                    {loading.cargas && cargas.length === 0 ? (
+                                        <div className="text-center py-10 text-gray-500">Cargando manifiesto...</div>
+                                    ) : cargas.length === 0 ? (
+                                        <div className="text-center py-10 text-gray-500 bg-gray-50 rounded-lg">
+                                            Este viaje no tiene cargas registradas en Mongo.
+                                            <br />
+                                            <span className="text-xs text-gray-400 mt-1 block">Usá el botón "Añadir Carga" para registrar la primera.</span>
+                                        </div>
+                                    ) : (
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                            {cargas.map(carga => {
+                                                const barcaza = esBarcaza(carga);
+                                                return (
+                                                    <div key={carga.id} className="border border-gray-100 rounded-xl p-5 hover:shadow-md transition bg-gray-50/50 space-y-4">
+                                                        <div className="flex justify-between items-start">
+                                                            <div>
+                                                                <p className="font-semibold text-gray-800 text-base">{carga.descripcionLista}</p>
+                                                                <p className="text-xs text-gray-400 font-mono">ID: {carga.id}</p>
+                                                                <span className={`inline-block mt-1 px-2 py-0.5 text-xs font-medium rounded-full ${barcaza ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'}`}>
+                                                                    {barcaza ? 'Barcaza' : 'Remolcador / Buque'}
+                                                                </span>
+                                                            </div>
+                                                            <div dangerouslySetInnerHTML={{ __html: getRiesgoBadge(carga.nivelRiesgo) }} />
                                                         </div>
-                                                        <div dangerouslySetInnerHTML={{ __html: getRiesgoBadge(carga.nivelRiesgo) }} />
-                                                    </div>
 
-                                                    <div className="flex items-center justify-between text-sm bg-white p-3 rounded-lg border">
-                                                        <span className="text-gray-500">Tonelaje Actual:</span>
-                                                        <span className="font-bold text-gray-800">{carga.tonelaje} Tn</span>
-                                                    </div>
-
-                                                    <div className="flex items-center text-sm text-gray-600">
-                                                        <IconoUbicacion />
-                                                        <span>Estado: <strong className="text-[#002454]">{carga.muelleActual || 'Navegando / Fondeado'}</strong></span>
-                                                    </div>
-
-                                                    {/* ── BOTONES DIFERENCIADOS POR TIPO ── */}
-                                                    {barcaza ? (
-                                                        <div className="flex gap-2 pt-2 flex-wrap">
-                                                            <button
-                                                                onClick={() => abrirModalAccion(carga, 'cargar')}
-                                                                className="flex-1 text-center bg-green-600 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-green-700 transition"
-                                                            >
-                                                                Cargar
-                                                            </button>
-                                                            <button
-                                                                onClick={() => abrirModalAccion(carga, 'descargar')}
-                                                                className="flex-1 text-center bg-amber-500 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-amber-600 transition"
-                                                            >
-                                                                Descargar
-                                                            </button>
-                                                            <button
-                                                                onClick={() => abrirModalAccion(carga, 'amarrar_barcaza')}
-                                                                className="flex-1 text-center bg-[#104a8e] text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-[#002454] transition"
-                                                            >
-                                                                Amarrar
-                                                            </button>
+                                                        <div className="flex items-center justify-between text-sm bg-white p-3 rounded-lg border">
+                                                            <span className="text-gray-500">Tonelaje Actual:</span>
+                                                            <span className="font-bold text-gray-800">{carga.tonelaje} Tn</span>
                                                         </div>
-                                                    ) : (
-                                                        <div className="flex flex-col gap-2 pt-2">
-                                                            <div className="flex gap-2">
-                                                                <button 
+
+                                                        <div className="flex items-center text-sm text-gray-600">
+                                                            <IconoUbicacion />
+                                                            <span>Estado: <strong className="text-[#002454]">{carga.muelleActual || 'Navegando / Fondeado'}</strong></span>
+                                                        </div>
+
+                                                        {/* ── BOTONES DIFERENCIADOS POR TIPO ── */}
+                                                        {barcaza ? (
+                                                            <div className="flex gap-2 pt-2 flex-wrap">
+                                                                <button
                                                                     onClick={() => abrirModalAccion(carga, 'cargar')}
-                                                                    className="flex-1 text-center bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-700 transition"
+                                                                    className="flex-1 text-center bg-green-600 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-green-700 transition"
                                                                 >
                                                                     Cargar
                                                                 </button>
-                                                                <button 
+                                                                <button
                                                                     onClick={() => abrirModalAccion(carga, 'descargar')}
-                                                                    className="flex-1 text-center bg-amber-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-amber-600 transition"
+                                                                    className="flex-1 text-center bg-amber-500 text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-amber-600 transition"
                                                                 >
                                                                     Descargar
                                                                 </button>
-                                                            </div>
-                                                            <div className="flex gap-2">
-                                                                <button 
-                                                                    onClick={() => abrirModalAccion(carga, 'amarrar_buque')}
-                                                                    className="flex-1 text-center bg-[#104a8e] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#002454] transition disabled:opacity-50"
-                                                                    disabled={!!carga.muelleActual}
+                                                                <button
+                                                                    onClick={() => abrirModalAccion(carga, 'amarrar_barcaza')}
+                                                                    className="flex-1 text-center bg-[#104a8e] text-white px-3 py-2 rounded-lg text-xs font-semibold hover:bg-[#002454] transition"
                                                                 >
                                                                     Amarrar
                                                                 </button>
-                                                                <button 
-                                                                    onClick={() => abrirModalAccion(carga, 'fondear_buque')}
-                                                                    className="flex-1 text-center bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-cyan-700 transition"
-                                                                >
-                                                                    Fondear
-                                                                </button>
                                                             </div>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                )}
+                                                        ) : (
+                                                            <div className="flex flex-col gap-2 pt-2">
+                                                                <div className="flex gap-2">
+                                                                    <button
+                                                                        onClick={() => abrirModalAccion(carga, 'cargar')}
+                                                                        className="flex-1 text-center bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-700 transition"
+                                                                    >
+                                                                        Cargar
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => abrirModalAccion(carga, 'descargar')}
+                                                                        className="flex-1 text-center bg-amber-500 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-amber-600 transition"
+                                                                    >
+                                                                        Descargar
+                                                                    </button>
+                                                                </div>
+                                                                <div className="flex gap-2">
+                                                                    <button
+                                                                        onClick={() => abrirModalAccion(carga, 'amarrar_buque')}
+                                                                        className="flex-1 text-center bg-[#104a8e] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#002454] transition disabled:opacity-50"
+                                                                        disabled={!!carga.muelleActual}
+                                                                    >
+                                                                        Amarrar
+                                                                    </button>
+                                                                    <button
+                                                                        onClick={() => abrirModalAccion(carga, 'fondear_buque')}
+                                                                        className="flex-1 text-center bg-cyan-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-cyan-700 transition"
+                                                                    >
+                                                                        Fondear
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
                             </section>
                         )}
                     </>
@@ -937,7 +865,7 @@ const MbpcDashboard = () => {
             {vistaActual === 'dashboard' && (
                 <footer className="border-t mt-12 p-6 bg-white text-center text-xs text-gray-400">
                     <p>&copy; 2026 Prefectura Naval Argentina - Dirección de Informática y Comunicaciones.</p>
-                    <p className="mt-1">Sistema de Gestión de Tráfico Marítimo (MBPC) - Módulo de Modernización - v0.6.0</p>
+                    <p className="mt-1">Sistema de Gestión de Tráfico Marítimo (MBPC) - Módulo de Modernización - v0.7.0</p>
                 </footer>
             )}
 
@@ -953,7 +881,6 @@ const MbpcDashboard = () => {
                         onClose={cerrarModal}
                     />
                     <div className="p-6 space-y-4">
-                        {/* Amarrar Buque → pide Muelle */}
                         {modalState.tipo === 'amarrar_buque' && (
                             <>
                                 <p className="text-sm text-gray-500">Indique el muelle de destino donde amarrará el remolcador/buque:</p>
@@ -963,8 +890,6 @@ const MbpcDashboard = () => {
                                     autoFocus />
                             </>
                         )}
-
-                        {/* Fondear Buque → pide Zona */}
                         {modalState.tipo === 'fondear_buque' && (
                             <>
                                 <p className="text-sm text-gray-500">Indique la zona de fondeo asignada al remolcador/buque:</p>
@@ -974,8 +899,6 @@ const MbpcDashboard = () => {
                                     autoFocus />
                             </>
                         )}
-
-                        {/* Cargar / Descargar → pide tonelaje final */}
                         {(modalState.tipo === 'cargar' || modalState.tipo === 'descargar') && (
                             <>
                                 <p className="text-sm text-gray-500">
@@ -988,11 +911,7 @@ const MbpcDashboard = () => {
                                         Tonelaje Final <span className="text-red-500">*</span>
                                     </label>
                                     <input
-                                        type="number"
-                                        min="0"
-                                        step="0.01"
-                                        placeholder="Ej: 250.5"
-                                        className={inputCls}
+                                        type="number" min="0" step="0.01" placeholder="Ej: 250.5" className={inputCls}
                                         value={modalState.toneladas}
                                         onChange={(e) => setModalState(prev => ({ ...prev, toneladas: e.target.value }))}
                                         autoFocus
@@ -1000,8 +919,6 @@ const MbpcDashboard = () => {
                                 </div>
                             </>
                         )}
-
-                        {/* Amarrar Barcaza → pide Fecha/Hora y Posición */}
                         {modalState.tipo === 'amarrar_barcaza' && (
                             <>
                                 <p className="text-sm text-gray-500">Complete los datos de amarre de la barcaza:</p>
@@ -1056,66 +973,53 @@ const MbpcDashboard = () => {
                     />
                     <div className="p-6">
                         {modalPuerto.loading ? (
-                            <div className="flex items-center justify-center py-16 text-gray-500 gap-3">
-                                <IconoSpinner />
-                                Consultando MongoDB...
+                            <div className="flex items-center justify-center py-12 text-gray-500">
+                                <IconoSpinner /><span className="ml-2">Consultando barcos en puerto...</span>
                             </div>
                         ) : modalPuerto.datos.length === 0 ? (
-                            <div className="text-center py-12 text-gray-500 bg-gray-50 rounded-xl">
-                                No se encontraron barcos en puerto en este momento.
-                            </div>
+                            <div className="text-center py-12 text-gray-500">No se encontraron barcos en puerto actualmente.</div>
                         ) : (
                             <div className="overflow-x-auto">
                                 <table className="w-full text-sm text-left">
                                     <thead className="text-xs text-gray-500 uppercase bg-gray-50">
                                         <tr>
                                             <th className="px-4 py-3">Buque</th>
-                                            <th className="px-4 py-3">Origen</th>
-                                            <th className="px-4 py-3">Destino</th>
-                                            <th className="px-4 py-3">ETA</th>
-                                            <th className="px-4 py-3">Estado</th>
                                             <th className="px-4 py-3">MMSI</th>
+                                            <th className="px-4 py-3">Estado</th>
+                                            <th className="px-4 py-3">Posición</th>
+                                            <th className="px-4 py-3">Última Actualización</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-100">
-                                        {modalPuerto.datos.map((barco) => (
-                                            <tr key={barco.id} className="hover:bg-blue-50 transition">
-                                                <td className="px-4 py-3 font-semibold text-[#002454]">{barco.buque}</td>
-                                                <td className="px-4 py-3 text-gray-600">{barco.origen}</td>
-                                                <td className="px-4 py-3 text-gray-600">{barco.destino}</td>
-                                                <td className="px-4 py-3 text-gray-600 font-mono text-xs">{barco.eta}</td>
+                                        {modalPuerto.datos.map((barco, idx) => (
+                                            <tr key={idx} className="hover:bg-blue-50 transition">
+                                                <td className="px-4 py-3 font-medium text-[#002454]">{barco.nombre || barco.vesselName || 'N/D'}</td>
+                                                <td className="px-4 py-3 font-mono text-gray-600">{barco.mmsi || 'N/D'}</td>
                                                 <td className="px-4 py-3">
-                                                    <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${getEstadoBadgeClass(barco.estado)}`}>
-                                                        {barco.estado}
+                                                    <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${getEstadoBadgeClass(barco.estado || barco.navegationStatusDesc)}`}>
+                                                        {barco.estado || barco.navegationStatusDesc || 'N/D'}
                                                     </span>
                                                 </td>
-                                                <td className="px-4 py-3 text-gray-400 font-mono text-xs">{barco.mmsi}</td>
+                                                <td className="px-4 py-3 text-gray-600 text-xs">{barco.posicion || `${barco.latitude?.toFixed(4) ?? ''}, ${barco.longitude?.toFixed(4) ?? ''}`}</td>
+                                                <td className="px-4 py-3 text-gray-500 text-xs">{barco.ultimaActualizacion || barco.msgTime || 'N/D'}</td>
                                             </tr>
                                         ))}
                                     </tbody>
                                 </table>
-                                <p className="text-xs text-gray-400 mt-4 text-right">
-                                    {modalPuerto.datos.length} registro(s) encontrado(s)
-                                </p>
                             </div>
                         )}
-                    </div>
-                    <div className="bg-gray-50 px-6 py-4 flex justify-end rounded-b-2xl">
-                        <button onClick={cerrarModalPuerto} className="px-5 py-2 border border-gray-300 text-sm font-medium text-gray-700 rounded-lg hover:bg-gray-100 transition">
-                            Cerrar
-                        </button>
                     </div>
                 </Modal>
             )}
 
             {/* ════════════════════════════════════════════════════════════
-                MODAL HISTÓRICO DE VIAJES
+                MODAL HISTÓRICO
             ════════════════════════════════════════════════════════════ */}
             {modalHistorico.show && (
                 <Modal onClose={cerrarModalHistorico} maxWidth="max-w-5xl">
                     <ModalHeader
-                        titulo="Histórico de Viajes"
-                        subtitulo="PKG_MBPC_VIAJES.SP_HISTORICO — Consulta multi-criterio a Oracle"
+                        titulo="Búsqueda de Viajes Históricos"
+                        subtitulo="Fuente: Oracle — Filtros combinables"
                         icono={
                             <svg className="w-6 h-6 text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
@@ -1123,83 +1027,53 @@ const MbpcDashboard = () => {
                         }
                         onClose={cerrarModalHistorico}
                     />
-                    <div className="p-6 space-y-6">
-                        {/* Formulario de búsqueda */}
-                        <div className="bg-blue-50 rounded-xl p-5 border border-blue-100">
-                            <p className="text-xs font-bold text-[#002454] uppercase tracking-wider mb-4">Criterios de Búsqueda</p>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <Campo label="Nombre del Buque">
-                                    <input name="nombre" type="text" className={inputCls}
-                                        placeholder="Ej: ARA Alte. Brown"
-                                        value={filtroHistorico.nombre}
-                                        onChange={handleFiltroHistoricoChange} />
+                    <div className="p-6 space-y-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                            <Campo label="Nombre del Buque">
+                                <input name="nombre" type="text" className={inputCls} placeholder="Ej: ARA Libertad"
+                                    value={filtroHistorico.nombre} onChange={handleFiltroHistoricoChange} />
+                            </Campo>
+                            <Campo label="Nro. OMI">
+                                <input name="omi" type="text" className={inputCls} placeholder="Ej: 9123456"
+                                    value={filtroHistorico.omi} onChange={handleFiltroHistoricoChange} />
+                            </Campo>
+                            <Campo label="Matrícula">
+                                <input name="matricula" type="text" className={inputCls} placeholder="Ej: ARG-1234"
+                                    value={filtroHistorico.matricula} onChange={handleFiltroHistoricoChange} />
+                            </Campo>
+                            <Campo label="Puerto de Origen">
+                                <input name="origen" type="text" className={inputCls} placeholder="Ej: Buenos Aires"
+                                    value={filtroHistorico.origen} onChange={handleFiltroHistoricoChange} />
+                            </Campo>
+                            <Campo label="Puerto de Destino">
+                                <input name="destino" type="text" className={inputCls} placeholder="Ej: Montevideo"
+                                    value={filtroHistorico.destino} onChange={handleFiltroHistoricoChange} />
+                            </Campo>
+                            <div className="flex gap-2">
+                                <Campo label="Desde">
+                                    <input name="desde" type="date" className={inputCls}
+                                        value={filtroHistorico.desde} onChange={handleFiltroHistoricoChange} />
                                 </Campo>
-                                <Campo label="N° OMI">
-                                    <input name="omi" type="text" className={inputCls}
-                                        placeholder="Ej: IMO9000001"
-                                        value={filtroHistorico.omi}
-                                        onChange={handleFiltroHistoricoChange} />
+                                <Campo label="Hasta">
+                                    <input name="hasta" type="date" className={inputCls}
+                                        value={filtroHistorico.hasta} onChange={handleFiltroHistoricoChange} />
                                 </Campo>
-                                <Campo label="Matrícula">
-                                    <input name="matricula" type="text" className={inputCls}
-                                        placeholder="Ej: ARG-0001"
-                                        value={filtroHistorico.matricula}
-                                        onChange={handleFiltroHistoricoChange} />
-                                </Campo>
-                                <Campo label="Puerto de Origen">
-                                    <input name="origen" type="text" className={inputCls}
-                                        placeholder="Ej: Puerto Rosario"
-                                        value={filtroHistorico.origen}
-                                        onChange={handleFiltroHistoricoChange} />
-                                </Campo>
-                                <Campo label="Puerto de Destino">
-                                    <input name="destino" type="text" className={inputCls}
-                                        placeholder="Ej: Puerto Buenos Aires"
-                                        value={filtroHistorico.destino}
-                                        onChange={handleFiltroHistoricoChange} />
-                                </Campo>
-                                <div className="grid grid-cols-2 gap-2">
-                                    <Campo label="Desde">
-                                        <input name="desde" type="date" className={inputCls}
-                                            value={filtroHistorico.desde}
-                                            onChange={handleFiltroHistoricoChange} />
-                                    </Campo>
-                                    <Campo label="Hasta">
-                                        <input name="hasta" type="date" className={inputCls}
-                                            value={filtroHistorico.hasta}
-                                            onChange={handleFiltroHistoricoChange} />
-                                    </Campo>
-                                </div>
-                            </div>
-                            <div className="mt-4 flex justify-end">
-                                <button
-                                    onClick={buscarHistorico}
-                                    disabled={modalHistorico.loading}
-                                    className="flex items-center gap-2 px-6 py-2 bg-[#002454] hover:bg-[#104a8e] text-white text-sm font-semibold rounded-lg transition disabled:opacity-50"
-                                >
-                                    {modalHistorico.loading ? (
-                                        <><IconoSpinner /> Buscando...</>
-                                    ) : (
-                                        <>
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                                            </svg>
-                                            Buscar
-                                        </>
-                                    )}
-                                </button>
                             </div>
                         </div>
-
-                        {/* Resultados */}
+                        <div className="flex justify-end">
+                            <button
+                                onClick={buscarHistorico}
+                                disabled={modalHistorico.loading}
+                                className="flex items-center gap-2 px-6 py-2 bg-[#002454] hover:bg-[#104a8e] text-white text-sm font-semibold rounded-lg transition disabled:opacity-50"
+                            >
+                                {modalHistorico.loading ? <><IconoSpinner /> Buscando...</> : 'Buscar'}
+                            </button>
+                        </div>
                         {modalHistorico.buscado && (
                             modalHistorico.resultados.length === 0 ? (
-                                <div className="text-center py-10 text-gray-500 bg-gray-50 rounded-xl">
-                                    No se encontraron viajes con los criterios ingresados.
-                                </div>
+                                <div className="text-center py-8 text-gray-500 bg-gray-50 rounded-lg">No se encontraron viajes con los criterios indicados.</div>
                             ) : (
-                                <div className="overflow-x-auto">
-                                    <p className="text-xs text-gray-400 mb-3">{modalHistorico.resultados.length} resultado(s)</p>
+                                <div className="overflow-x-auto mt-2">
                                     <table className="w-full text-sm text-left">
                                         <thead className="text-xs text-gray-500 uppercase bg-gray-50">
                                             <tr>
@@ -1208,24 +1082,22 @@ const MbpcDashboard = () => {
                                                 <th className="px-4 py-3">Matrícula</th>
                                                 <th className="px-4 py-3">Origen</th>
                                                 <th className="px-4 py-3">Destino</th>
-                                                <th className="px-4 py-3">Partida</th>
-                                                <th className="px-4 py-3">ETA</th>
+                                                <th className="px-4 py-3">Fecha</th>
                                                 <th className="px-4 py-3">Estado</th>
                                             </tr>
                                         </thead>
                                         <tbody className="divide-y divide-gray-100">
-                                            {modalHistorico.resultados.map((v) => (
-                                                <tr key={v.id} className="hover:bg-blue-50 transition">
-                                                    <td className="px-4 py-3 font-semibold text-[#002454]">{v.buque}</td>
-                                                    <td className="px-4 py-3 font-mono text-xs text-gray-500">{v.omi}</td>
-                                                    <td className="px-4 py-3 font-mono text-xs text-gray-500">{v.matricula}</td>
-                                                    <td className="px-4 py-3 text-gray-600">{v.origen}</td>
-                                                    <td className="px-4 py-3 text-gray-600">{v.destino}</td>
-                                                    <td className="px-4 py-3 text-gray-500 text-xs">{v.fechaPartida}</td>
-                                                    <td className="px-4 py-3 text-gray-500 text-xs">{v.eta}</td>
+                                            {modalHistorico.resultados.map((v, idx) => (
+                                                <tr key={idx} className="hover:bg-blue-50 transition">
+                                                    <td className="px-4 py-3 font-medium text-[#002454]">{v.nombre || v.buque || 'N/D'}</td>
+                                                    <td className="px-4 py-3 font-mono text-gray-600">{v.omi || 'N/D'}</td>
+                                                    <td className="px-4 py-3 text-gray-600">{v.matricula || 'N/D'}</td>
+                                                    <td className="px-4 py-3 text-gray-600">{v.origen || 'N/D'}</td>
+                                                    <td className="px-4 py-3 text-gray-600">{v.destino || 'N/D'}</td>
+                                                    <td className="px-4 py-3 text-gray-500 text-xs">{v.fecha || v.fechaInicio || 'N/D'}</td>
                                                     <td className="px-4 py-3">
-                                                        <span className={`px-2.5 py-1 text-xs font-semibold rounded-full ${getEstadoBadgeClass(v.estado)}`}>
-                                                            {v.estado}
+                                                        <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${getEstadoBadgeClass(v.estado)}`}>
+                                                            {v.estado || 'N/D'}
                                                         </span>
                                                     </td>
                                                 </tr>
@@ -1235,11 +1107,6 @@ const MbpcDashboard = () => {
                                 </div>
                             )
                         )}
-                    </div>
-                    <div className="bg-gray-50 px-6 py-4 flex justify-end rounded-b-2xl">
-                        <button onClick={cerrarModalHistorico} className="px-5 py-2 border border-gray-300 text-sm font-medium text-gray-700 rounded-lg hover:bg-gray-100 transition">
-                            Cerrar
-                        </button>
                     </div>
                 </Modal>
             )}
@@ -1251,7 +1118,7 @@ const MbpcDashboard = () => {
                 <Modal onClose={cerrarAmarrarGlobal} maxWidth="max-w-md">
                     <ModalHeader
                         titulo="Amarrar Barcaza"
-                        subtitulo="Amarre global — PKG_MBPC_CARGAS.SP_AMARRAR"
+                        subtitulo="Operación global — se ejecuta por ID/nombre de barcaza"
                         icono={
                             <svg className="w-6 h-6 text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
@@ -1260,42 +1127,28 @@ const MbpcDashboard = () => {
                         onClose={cerrarAmarrarGlobal}
                     />
                     <div className="p-6 space-y-4">
-                        <p className="text-sm text-gray-500">
-                            Complete los datos de amarre. Se enviará la operación a Oracle y se sincronizará MongoDB vía CQRS.
-                        </p>
-                        <Campo label="Nombre o ID de la Barcaza" required>
-                            <input
-                                type="text"
-                                placeholder="Ej: BARCAZA NORTE IV"
-                                className={inputCls}
+                        <Campo label="ID / Nombre de la Barcaza" required>
+                            <input type="text" className={inputCls} placeholder="Ej: BARCAZA-001"
                                 value={modalAmarrarGlobal.barcazaId}
                                 onChange={(e) => setModalAmarrarGlobal(prev => ({ ...prev, barcazaId: e.target.value }))}
-                                autoFocus
-                            />
+                                autoFocus />
                         </Campo>
                         <Campo label="Lugar de Amarre / Muelle" required>
-                            <input
-                                type="text"
-                                placeholder="Ej: Muelle Alte. Storni - Sitio 2"
-                                className={inputCls}
+                            <input type="text" className={inputCls} placeholder="Ej: Muelle Sur - Sitio 4"
                                 value={modalAmarrarGlobal.lugarAmarre}
-                                onChange={(e) => setModalAmarrarGlobal(prev => ({ ...prev, lugarAmarre: e.target.value }))}
-                            />
+                                onChange={(e) => setModalAmarrarGlobal(prev => ({ ...prev, lugarAmarre: e.target.value }))} />
                         </Campo>
                         <Campo label="Fecha y Hora de Amarre" required>
-                            <input
-                                type="datetime-local"
-                                className={inputCls}
+                            <input type="datetime-local" className={inputCls}
                                 value={modalAmarrarGlobal.fechaHora}
-                                onChange={(e) => setModalAmarrarGlobal(prev => ({ ...prev, fechaHora: e.target.value }))}
-                            />
+                                onChange={(e) => setModalAmarrarGlobal(prev => ({ ...prev, fechaHora: e.target.value }))} />
                         </Campo>
                     </div>
                     <div className="bg-gray-50 px-6 py-4 flex flex-row-reverse gap-2 rounded-b-2xl">
                         <button
                             onClick={ejecutarAmarrarGlobal}
                             disabled={modalAmarrarGlobal.loading}
-                            className="flex items-center gap-2 px-5 py-2 bg-[#002454] hover:bg-[#104a8e] text-white text-sm font-semibold rounded-lg transition disabled:opacity-50"
+                            className="inline-flex items-center gap-2 px-5 py-2 bg-[#104a8e] hover:bg-[#002454] text-white text-sm font-semibold rounded-lg transition disabled:opacity-50"
                         >
                             {modalAmarrarGlobal.loading ? <><IconoSpinner /> Amarrando...</> : 'Confirmar Amarre'}
                         </button>
@@ -1311,140 +1164,101 @@ const MbpcDashboard = () => {
             )}
 
             {/* ════════════════════════════════════════════════════════════
-                TAREA 2 — MODAL AÑADIR CARGA AL VIAJE
-                POST /api/carga/viaje/{viajeNombreBuque}
+                MODAL AÑADIR CARGA
             ════════════════════════════════════════════════════════════ */}
             {modalNuevaCarga.show && (
                 <Modal onClose={cerrarModalNuevaCarga} maxWidth="max-w-md">
                     <ModalHeader
-                        titulo="Añadir Carga al Viaje"
-                        subtitulo={`PKG_MBPC_CARGAS.SP_AGREGAR_CARGA — Buque: ${viajeSeleccionado?.buque || '...'}`}
+                        titulo="Añadir Nueva Carga"
+                        subtitulo={`Buque: ${viajeSeleccionado?.buque || '...'}`}
                         icono={<IconoCarga className="w-6 h-6 text-blue-300" />}
                         onClose={cerrarModalNuevaCarga}
                     />
                     <div className="p-6 space-y-4">
-                        <p className="text-sm text-gray-500">
-                            Registrá una nueva carga en Oracle y sincronizá el array <code className="bg-gray-100 px-1 rounded text-xs">barcazas</code> en MongoDB vía CQRS (Update.Push).
-                        </p>
-
-                        {/* Nombre / ID */}
-                        <Campo label="Nombre o ID de la Carga" required>
-                            <input
-                                name="nombre"
-                                type="text"
-                                placeholder="Ej: BARCAZA SUR VII / BODEGA-01"
-                                className={`${inputCls} ${nuevaCargaErrors.nombre ? 'border-red-400 ring-1 ring-red-300' : ''}`}
-                                value={nuevaCargaForm.nombre}
-                                onChange={handleNuevaCargaChange}
-                                autoFocus
-                            />
+                        <Campo label="Nombre / ID de la Carga" required>
+                            <input name="nombre" type="text" className={`${inputCls} ${nuevaCargaErrors.nombre ? 'border-red-400 ring-1 ring-red-300' : ''}`}
+                                placeholder="Ej: BARCAZA-12 / Contenedor Sur"
+                                value={nuevaCargaForm.nombre} onChange={handleNuevaCargaChange} autoFocus />
                             {nuevaCargaErrors.nombre && <p className="text-xs text-red-500 mt-1">{nuevaCargaErrors.nombre}</p>}
                         </Campo>
-
-                        {/* Tipo */}
                         <Campo label="Tipo de Carga" required>
-                            <select
-                                name="tipo"
-                                className={`${inputCls} ${nuevaCargaErrors.tipo ? 'border-red-400 ring-1 ring-red-300' : ''}`}
-                                value={nuevaCargaForm.tipo}
-                                onChange={handleNuevaCargaChange}
-                            >
+                            <select name="tipo" className={`${inputCls} ${nuevaCargaErrors.tipo ? 'border-red-400 ring-1 ring-red-300' : ''}`}
+                                value={nuevaCargaForm.tipo} onChange={handleNuevaCargaChange}>
                                 <option value="Barcaza">Barcaza</option>
                                 <option value="Bodega">Bodega</option>
                             </select>
                             {nuevaCargaErrors.tipo && <p className="text-xs text-red-500 mt-1">{nuevaCargaErrors.tipo}</p>}
                         </Campo>
-
-                        {/* Tonelaje */}
                         <Campo label="Tonelaje Inicial (Tn)" required>
-                            <input
-                                name="tonelaje"
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                placeholder="Ej: 1250.00"
+                            <input name="tonelaje" type="number" min="0" step="0.01"
                                 className={`${inputCls} ${nuevaCargaErrors.tonelaje ? 'border-red-400 ring-1 ring-red-300' : ''}`}
-                                value={nuevaCargaForm.tonelaje}
-                                onChange={handleNuevaCargaChange}
-                            />
+                                placeholder="Ej: 150.5"
+                                value={nuevaCargaForm.tonelaje} onChange={handleNuevaCargaChange} />
                             {nuevaCargaErrors.tonelaje && <p className="text-xs text-red-500 mt-1">{nuevaCargaErrors.tonelaje}</p>}
                         </Campo>
-
-                        {/* Aviso CQRS */}
-                        <div className="bg-blue-50 border border-blue-100 rounded-lg px-4 py-3 text-xs text-blue-700">
-                            <strong>CQRS:</strong> Se escribirá en Oracle y se hará un <code>Update.Push</code> en <code>details_mbpc</code> para el buque <strong>{viajeSeleccionado?.buque}</strong>.
-                        </div>
                     </div>
-                    <div className="sticky bottom-0 bg-gray-50 border-t px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
-                        <button
-                            onClick={cerrarModalNuevaCarga}
-                            disabled={modalNuevaCarga.loading}
-                            className="px-5 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition disabled:opacity-50"
-                        >
-                            Cancelar
-                        </button>
+                    <div className="bg-gray-50 px-6 py-4 flex flex-row-reverse gap-2 rounded-b-2xl">
                         <button
                             onClick={guardarNuevaCarga}
                             disabled={modalNuevaCarga.loading}
-                            className="flex items-center gap-2 px-6 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50 shadow-sm"
+                            className="inline-flex items-center gap-2 px-5 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition disabled:opacity-50"
                         >
-                            {modalNuevaCarga.loading ? (
-                                <><IconoSpinner /> Guardando...</>
-                            ) : (
-                                <>
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
-                                    </svg>
-                                    Confirmar Carga
-                                </>
-                            )}
+                            {modalNuevaCarga.loading ? <><IconoSpinner /> Guardando...</> : 'Registrar Carga'}
+                        </button>
+                        <button
+                            onClick={cerrarModalNuevaCarga}
+                            disabled={modalNuevaCarga.loading}
+                            className="px-5 py-2 border border-gray-300 text-sm font-medium text-gray-700 rounded-lg hover:bg-gray-100 transition"
+                        >
+                            Cancelar
                         </button>
                     </div>
                 </Modal>
             )}
 
             {/* ════════════════════════════════════════════════════════════
-                MODAL NUEVO VIAJE — todos los campos del DTO expandido
+                MODAL NUEVO VIAJE
             ════════════════════════════════════════════════════════════ */}
             {modalNuevoViaje.show && (
                 <Modal onClose={cerrarNuevoViaje} maxWidth="max-w-3xl">
                     <ModalHeader
-                        titulo="Nuevo Viaje"
-                        subtitulo="PKG_MBPC_VIAJES.SP_CREAR_VIAJE — El buque nace con estado 'Amarrado'"
-                        icono={
-                            <svg className="w-6 h-6 text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4" />
-                            </svg>
-                        }
+                        titulo="Registrar Nuevo Viaje"
+                        subtitulo="El buque será creado con estado 'Amarrado' según regla de negocio."
+                        icono={<IconoBarco className="w-6 h-6 text-blue-300" />}
                         onClose={cerrarNuevoViaje}
                     />
-
                     <div className="p-6 space-y-6">
                         {/* ── Datos del Buque ── */}
                         <fieldset>
                             <legend className="text-xs font-bold text-[#002454] uppercase tracking-wider mb-3 pb-1 border-b border-blue-100 w-full">Datos del Buque</legend>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <Campo label="Nombre del Buque" required>
-                                    <input name="nombreBuque" type="text"
-                                        className={`${inputCls} ${nuevoViajeErrors.nombreBuque ? 'border-red-400 ring-1 ring-red-300' : ''}`}
-                                        placeholder="Ej: ARA Gral. San Martín"
-                                        value={nuevoViajeForm.nombreBuque} onChange={handleNuevoViajeChange} />
-                                    {nuevoViajeErrors.nombreBuque && <p className="text-xs text-red-500 mt-1">{nuevoViajeErrors.nombreBuque}</p>}
-                                </Campo>
-                                <Campo label="Origen" required>
-                                    <input name="origen" type="text"
-                                        className={`${inputCls} ${nuevoViajeErrors.origen ? 'border-red-400 ring-1 ring-red-300' : ''}`}
-                                        placeholder="Ej: Puerto Buenos Aires"
-                                        value={nuevoViajeForm.origen} onChange={handleNuevoViajeChange} />
-                                    {nuevoViajeErrors.origen && <p className="text-xs text-red-500 mt-1">{nuevoViajeErrors.origen}</p>}
-                                </Campo>
-                                <Campo label="Destino" required>
-                                    <input name="destino" type="text"
-                                        className={`${inputCls} ${nuevoViajeErrors.destino ? 'border-red-400 ring-1 ring-red-300' : ''}`}
-                                        placeholder="Ej: Puerto Rosario"
-                                        value={nuevoViajeForm.destino} onChange={handleNuevoViajeChange} />
-                                    {nuevoViajeErrors.destino && <p className="text-xs text-red-500 mt-1">{nuevoViajeErrors.destino}</p>}
-                                </Campo>
+                                <div className="md:col-span-3">
+                                    <Campo label="Nombre del Buque" required>
+                                        <input name="nombreBuque" type="text"
+                                            className={`${inputCls} ${nuevoViajeErrors.nombreBuque ? 'border-red-400 ring-1 ring-red-300' : ''}`}
+                                            placeholder="Ej: ARA Libertad / BARCAZA-001"
+                                            value={nuevoViajeForm.nombreBuque} onChange={handleNuevoViajeChange} autoFocus />
+                                        {nuevoViajeErrors.nombreBuque && <p className="text-xs text-red-500 mt-1">{nuevoViajeErrors.nombreBuque}</p>}
+                                    </Campo>
+                                </div>
+                                <div className="md:col-span-1">
+                                    <Campo label="Puerto de Origen" required>
+                                        <input name="origen" type="text"
+                                            className={`${inputCls} ${nuevoViajeErrors.origen ? 'border-red-400 ring-1 ring-red-300' : ''}`}
+                                            placeholder="Ej: Buenos Aires"
+                                            value={nuevoViajeForm.origen} onChange={handleNuevoViajeChange} />
+                                        {nuevoViajeErrors.origen && <p className="text-xs text-red-500 mt-1">{nuevoViajeErrors.origen}</p>}
+                                    </Campo>
+                                </div>
+                                <div className="md:col-span-1">
+                                    <Campo label="Puerto de Destino" required>
+                                        <input name="destino" type="text"
+                                            className={`${inputCls} ${nuevoViajeErrors.destino ? 'border-red-400 ring-1 ring-red-300' : ''}`}
+                                            placeholder="Ej: Montevideo"
+                                            value={nuevoViajeForm.destino} onChange={handleNuevoViajeChange} />
+                                        {nuevoViajeErrors.destino && <p className="text-xs text-red-500 mt-1">{nuevoViajeErrors.destino}</p>}
+                                    </Campo>
+                                </div>
                             </div>
                         </fieldset>
 
@@ -1566,7 +1380,7 @@ const MbpcDashboard = () => {
                 }
                 @keyframes fadeIn {
                     from { opacity: 0; transform: translateY(10px); }
-                    to { opacity: 1; transform: translateY(0); }
+                    to   { opacity: 1; transform: translateY(0); }
                 }
             `}</style>
         </div>
