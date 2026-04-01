@@ -9,13 +9,13 @@ namespace Mbpc.Api.Models.Mongo
     {
         [BsonId]
         [BsonRepresentation(BsonType.ObjectId)]
-        public string Id { get; set; }
+        public string Id { get; set; } = null!;
 
         [BsonElement("TravelId")]
         public long TravelId { get; set; }
 
         [BsonElement("VesselName")]
-        public string VesselName { get; set; }
+        public string VesselName { get; set; } = null!;
 
         // Puede ser nulo en algunos registros (ej: ANGELITA B)
         [BsonElement("MMSI")]
@@ -34,9 +34,9 @@ namespace Mbpc.Api.Models.Mongo
         public double Longitude { get; set; }
 
         [BsonElement("NavegationStatusDesc")]
-        public string NavegationStatusDesc { get; set; }
+        public string NavegationStatusDesc { get; set; } = null!;
 
-        [BsonElement("SpeedOverGroud")] // Respetamos el typo original de la base ("Groud")
+        [BsonElement("SpeedOverGroud")] // Respetamos el typo original de la base
         public double SpeedOverGround { get; set; }
 
         [BsonElement("CourseOverGround")]
@@ -53,21 +53,24 @@ namespace Mbpc.Api.Models.Mongo
 
         [BsonElement("location")]
         public LocationMongo? Location { get; set; }
+
+        // ── NUEVO: MULTITENANT GEOGRÁFICO ──
+        [BsonElement("CosteraId")]
+        public string? CosteraId { get; set; }
     }
 
     public class LocationMongo
     {
         [BsonElement("geo")]
-        public GeoMongo Geo { get; set; }
+        public GeoMongo Geo { get; set; } = null!;
     }
 
     public class GeoMongo
     {
         [BsonElement("type")]
-        public string Type { get; set; }
+        public string Type { get; set; } = null!;
 
-        // MongoDB GeoJSON: [Longitud, Latitud]
         [BsonElement("coordinates")]
-        public double[] Coordinates { get; set; }
+        public double[] Coordinates { get; set; } = null!;
     }
 }

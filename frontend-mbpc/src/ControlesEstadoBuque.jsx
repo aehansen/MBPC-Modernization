@@ -1,12 +1,11 @@
 // ControlesEstadoBuque.jsx — Panel de Máquina de Estados para un Buque
 // Props:
-//   viajeId       {string}   — ID del viaje / buque en la API
-//   estadoActual  {string}   — Estado actual del buque (para mostrar en el panel)
-//   onEstadoCambiado {fn}    — Callback(accion, mensajeExito) invocado tras éxito
+//   viajeId          {string} — ID del viaje / buque en la API
+//   estadoActual     {string} — Estado actual del buque (para mostrar en el panel)
+//   onEstadoCambiado {fn}     — Callback(accion, mensajeExito) invocado tras éxito
 
 import React, { useState } from 'react';
-
-const API_BASE_URL = 'http://localhost:5009/api';
+import { viajesApi } from './axiosClient';
 
 // ─── Icono Spinner ────────────────────────────────────────────────────────────
 const IconoSpinner = () => (
@@ -64,11 +63,19 @@ const BOTONES = [
     },
 ];
 
+// Mapa de acción → método del cliente centralizado
+const TRANSICIONES = {
+    zarpar  : (id) => viajesApi.zarpar(id),
+    amarrar : (id) => viajesApi.amarrar(id),
+    fondear : (id) => viajesApi.fondear(id),
+    reanudar: (id) => viajesApi.reanudar(id),
+};
+
 // ─── Componente Principal ─────────────────────────────────────────────────────
 const ControlesEstadoBuque = ({ viajeId, estadoActual, onEstadoCambiado }) => {
     // accionProcesando: string | null — cuál botón está en vuelo
     const [accionProcesando, setAccionProcesando] = useState(null);
-    // errorTransicion: string | null — mensaje 422 del backend
+    // errorTransicion: string | null — mensaje de error del backend
     const [errorTransicion, setErrorTransicion] = useState(null);
 
     const ejecutarTransicion = async (accion) => {
@@ -78,34 +85,27 @@ const ControlesEstadoBuque = ({ viajeId, estadoActual, onEstadoCambiado }) => {
         setErrorTransicion(null);
 
         try {
-            const response = await fetch(
-                `${API_BASE_URL}/viajes/${encodeURIComponent(viajeId)}/${accion}`,
-                { method: 'PUT', headers: { 'Content-Type': 'application/json' } }
-            );
+            const res = await TRANSICIONES[accion](viajeId);
+            const mensajeExito = res.data?.mensaje || `'${accion}' ejecutado correctamente.`;
 
-            if (response.status === 422) {
-                // Unprocessable Entity → capturamos el { "mensaje": "..." }
-                const body = await response.json().catch(() => ({}));
-                setErrorTransicion(body.mensaje || `No se pudo ejecutar '${accion}'. Transición no permitida.`);
-                return;
-            }
-
-            if (!response.ok) {
-                const body = await response.json().catch(() => ({}));
-                setErrorTransicion(body.mensaje || `Error ${response.status} al ejecutar '${accion}'.`);
-                return;
-            }
-
-            const body = await response.json().catch(() => ({}));
-            const mensajeExito = body.mensaje || `'${accion}' ejecutado correctamente.`;
-
-            // Notificamos al padre para que recargue la grilla
             if (typeof onEstadoCambiado === 'function') {
                 await onEstadoCambiado(accion, mensajeExito);
             }
         } catch (err) {
-            console.error(`[ControlesEstadoBuque] Error en '${accion}':`, err);
-            setErrorTransicion('Error de red. Verificá que el Backend esté corriendo.');
+            const status  = err?.response?.status;
+            const mensaje = err?.response?.data?.mensaje;
+
+            if (status === 422) {
+                // Unprocessable Entity → transición no permitida por la máquina de estados
+                setErrorTransicion(mensaje || `No se pudo ejecutar '${accion}'. Transición no permitida.`);
+            } else if (status) {
+                // Otro error HTTP con cuerpo del backend (401/403 ya los maneja el interceptor)
+                setErrorTransicion(mensaje || `Error ${status} al ejecutar '${accion}'.`);
+            } else {
+                // Error de red (sin respuesta del servidor)
+                console.error(`[ControlesEstadoBuque] Error en '${accion}':`, err);
+                setErrorTransicion('Error de red. Verificá que el Backend esté corriendo.');
+            }
         } finally {
             setAccionProcesando(null);
         }
@@ -131,7 +131,7 @@ const ControlesEstadoBuque = ({ viajeId, estadoActual, onEstadoCambiado }) => {
                 )}
             </div>
 
-            {/* ── Banner de error 422 ──────────────────────────────────── */}
+            {/* ── Banner de error ──────────────────────────────────────── */}
             {errorTransicion && (
                 <div className="mb-3 flex items-start gap-2 bg-red-50 border border-red-300 text-red-800 text-sm rounded-lg px-4 py-3">
                     <svg className="w-5 h-5 flex-shrink-0 mt-0.5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">

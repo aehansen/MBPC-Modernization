@@ -24,6 +24,10 @@ namespace Mbpc.Api.DTOs
         public string FechaPartida { get; init; } = null!;
         public string Eta { get; init; } = null!;
         public string Estado { get; init; } = null!;
+        
+        // ── NUEVO: MULTITENANT GEOGRÁFICO ──
+        // Agregado con 'init' para respetar la inmutabilidad del record
+        public string CosteraId { get; init; } = string.Empty;
     }
 
     public record FiltroHistoricoDto 

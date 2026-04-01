@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import "@arcgis/core/assets/esri/themes/light/main.css";
+import apiClient from "./axiosClient";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MapaAIS.jsx
@@ -21,8 +22,6 @@ import "@arcgis/core/assets/esri/themes/light/main.css";
 //   • La API de ArcGIS JS se carga vía ESM desde la CDN oficial
 // ─────────────────────────────────────────────────────────────────────────────
 
-const API_BASE = "http://localhost:5009/api/viajes";
-
 // Paleta de colores por estado de navegación
 const ESTADO_COLOR = {
   Navegando : [24,  144, 255],  // azul
@@ -33,21 +32,17 @@ const ESTADO_COLOR = {
 
 function colorPorEstado(estadoStr) {
   if (!estadoStr || estadoStr === "N/A") return ESTADO_COLOR.default;
-  
+
   const e = estadoStr.toLowerCase();
 
-  // Si tiene la palabra amarr, es verde
   if (e.includes("amarr")) return ESTADO_COLOR.Amarrado;
-  
-  // Si está fondeado o al ancla, es ámbar
   if (e.includes("fonde") || e.includes("ancla")) return ESTADO_COLOR.Fondeado;
-  
-// NAVEGANDO O EN MOVIMIENTO (Azul)
-  if (e.includes("navegando") || e.includes("transitando") || e.includes("salio") || 
-      e.includes("entro") || e.includes("pesca") || e.includes("exploracion") || 
-      e.includes("reanuda") || e.includes("paso inocente")) return ESTADO_COLOR.Navegando;
+  if (
+    e.includes("navegando") || e.includes("transitando") || e.includes("salio") ||
+    e.includes("entro") || e.includes("pesca") || e.includes("exploracion") ||
+    e.includes("reanuda") || e.includes("paso inocente")
+  ) return ESTADO_COLOR.Navegando;
 
-  // Cualquier otra cosa (ej: N/A, Desconocido), gris
   return ESTADO_COLOR.default;
 }
 
@@ -68,10 +63,9 @@ export default function MapaAIS() {
 
   // ── 1. Cargar ArcGIS y montar el mapa ─────────────────────────────────────
   useEffect(() => {
-    let vista; // referencia local para cleanup
+    let vista;
 
     async function init() {
-      // Carga dinámica de ArcGIS Core (ESM)
       const [
         { default: Map           },
         { default: MapView       },
@@ -96,7 +90,6 @@ export default function MapaAIS() {
         import("@arcgis/core/config.js"),
       ]);
 
-      // Vaciamos cualquier API Key residual para forzar uso libre
       esriConfig.apiKey = "";
 
       arcgisRef.current = {
@@ -108,7 +101,6 @@ export default function MapaAIS() {
       routeLayerRef.current = routeLayer;
       layerRef.current      = buqueLayer;
 
-      // FIX CLAVE: Cambiamos "arcgis/navigation" por "osm" para no requerir login
       const map = new Map({
         basemap: "osm",
         layers : [routeLayer, buqueLayer],
@@ -117,7 +109,7 @@ export default function MapaAIS() {
       vista = new MapView({
         container : mapDiv.current,
         map,
-        center : [-58.4, -34.6], // Buenos Aires por defecto
+        center : [-58.4, -34.6],
         zoom   : 6,
         ui     : { components: ["zoom", "compass"] },
         popup  : { dockEnabled: false, dockOptions: { buttonEnabled: false } },
@@ -144,18 +136,19 @@ export default function MapaAIS() {
     setError(null);
 
     try {
-      const params = new URLSearchParams();
-      if (filtro.mmsi)        params.set("mmsi",        filtro.mmsi);
-      if (filtro.nombreBuque) params.set("nombreBuque", filtro.nombreBuque);
+      const params = {};
+      if (filtro.mmsi)        params.mmsi        = filtro.mmsi;
+      if (filtro.nombreBuque) params.nombreBuque = filtro.nombreBuque;
 
-      const res  = await fetch(`${API_BASE}/mapa?${params}`);
-      if (!res.ok) throw new Error(`Error ${res.status} al consultar el mapa.`);
-      const data = await res.json();
+      const res = await apiClient.get("/viajes/mapa", { params });
+      const data = res.data;
 
       setBuques(data);
       renderizarGraficos(data);
     } catch (e) {
-      setError(e.message);
+      // axios ya maneja 401/403 automáticamente en el interceptor
+      const mensaje = e?.response?.data?.mensaje ?? e.message ?? "Error al consultar el mapa.";
+      setError(mensaje);
     } finally {
       setCargando(false);
     }
@@ -175,7 +168,6 @@ export default function MapaAIS() {
     datos.forEach(buque => {
       const [r, g, b] = colorPorEstado(buque.estadoNav);
 
-      // ── Punto actual (triángulo rotado según rumbo) ────────────────────────
       const ptActual = new Point({
         longitude: buque.longitud,
         latitude : buque.latitud,
@@ -186,7 +178,7 @@ export default function MapaAIS() {
         color    : [r, g, b, 230],
         size     : "14px",
         outline  : { color: [255, 255, 255, 200], width: 1.5 },
-        angle    : buque.rumbo ?? 0, // rotamos por CourseOverGround
+        angle    : buque.rumbo ?? 0,
       });
 
       const popup = buildPopup(buque);
@@ -197,13 +189,7 @@ export default function MapaAIS() {
         popupTemplate: popup,
       }));
 
-      // ── Línea de ruta (no dibujamos si no hay origen/destino) ─────────────
-      // Para obtener coordenadas del origen/destino necesitarías un geocoder;
-      // aquí usamos la posición actual como ancla visual de la ruta.
-      // En una implementación completa se gecodificarían Origin y Destination.
       if (buque.origen && buque.destino) {
-        // Línea punteada a modo indicativo (origen → actual → destino)
-        // Los extremos son la misma posición hasta tener geocoder.
         const rutaLine = new Polyline({
           paths: [[[buque.longitud, buque.latitud]]],
         });
@@ -255,7 +241,6 @@ export default function MapaAIS() {
       zoom  : 10,
     }, { duration: 800, easing: "ease-in-out" });
 
-    // Abrir popup sobre el graphic correspondiente
     const graphic = layerRef.current.graphics.find(
       g => g.attributes?.id === buque.id
     );
@@ -281,7 +266,6 @@ export default function MapaAIS() {
       return;
     }
     const timer = setTimeout(() => {
-      // Detectamos si parece MMSI (sólo dígitos) o nombre
       const esMmsi = /^\d+$/.test(filtroTexto.trim());
       fetchYRenderizar(
         esMmsi

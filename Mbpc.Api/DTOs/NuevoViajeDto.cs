@@ -74,9 +74,11 @@ namespace Mbpc.Api.DTOs
     /// </summary>
     public class NuevoViajeDto
     {
+        // ── NUEVO: MULTITENANT GEOGRÁFICO ──
+        public string CosteraId { get; set; } = string.Empty;
+
         // ----------------------------------------------------------------
         // CAMPOS ORIGINALES (requeridos por el SP)
-        // ----------------------------------------------------------------
 
         [Required(ErrorMessage = "El nombre del buque es requerido.")]
         [StringLength(100, MinimumLength = 2, ErrorMessage = "El nombre del buque debe tener entre 2 y 100 caracteres.")]

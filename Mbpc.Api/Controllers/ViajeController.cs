@@ -1,15 +1,18 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Mbpc.Api.Services;
 using Mbpc.Api.Models.Mongo;
 using Mbpc.Api.DTOs;
+using System.Security.Claims;
 
 namespace Mbpc.Api.Controllers
 {
     [ApiController]
     [Route("api/viajes")]
+    [Authorize]
     public class ViajesController : ControllerBase
     {
-        private readonly IViajeService            _viajeService;
+        private readonly IViajeService             _viajeService;
         private readonly ILogger<ViajesController> _logger;
 
         public ViajesController(IViajeService viajeService, ILogger<ViajesController> logger)
@@ -22,24 +25,39 @@ namespace Mbpc.Api.Controllers
 
         /// <summary>
         /// Lista paginada de posiciones activas desde MongoDB (max 200 por página).
+        /// Requiere el Claim "CosteraId" en el token para filtrado multitenant.
         /// </summary>
         [HttpGet]
         public async Task<ActionResult<List<ViajeDto>>> GetViajes(
             [FromQuery] int pagina  = 1,
             [FromQuery] int tamanio = 50)
         {
+            var costeraId = User.FindFirstValue("CosteraId");
+
+            if (string.IsNullOrWhiteSpace(costeraId))
+            {
+                _logger.LogWarning(
+                    "GetViajes rechazado: el token no contiene el Claim 'CosteraId'. Usuario: {User}",
+                    User.Identity?.Name ?? "desconocido");
+                return Forbid();
+            }
+
             if (pagina < 1) pagina = 1;
             tamanio = Math.Clamp(tamanio, 1, 200);
 
-            var posicionesMongo = await _viajeService.GetViajesAsync(pagina, tamanio);
+            _logger.LogInformation(
+                "GetViajes — CosteraId: {CosteraId} | Página: {Pagina} | Tamaño: {Tamanio}",
+                costeraId, pagina, tamanio);
+
+            var posicionesMongo = await _viajeService.GetViajesAsync(costeraId, pagina, tamanio);
 
             var viajesDto = posicionesMongo.Select(p => new ViajeDto
             {
-                Id                   = p.Id,
-                Buque                = p.VesselName ?? "DESCONOCIDO",
-                Ruta                 = $"{p.Origin ?? "Sin Origen"} ➔ {p.Destination ?? "Sin Destino"} | Pos: {Math.Round(p.Latitude, 4)}, {Math.Round(p.Longitude, 4)}",
+                Id                    = p.Id,
+                Buque                 = p.VesselName ?? "DESCONOCIDO",
+                Ruta                  = $"{p.Origin ?? "Sin Origen"} ➔ {p.Destination ?? "Sin Destino"} | Pos: {Math.Round(p.Latitude, 4)}, {Math.Round(p.Longitude, 4)}",
                 FechaInicioFormateada = p.MsgTime.ToString("dd/MM/yyyy HH:mm"),
-                EstadoActual         = p.NavegationStatusDesc ?? "N/A"
+                EstadoActual          = p.NavegationStatusDesc ?? "N/A"
             }).ToList();
 
             return Ok(viajesDto);
@@ -51,10 +69,13 @@ namespace Mbpc.Api.Controllers
         [HttpGet("{mmsi}")]
         public async Task<ActionResult<ViajePosicionMongo>> GetViajeByMmsi(string mmsi)
         {
+            var costeraId = User.FindFirstValue("CosteraId");
+            if (string.IsNullOrWhiteSpace(costeraId)) return Forbid();
+
             if (string.IsNullOrWhiteSpace(mmsi))
                 return BadRequest(new { mensaje = "El MMSI no puede estar vacío." });
 
-            var viaje = await _viajeService.GetViajeByMmsiAsync(mmsi);
+            var viaje = await _viajeService.GetViajeByMmsiAsync(mmsi, costeraId);
 
             if (viaje == null)
                 return NotFound(new { mensaje = $"No se encontró posición para el buque con MMSI {mmsi}." });
@@ -68,8 +89,20 @@ namespace Mbpc.Api.Controllers
         [HttpGet("puerto")]
         public async Task<ActionResult<List<BarcoPuertoDto>>> GetBarcosEnPuerto()
         {
-            _logger.LogInformation("Consultando barcos en puerto.");
-            var barcos = await _viajeService.GetBarcosEnPuertoAsync();
+            var costeraId = User.FindFirstValue("CosteraId");
+
+            if (string.IsNullOrWhiteSpace(costeraId))
+            {
+                _logger.LogWarning(
+                    "GetBarcosEnPuerto rechazado: el token no contiene el Claim 'CosteraId'. Usuario: {User}",
+                    User.Identity?.Name ?? "desconocido");
+                return Forbid();
+            }
+
+            _logger.LogInformation(
+                "Consultando barcos en puerto — CosteraId: {CosteraId}", costeraId);
+
+            var barcos = await _viajeService.GetBarcosEnPuertoAsync(costeraId);
             return Ok(barcos);
         }
 
@@ -86,9 +119,19 @@ namespace Mbpc.Api.Controllers
             [FromQuery] DateTime? desde     = null,
             [FromQuery] DateTime? hasta     = null)
         {
+            var costeraId = User.FindFirstValue("CosteraId");
+
+            if (string.IsNullOrWhiteSpace(costeraId))
+            {
+                _logger.LogWarning(
+                    "GetHistorico rechazado: el token no contiene el Claim 'CosteraId'. Usuario: {User}",
+                    User.Identity?.Name ?? "desconocido");
+                return Forbid();
+            }
+
             _logger.LogInformation(
-                "Búsqueda histórica — Nombre:{Nombre} OMI:{Omi} Matrícula:{Matricula}",
-                nombre, omi, matricula);
+                "Búsqueda histórica — CosteraId: {CosteraId} | Nombre:{Nombre} OMI:{Omi} Matrícula:{Matricula}",
+                costeraId, nombre, omi, matricula);
 
             var filtro = new FiltroHistoricoDto
             {
@@ -101,25 +144,36 @@ namespace Mbpc.Api.Controllers
                 Hasta     = hasta
             };
 
-            var historico = await _viajeService.GetHistoricoAsync(filtro);
+            var historico = await _viajeService.GetHistoricoAsync(filtro, costeraId);
             return Ok(historico);
         }
 
-        // ── Endpoint del Mapa AIS ───────────────────────────────────
+        // ── Endpoint del Mapa AIS ─────────────────────────────────────────────
 
         /// <summary>
         /// Retorna los puntos GeoJSON-ready para el mapa ArcGIS.
+        /// Filtra por CosteraId del token para soporte multitenant geográfico.
         /// </summary>
         [HttpGet("mapa")]
         public async Task<ActionResult<List<MapaViajeDto>>> GetMapaViajes(
             [FromQuery] string? mmsi        = null,
             [FromQuery] string? nombreBuque = null)
         {
-            _logger.LogInformation(
-                "Consulta mapa AIS — MMSI: '{Mmsi}' | Nombre: '{Nombre}'",
-                mmsi ?? "TODOS", nombreBuque ?? "TODOS");
+            var costeraId = User.FindFirstValue("CosteraId");
 
-            var puntos = await _viajeService.GetMapaViajesAsync(mmsi, nombreBuque);
+            if (string.IsNullOrWhiteSpace(costeraId))
+            {
+                _logger.LogWarning(
+                    "GetMapaViajes rechazado: el token no contiene el Claim 'CosteraId'. Usuario: {User}",
+                    User.Identity?.Name ?? "desconocido");
+                return Forbid();
+            }
+
+            _logger.LogInformation(
+                "Consulta mapa AIS — CosteraId: '{CosteraId}' | MMSI: '{Mmsi}' | Nombre: '{Nombre}'",
+                costeraId, mmsi ?? "TODOS", nombreBuque ?? "TODOS");
+
+            var puntos = await _viajeService.GetMapaViajesAsync(costeraId, mmsi, nombreBuque);
             return Ok(puntos);
         }
 
@@ -132,7 +186,19 @@ namespace Mbpc.Api.Controllers
         [HttpPost]
         public async Task<ActionResult> IniciarViaje([FromBody] NuevoViajeDto nuevoViaje)
         {
-            _logger.LogInformation("Despacho para buque: {Buque}", nuevoViaje?.NombreBuque);
+            var costeraId = User.FindFirstValue("CosteraId");
+
+            if (string.IsNullOrWhiteSpace(costeraId))
+            {
+                _logger.LogWarning(
+                    "IniciarViaje rechazado: el token no contiene el Claim 'CosteraId'. Usuario: {User}",
+                    User.Identity?.Name ?? "desconocido");
+                return Forbid();
+            }
+
+            _logger.LogInformation(
+                "Despacho para buque: {Buque} | CosteraId: {CosteraId}",
+                nuevoViaje?.NombreBuque, costeraId);
 
             if (nuevoViaje == null
                 || string.IsNullOrWhiteSpace(nuevoViaje.NombreBuque)
@@ -144,6 +210,9 @@ namespace Mbpc.Api.Controllers
                     mensaje = "Todos los campos son requeridos: NombreBuque, Origen y Destino."
                 });
             }
+
+            // Inyectamos el CosteraId
+            nuevoViaje.CosteraId = costeraId;
 
             var exito = await _viajeService.IniciarViajeAsync(nuevoViaje);
 

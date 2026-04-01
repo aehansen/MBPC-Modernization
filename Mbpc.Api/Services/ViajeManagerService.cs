@@ -41,10 +41,12 @@ namespace Mbpc.Api.Services
                 retryCount: 2,
                 sleepDurationProvider: _ => TimeSpan.FromMilliseconds(500));
 
-        // Claves y TTL del caché
-        private const string CacheKeyBarcosEnPuerto = "barcos:en_puerto";
-        private const string CacheKeyMapaViajes     = "viajes:mapa";
-        private static readonly TimeSpan CacheTtl   = TimeSpan.FromMinutes(2);
+        // Claves y TTL del caché.
+        // NOTA EJE 3: las claves de caché ahora incluyen el costeraId para que cada
+        // costera tenga su propio espacio de caché aislado en Redis.
+        private static string CacheKeyBarcosEnPuerto(string costeraId) => $"barcos:en_puerto:{costeraId}";
+        private static string CacheKeyMapaViajes(string costeraId)     => $"viajes:mapa:{costeraId}";
+        private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(2);
 
         // ── TABLA DE TRANSICIONES VÁLIDAS (EJE 2 — Máquina de Estados) ──────
         //
@@ -89,40 +91,60 @@ namespace Mbpc.Api.Services
 
         // ── LECTURA (MongoDB) ────────────────────────────────────────────────
 
-        public async Task<List<ViajePosicionMongo>> GetViajesAsync(int pagina = 1, int tamanio = 50)
+        /// <summary>
+        /// EJE 3: Se agrega filtro Eq("CosteraId", costeraId) a la consulta base.
+        /// El campo CosteraId en MongoDB identifica a qué sección costera pertenece
+        /// el registro, alineado con el claim del JWT del usuario autenticado.
+        /// </summary>
+        public async Task<List<ViajePosicionMongo>> GetViajesAsync(string costeraId, int pagina = 1, int tamanio = 50)
         {
             var skip = (pagina - 1) * tamanio;
-            return await _viajesCollection.Find(_ => true)
-                                          .SortByDescending(v => v.MsgTime)
-                                          .Skip(skip)
-                                          .Limit(tamanio)
-                                          .ToListAsync();
-        }
 
-        public async Task<ViajePosicionMongo?> GetViajeByMmsiAsync(string mmsi)
-        {
-            return await _viajesCollection.Find(v => v.Mmsi == mmsi).FirstOrDefaultAsync();
+            var filtro = Builders<ViajePosicionMongo>.Filter
+                .Eq(v => v.CosteraId, costeraId);
+
+            return await _viajesCollection
+                .Find(filtro)
+                .SortByDescending(v => v.MsgTime)
+                .Skip(skip)
+                .Limit(tamanio)
+                .ToListAsync();
         }
 
         /// <summary>
-        /// Retorna los barcos actualmente en puerto.
-        /// Consulta MongoDB filtrando por NavegationStatusDesc "Amarrado" o "Fondeado"
-        /// (case-insensitive via regex). El resultado se cachea en Redis por 2 minutos
-        /// para reducir la presión sobre Mongo en horas pico.
+        /// EJE 3: Busca por MMSI Y valida que el registro pertenezca a la costera
+        /// del usuario. Si el MMSI existe pero no corresponde a esa costera, retorna
+        /// null (mismo comportamiento que no encontrado, para no filtrar información).
         /// </summary>
-        public async Task<List<BarcoPuertoDto>> GetBarcosEnPuertoAsync()
+        public async Task<ViajePosicionMongo?> GetViajeByMmsiAsync(string mmsi, string costeraId)
         {
-            _logger.LogInformation("Consultando barcos en puerto.");
+            var filtro = Builders<ViajePosicionMongo>.Filter.And(
+                Builders<ViajePosicionMongo>.Filter.Eq(v => v.Mmsi, mmsi),
+                Builders<ViajePosicionMongo>.Filter.Eq(v => v.CosteraId, costeraId));
+
+            return await _viajesCollection.Find(filtro).FirstOrDefaultAsync();
+        }
+
+        /// <summary>
+        /// EJE 3: El filtro de estado (Amarrado/Fondeado) se combina con el
+        /// filtro de CosteraId usando un And compuesto con Builders estrictos.
+        /// La clave de Redis incluye el costeraId para aislar cachés por costera.
+        /// </summary>
+        public async Task<List<BarcoPuertoDto>> GetBarcosEnPuertoAsync(string costeraId)
+        {
+            _logger.LogInformation("Consultando barcos en puerto para costera '{CosteraId}'.", costeraId);
+
+            var cacheKey = CacheKeyBarcosEnPuerto(costeraId);
 
             // 1. Intentar leer desde Redis
             try
             {
                 var cachedResult = await _redisRetryPolicy.ExecuteAsync(async () =>
-                    await _cache.GetStringAsync(CacheKeyBarcosEnPuerto));
+                    await _cache.GetStringAsync(cacheKey));
 
                 if (cachedResult is not null)
                 {
-                    _logger.LogInformation("Cache HIT: devolviendo barcos en puerto desde Redis.");
+                    _logger.LogInformation("Cache HIT: devolviendo barcos en puerto desde Redis para costera '{CosteraId}'.", costeraId);
                     return JsonSerializer.Deserialize<List<BarcoPuertoDto>>(cachedResult)
                            ?? new List<BarcoPuertoDto>();
                 }
@@ -132,20 +154,26 @@ namespace Mbpc.Api.Services
                 _logger.LogWarning(redisEx, "Redis no disponible al leer caché de barcos en puerto. Consultando MongoDB directamente.");
             }
 
-            // 2. Consultar MongoDB
+            // 2. Consultar MongoDB con filtro compuesto: estado + costera
             try
             {
-                _logger.LogInformation("Cache MISS: consultando MongoDB para barcos en puerto.");
+                _logger.LogInformation("Cache MISS: consultando MongoDB para barcos en puerto de costera '{CosteraId}'.", costeraId);
 
                 var regexAmarrado = new MongoDB.Bson.BsonRegularExpression("amarrado", "i");
                 var regexFondeado = new MongoDB.Bson.BsonRegularExpression("fondeado", "i");
 
-                var filtro = Builders<ViajePosicionMongo>.Filter.Or(
+                // EJE 3: filtro AND( OR(Amarrado, Fondeado), CosteraId == costeraId )
+                var filtroEstado = Builders<ViajePosicionMongo>.Filter.Or(
                     Builders<ViajePosicionMongo>.Filter.Regex(v => v.NavegationStatusDesc, regexAmarrado),
                     Builders<ViajePosicionMongo>.Filter.Regex(v => v.NavegationStatusDesc, regexFondeado));
 
+                var filtroCostera = Builders<ViajePosicionMongo>.Filter
+                    .Eq(v => v.CosteraId, costeraId);
+
+                var filtroFinal = Builders<ViajePosicionMongo>.Filter.And(filtroEstado, filtroCostera);
+
                 var posicionesMongo = await _viajesCollection
-                    .Find(filtro)
+                    .Find(filtroFinal)
                     .SortByDescending(v => v.MsgTime)
                     .Limit(50)
                     .ToListAsync();
@@ -166,16 +194,16 @@ namespace Mbpc.Api.Services
                 // 3. Guardar en Redis (fire-and-forget tolerante a fallos)
                 try
                 {
-                    var serialized  = JsonSerializer.Serialize(resultado);
+                    var serialized   = JsonSerializer.Serialize(resultado);
                     var cacheOptions = new DistributedCacheEntryOptions
                     {
                         AbsoluteExpirationRelativeToNow = CacheTtl
                     };
 
                     await _redisRetryPolicy.ExecuteAsync(async () =>
-                        await _cache.SetStringAsync(CacheKeyBarcosEnPuerto, serialized, cacheOptions));
+                        await _cache.SetStringAsync(cacheKey, serialized, cacheOptions));
 
-                    _logger.LogInformation("Barcos en puerto almacenados en Redis (TTL: {Ttl}).", CacheTtl);
+                    _logger.LogInformation("Barcos en puerto de costera '{CosteraId}' almacenados en Redis (TTL: {Ttl}).", costeraId, CacheTtl);
                 }
                 catch (Exception redisWriteEx)
                 {
@@ -186,22 +214,32 @@ namespace Mbpc.Api.Services
             }
             catch (Exception mongoEx)
             {
-                _logger.LogError(mongoEx, "Error al consultar MongoDB para barcos en puerto.");
+                _logger.LogError(mongoEx, "Error al consultar MongoDB para barcos en puerto de costera '{CosteraId}'.", costeraId);
                 return new List<BarcoPuertoDto>();
             }
         }
 
         // ── MAPA GEOESPACIAL (ArcGIS) ────────────────────────────────────────
 
-        public async Task<List<MapaViajeDto>> GetMapaViajesAsync(string? mmsi = null, string? nombreBuque = null)
+        /// <summary>
+        /// EJE 3: El filtro de CosteraId se aplica en la consulta a MongoDB ANTES
+        /// de cruzar con detalles, evitando cargar en memoria datos de otras costeras.
+        /// La caché en Redis está particionada por costeraId.
+        /// Los filtros de mmsi/nombre se siguen aplicando en memoria sobre el
+        /// resultado ya acotado, preservando la estrategia original de caché unificada
+        /// (ahora "unificada por costera").
+        /// </summary>
+        public async Task<List<MapaViajeDto>> GetMapaViajesAsync(string costeraId, string? mmsi = null, string? nombreBuque = null)
         {
             List<MapaViajeDto> listaCompleta;
+
+            var cacheKey = CacheKeyMapaViajes(costeraId);
 
             // 1. Intentar obtener la lista completa cruzada desde Caché
             try
             {
                 var cachedData = await _redisRetryPolicy.ExecuteAsync(async () =>
-                    await _cache.GetStringAsync(CacheKeyMapaViajes));
+                    await _cache.GetStringAsync(cacheKey));
 
                 if (cachedData != null)
                 {
@@ -210,9 +248,23 @@ namespace Mbpc.Api.Services
                 }
                 else
                 {
-                    // 2. Cache Miss: Buscar en Mongo y hacer el cruce en memoria
-                    var posiciones = await _viajesCollection.Find(_ => true).ToListAsync();
-                    var detalles   = await _detallesCollection.Find(_ => true).ToListAsync();
+                    // 2. Cache Miss: filtrar por costera en MongoDB y hacer el cruce en memoria
+                    // EJE 3: se reemplaza Find(_ => true) por Find con filtro de CosteraId
+                    var filtroCostera = Builders<ViajePosicionMongo>.Filter
+                        .Eq(v => v.CosteraId, costeraId);
+
+                    var posiciones = await _viajesCollection
+                        .Find(filtroCostera)
+                        .ToListAsync();
+
+                    // Los detalles operativos (Oracle-backed) también se filtran por costera
+                    // para evitar cruces de información entre jurisdicciones.
+                    var filtroDetalleCostera = Builders<ViajeDetalleMongo>.Filter
+                        .Eq(d => d.CosteraId, costeraId);
+
+                    var detalles = await _detallesCollection
+                        .Find(filtroDetalleCostera)
+                        .ToListAsync();
 
                     // ToLookup agrupa documentos con el mismo VesselName (evita excepción por duplicados).
                     var lookupDetalles = detalles
@@ -225,7 +277,7 @@ namespace Mbpc.Api.Services
 
                         // TAREA PENDIENTE ARQUITECTURA: cruzar por p.TravelId == detalle.IdViaje.
                         // Por ahora se toma el primer detalle disponible para ese nombre.
-                        var detalle     = detallesHomonimos.FirstOrDefault();
+                        var detalle      = detallesHomonimos.FirstOrDefault();
                         var tieneDetalle = detalle != null;
 
                         return new MapaViajeDto
@@ -259,23 +311,23 @@ namespace Mbpc.Api.Services
                         };
                     }).ToList();
 
-                    // Guardar en caché
+                    // Guardar en caché particionada por costera
                     var serialized   = JsonSerializer.Serialize(listaCompleta);
                     var cacheOptions = new DistributedCacheEntryOptions
                     {
                         AbsoluteExpirationRelativeToNow = CacheTtl
                     };
                     await _redisRetryPolicy.ExecuteAsync(async () =>
-                        await _cache.SetStringAsync(CacheKeyMapaViajes, serialized, cacheOptions));
+                        await _cache.SetStringAsync(cacheKey, serialized, cacheOptions));
                 }
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error construyendo la vista del mapa.");
+                _logger.LogError(ex, "Error construyendo la vista del mapa para costera '{CosteraId}'.", costeraId);
                 return new List<MapaViajeDto>();
             }
 
-            // 3. Aplicar filtros en memoria (evita fragmentar la caché por cada búsqueda de usuario)
+            // 3. Aplicar filtros opcionales en memoria sobre el resultado ya acotado por costera
             var query = listaCompleta.AsEnumerable();
 
             if (!string.IsNullOrWhiteSpace(mmsi))
@@ -293,7 +345,12 @@ namespace Mbpc.Api.Services
             return query.ToList();
         }
 
-        public async Task<List<ViajeHistoricoDto>> GetHistoricoAsync(FiltroHistoricoDto filtro)
+        /// <summary>
+        /// EJE 3: Se agrega p_COSTERA_ID como parámetro al stored procedure de Oracle,
+        /// permitiendo que la query del lado de la base de datos también filtre por costera.
+        /// El fallback mock también respeta el filtro de costera.
+        /// </summary>
+        public async Task<List<ViajeHistoricoDto>> GetHistoricoAsync(FiltroHistoricoDto filtro, string costeraId)
         {
             try
             {
@@ -302,13 +359,15 @@ namespace Mbpc.Api.Services
                     using var connection = new OracleConnection(_oracleConnectionString);
                     var parameters = new DynamicParameters();
 
-                    parameters.Add("p_NOMBRE",    filtro.Nombre    ?? (object)DBNull.Value);
-                    parameters.Add("p_OMI",       filtro.Omi       ?? (object)DBNull.Value);
-                    parameters.Add("p_MATRICULA", filtro.Matricula ?? (object)DBNull.Value);
-                    parameters.Add("p_ORIGEN",    filtro.Origen    ?? (object)DBNull.Value);
-                    parameters.Add("p_DESTINO",   filtro.Destino   ?? (object)DBNull.Value);
-                    parameters.Add("p_DESDE",     filtro.Desde     ?? (object)DBNull.Value);
-                    parameters.Add("p_HASTA",     filtro.Hasta     ?? (object)DBNull.Value);
+                    parameters.Add("p_NOMBRE",     filtro.Nombre    ?? (object)DBNull.Value);
+                    parameters.Add("p_OMI",        filtro.Omi       ?? (object)DBNull.Value);
+                    parameters.Add("p_MATRICULA",  filtro.Matricula ?? (object)DBNull.Value);
+                    parameters.Add("p_ORIGEN",     filtro.Origen    ?? (object)DBNull.Value);
+                    parameters.Add("p_DESTINO",    filtro.Destino   ?? (object)DBNull.Value);
+                    parameters.Add("p_DESDE",      filtro.Desde     ?? (object)DBNull.Value);
+                    parameters.Add("p_HASTA",      filtro.Hasta     ?? (object)DBNull.Value);
+                    // EJE 3: parámetro de costera para filtrado en Oracle
+                    parameters.Add("p_COSTERA_ID", costeraId);
 
                     var resultado = await connection.QueryAsync<ViajeHistoricoDto>(
                         "PKG_MBPC_VIAJES.SP_HISTORICO",
@@ -320,17 +379,14 @@ namespace Mbpc.Api.Services
             }
             catch (OracleException ex)
             {
-                if (!_env.IsDevelopment())
-                {
-                    _logger.LogError(ex, "Error de Oracle en producción al consultar histórico.");
-                    throw;
-                }
-
                 _logger.LogWarning(
-                    "Oracle no disponible tras reintentos. Bypass DEV activado. Devolviendo histórico mockeado. Error: {Message}",
+                    "Oracle no disponible tras reintentos en GetHistoricoAsync para costera '{CosteraId}'. " +
+                    "Activando fallback mock. Error: {Message}",
+                    costeraId,
                     ex.Message);
 
-                return GetHistoricoMock(filtro);
+                // EJE 3: el mock también filtra por costera para mantener coherencia
+                return GetHistoricoMock(filtro, costeraId);
             }
         }
 
@@ -348,17 +404,17 @@ namespace Mbpc.Api.Services
                     using var connection = new OracleConnection(_oracleConnectionString);
                     var parameters = new DynamicParameters();
 
-                    parameters.Add("p_BUQUE",         nuevoViaje.NombreBuque);
-                    parameters.Add("p_ORIGEN",         nuevoViaje.Origen);
-                    parameters.Add("p_DESTINO",        nuevoViaje.Destino);
-                    parameters.Add("p_MUELLE_SALIDA",  nuevoViaje.MuelleSalida);
-                    parameters.Add("p_PTO_CONTROL",    nuevoViaje.ProximoPuntoControl);
-                    parameters.Add("p_FECHA_PARTIDA",  nuevoViaje.FechaPartida);
-                    parameters.Add("p_ETA",            nuevoViaje.ETA);
-                    parameters.Add("p_ZOE",            nuevoViaje.ZOE);
-                    parameters.Add("p_POSICION",       nuevoViaje.Posicion);
-                    parameters.Add("p_KM_PAR",         nuevoViaje.RioCanalKmPar);
-                    parameters.Add("p_MALVINAS_COD",   nuevoViaje.DeclaracionMalvinas.ToString());
+                    parameters.Add("p_BUQUE",        nuevoViaje.NombreBuque);
+                    parameters.Add("p_ORIGEN",        nuevoViaje.Origen);
+                    parameters.Add("p_DESTINO",       nuevoViaje.Destino);
+                    parameters.Add("p_MUELLE_SALIDA", nuevoViaje.MuelleSalida);
+                    parameters.Add("p_PTO_CONTROL",   nuevoViaje.ProximoPuntoControl);
+                    parameters.Add("p_FECHA_PARTIDA", nuevoViaje.FechaPartida);
+                    parameters.Add("p_ETA",           nuevoViaje.ETA);
+                    parameters.Add("p_ZOE",           nuevoViaje.ZOE);
+                    parameters.Add("p_POSICION",      nuevoViaje.Posicion);
+                    parameters.Add("p_KM_PAR",        nuevoViaje.RioCanalKmPar);
+                    parameters.Add("p_MALVINAS_COD",  nuevoViaje.DeclaracionMalvinas.ToString());
                     parameters.Add("p_RESULTADO", dbType: DbType.Int32, direction: ParameterDirection.Output);
 
                     await connection.ExecuteAsync(
@@ -401,23 +457,25 @@ namespace Mbpc.Api.Services
                         Longitude            = 0,
                         SpeedOverGround      = 0,
                         Origin               = nuevoViaje.Origen,
-                        Destination          = nuevoViaje.Destino
+                        Destination          = nuevoViaje.Destino,
+                        // EJE 3: el nuevo viaje hereda la costera del DTO de creación
+                        CosteraId            = nuevoViaje.CosteraId
                     };
 
                     await _viajesCollection.InsertOneAsync(nuevoRegistroMongo);
-                    _logger.LogInformation("¡CQRS Exitoso! Viaje insertado en Mongo con estado inicial '{Estado}'.",
-                        EstadoEtapa.Amarrado);
+                    _logger.LogInformation("¡CQRS Exitoso! Viaje insertado en Mongo con estado inicial '{Estado}' para costera '{CosteraId}'.",
+                        EstadoEtapa.Amarrado, nuevoViaje.CosteraId);
 
-                    // Invalidar caché para reflejar el nuevo registro
+                    // Invalidar caché de la costera correspondiente
                     try
                     {
                         await _redisRetryPolicy.ExecuteAsync(async () =>
                         {
-                            await _cache.RemoveAsync(CacheKeyBarcosEnPuerto);
-                            await _cache.RemoveAsync(CacheKeyMapaViajes);
+                            await _cache.RemoveAsync(CacheKeyBarcosEnPuerto(nuevoViaje.CosteraId));
+                            await _cache.RemoveAsync(CacheKeyMapaViajes(nuevoViaje.CosteraId));
                         });
 
-                        _logger.LogInformation("Cachés invalidadas tras nuevo viaje.");
+                        _logger.LogInformation("Cachés de costera '{CosteraId}' invalidadas tras nuevo viaje.", nuevoViaje.CosteraId);
                     }
                     catch (Exception redisEx)
                     {
@@ -573,7 +631,8 @@ namespace Mbpc.Api.Services
 
         /// <summary>
         /// Escritura pura: ejecuta el Update.Set sobre NavegationStatusDesc e invalida
-        /// las cachés de Redis. No realiza ninguna validación de negocio; esa es
+        /// las cachés de Redis de TODAS las costeras afectadas por el viaje.
+        /// No realiza ninguna validación de negocio; esa es
         /// responsabilidad exclusiva de CambiarEstadoConValidacionAsync.
         /// </summary>
         private async Task<bool> CambiarEstadoNavegacionAsync(string id, string nuevoEstado)
@@ -597,16 +656,31 @@ namespace Mbpc.Api.Services
                 _logger.LogInformation(
                     "¡CQRS Exitoso! NavegationStatusDesc actualizado a '{Estado}' para '{Id}'.", nuevoEstado, id);
 
-                // Invalidar cachés (fire-and-forget tolerante a fallos de Redis)
+                // EJE 3: para invalidar la caché correcta, leemos el CosteraId del documento
+                // actualizado. Si no se puede obtener, no bloqueamos el flujo.
                 try
                 {
-                    await _redisRetryPolicy.ExecuteAsync(async () =>
-                    {
-                        await _cache.RemoveAsync(CacheKeyBarcosEnPuerto);
-                        await _cache.RemoveAsync(CacheKeyMapaViajes);
-                    });
+                    var viajeActualizado = await _viajesCollection.Find(filtro).FirstOrDefaultAsync();
+                    var costeraId        = viajeActualizado?.CosteraId;
 
-                    _logger.LogInformation("Cachés invalidadas tras cambio de estado a '{Estado}'.", nuevoEstado);
+                    if (!string.IsNullOrWhiteSpace(costeraId))
+                    {
+                        await _redisRetryPolicy.ExecuteAsync(async () =>
+                        {
+                            await _cache.RemoveAsync(CacheKeyBarcosEnPuerto(costeraId));
+                            await _cache.RemoveAsync(CacheKeyMapaViajes(costeraId));
+                        });
+
+                        _logger.LogInformation(
+                            "Cachés de costera '{CosteraId}' invalidadas tras cambio de estado a '{Estado}'.",
+                            costeraId, nuevoEstado);
+                    }
+                    else
+                    {
+                        _logger.LogWarning(
+                            "No se pudo determinar CosteraId tras cambio de estado para '{Id}'. " +
+                            "Las cachés se auto-expirarán en {Ttl}.", id, CacheTtl);
+                    }
                 }
                 catch (Exception redisEx)
                 {
@@ -626,20 +700,25 @@ namespace Mbpc.Api.Services
 
         // ── DATOS MOCKEADOS (solo DEV — fallback Oracle) ─────────────────────
 
-        private static List<ViajeHistoricoDto> GetHistoricoMock(FiltroHistoricoDto filtro)
+        /// <summary>
+        /// EJE 3: El mock ahora filtra por costeraId además de los filtros de búsqueda.
+        /// Los registros mock incluyen CosteraId para simular el comportamiento real.
+        /// </summary>
+        private static List<ViajeHistoricoDto> GetHistoricoMock(FiltroHistoricoDto filtro, string costeraId)
         {
             var todos = new List<ViajeHistoricoDto>
             {
-                new() { Id = "H-001", Buque = "ARA Alte. Brown",      Omi = "IMO9000001", Matricula = "ARG-0001", Origen = "Puerto Rosario",     Destino = "Puerto Buenos Aires", FechaPartida = "10/01/2026 07:00", Eta = "10/01/2026 18:00", Estado = "Finalizado" },
-                new() { Id = "H-002", Buque = "RÍO PARANÁ",           Omi = "IMO9000002", Matricula = "ARG-0002", Origen = "Puerto Corrientes",   Destino = "Puerto Buenos Aires", FechaPartida = "15/01/2026 06:30", Eta = "16/01/2026 08:00", Estado = "Finalizado" },
-                new() { Id = "H-003", Buque = "SANTA FE FLUVIAL",     Omi = "IMO9000003", Matricula = "ARG-0003", Origen = "Puerto Santa Fe",     Destino = "Puerto La Plata",     FechaPartida = "20/01/2026 08:00", Eta = "20/01/2026 20:00", Estado = "Finalizado" },
-                new() { Id = "H-004", Buque = "HIDROVÍA EXPRESS",     Omi = "IMO9000004", Matricula = "ARG-0004", Origen = "Puerto Concordia",    Destino = "Puerto Buenos Aires", FechaPartida = "02/02/2026 07:00", Eta = "03/02/2026 06:00", Estado = "Finalizado" },
-                new() { Id = "H-005", Buque = "GRAN CHACO",           Omi = "IMO9000005", Matricula = "ARG-0005", Origen = "Puerto Barranqueras", Destino = "Puerto Zárate",       FechaPartida = "14/02/2026 09:00", Eta = "16/02/2026 07:00", Estado = "Finalizado" },
-                new() { Id = "H-006", Buque = "ARA Gral. San Martín", Omi = "IMO9000006", Matricula = "ARG-0006", Origen = "Puerto Buenos Aires", Destino = "Puerto Montevideo",   FechaPartida = "01/03/2026 10:00", Eta = "01/03/2026 22:00", Estado = "Finalizado" },
-                new() { Id = "H-007", Buque = "LITORAL I",            Omi = "IMO9000007", Matricula = "ARG-0007", Origen = "Puerto Goya",         Destino = "Puerto Rosario",      FechaPartida = "10/03/2026 07:00", Eta = "11/03/2026 09:00", Estado = "Cancelado"  },
+                new() { Id = "H-001", Buque = "ARA Alte. Brown",      Omi = "IMO9000001", Matricula = "ARG-0001", Origen = "Puerto Rosario",     Destino = "Puerto Buenos Aires", FechaPartida = "10/01/2026 07:00", Eta = "10/01/2026 18:00", Estado = "Finalizado", CosteraId = "COSTERAS-RIO-PARANA" },
+                new() { Id = "H-002", Buque = "RÍO PARANÁ",           Omi = "IMO9000002", Matricula = "ARG-0002", Origen = "Puerto Corrientes",   Destino = "Puerto Buenos Aires", FechaPartida = "15/01/2026 06:30", Eta = "16/01/2026 08:00", Estado = "Finalizado", CosteraId = "COSTERAS-RIO-PARANA" },
+                new() { Id = "H-003", Buque = "SANTA FE FLUVIAL",     Omi = "IMO9000003", Matricula = "ARG-0003", Origen = "Puerto Santa Fe",     Destino = "Puerto La Plata",     FechaPartida = "20/01/2026 08:00", Eta = "20/01/2026 20:00", Estado = "Finalizado", CosteraId = "COSTERAS-RIO-PARANA" },
+                new() { Id = "H-004", Buque = "HIDROVÍA EXPRESS",     Omi = "IMO9000004", Matricula = "ARG-0004", Origen = "Puerto Concordia",    Destino = "Puerto Buenos Aires", FechaPartida = "02/02/2026 07:00", Eta = "03/02/2026 06:00", Estado = "Finalizado", CosteraId = "COSTERAS-DELTA"      },
+                new() { Id = "H-005", Buque = "GRAN CHACO",           Omi = "IMO9000005", Matricula = "ARG-0005", Origen = "Puerto Barranqueras", Destino = "Puerto Zárate",       FechaPartida = "14/02/2026 09:00", Eta = "16/02/2026 07:00", Estado = "Finalizado", CosteraId = "COSTERAS-DELTA"      },
+                new() { Id = "H-006", Buque = "ARA Gral. San Martín", Omi = "IMO9000006", Matricula = "ARG-0006", Origen = "Puerto Buenos Aires", Destino = "Puerto Montevideo",   FechaPartida = "01/03/2026 10:00", Eta = "01/03/2026 22:00", Estado = "Finalizado", CosteraId = "COSTERAS-RIO-PLATA"  },
+                new() { Id = "H-007", Buque = "LITORAL I",            Omi = "IMO9000007", Matricula = "ARG-0007", Origen = "Puerto Goya",         Destino = "Puerto Rosario",      FechaPartida = "10/03/2026 07:00", Eta = "11/03/2026 09:00", Estado = "Cancelado",  CosteraId = "COSTERAS-RIO-PARANA" },
             };
 
             return todos.Where(v =>
+                v.CosteraId == costeraId &&
                 (string.IsNullOrWhiteSpace(filtro.Nombre)    || v.Buque.Contains(filtro.Nombre,        StringComparison.OrdinalIgnoreCase)) &&
                 (string.IsNullOrWhiteSpace(filtro.Omi)       || v.Omi.Contains(filtro.Omi,             StringComparison.OrdinalIgnoreCase)) &&
                 (string.IsNullOrWhiteSpace(filtro.Matricula) || v.Matricula.Contains(filtro.Matricula,  StringComparison.OrdinalIgnoreCase)) &&

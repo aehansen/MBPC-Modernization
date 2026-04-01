@@ -1,7 +1,10 @@
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Options;
+using Microsoft.IdentityModel.Tokens;
 using MongoDB.Driver;
 using Mbpc.Api.Models.Config;
 using Mbpc.Api.Services;
+using System.Text;
 using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -20,7 +23,32 @@ builder.Services.AddControllers()
 builder.Services.AddDistributedMemoryCache();
 builder.Services.AddMemoryCache();
 builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
+builder.Services.AddSwaggerGen(options =>
+{
+    options.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+    {
+        Name         = "Authorization",
+        Type         = Microsoft.OpenApi.Models.SecuritySchemeType.Http,
+        Scheme       = "Bearer",
+        BearerFormat = "JWT",
+        In           = Microsoft.OpenApi.Models.ParameterLocation.Header,
+        Description  = "Ingresá el token JWT. Ejemplo: Bearer {token}"
+    });
+    options.AddSecurityRequirement(new Microsoft.OpenApi.Models.OpenApiSecurityRequirement
+    {
+        {
+            new Microsoft.OpenApi.Models.OpenApiSecurityScheme
+            {
+                Reference = new Microsoft.OpenApi.Models.OpenApiReference
+                {
+                    Type = Microsoft.OpenApi.Models.ReferenceType.SecurityScheme,
+                    Id   = "Bearer"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
+});
 
 // ── MongoDB ─────────────────────────────────────────────────────────────────
 builder.Services.Configure<MongoDbSettings>(
@@ -36,6 +64,40 @@ builder.Services.AddSingleton<IMongoClient>(sp =>
 // ── Oracle ──────────────────────────────────────────────────────────────────
 builder.Services.Configure<OracleDbSettings>(
     builder.Configuration.GetSection("OracleDbSettings"));
+
+// ── JWT ──────────────────────────────────────────────────────────────────────
+// Leemos la sección JwtSettings desde appsettings.json.
+// La SigningKey se convierte a bytes y se usa para validar la firma HMAC-SHA256.
+var jwtSection  = builder.Configuration.GetSection("JwtSettings");
+var secretKey   = jwtSection["SecretKey"]   ?? throw new InvalidOperationException("JwtSettings:SecretKey no está configurada.");
+var issuer      = jwtSection["Issuer"]      ?? throw new InvalidOperationException("JwtSettings:Issuer no está configurado.");
+var audience    = jwtSection["Audience"]    ?? throw new InvalidOperationException("JwtSettings:Audience no está configurado.");
+
+var signingKey  = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey));
+
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme    = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(options =>
+{
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuer           = true,
+        ValidateAudience         = true,
+        ValidateLifetime         = true,
+        ValidateIssuerSigningKey = true,
+        ValidIssuer              = issuer,
+        ValidAudience            = audience,
+        IssuerSigningKey         = signingKey,
+        // Tolerancia cero de desvío de reloj en producción; en desarrollo podés
+        // relajarlo con ClockSkew = TimeSpan.FromMinutes(1).
+        ClockSkew                = TimeSpan.Zero
+    };
+});
+
+builder.Services.AddAuthorization();
 
 // ── Servicios de negocio ─────────────────────────────────────────────────────
 // Scoped (por request) para evitar problemas si en el futuro se agrega
@@ -76,7 +138,7 @@ app.UseExceptionHandler(errApp =>
         var feature = context.Features
             .Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>();
 
-        var error = feature?.Error;
+        var error  = feature?.Error;
         var logger = context.RequestServices
             .GetRequiredService<ILogger<Program>>();
 
@@ -91,7 +153,7 @@ app.UseExceptionHandler(errApp =>
     });
 });
 
-// CORS debe ir antes de Authorization
+// CORS debe ir antes de Authentication/Authorization
 app.UseCors("AllowFrontend");
 
 if (app.Environment.IsDevelopment())
@@ -103,6 +165,9 @@ if (app.Environment.IsDevelopment())
 // Habilitar para producción cuando se configure HTTPS
 // app.UseHttpsRedirection();
 
+// ⚠️ Orden crítico: Authentication SIEMPRE antes de Authorization
+app.UseAuthentication();
 app.UseAuthorization();
+
 app.MapControllers();
 app.Run();

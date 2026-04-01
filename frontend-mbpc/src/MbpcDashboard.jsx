@@ -1,4 +1,11 @@
-// MbpcDashboard.jsx - VERSIÓN MODERNIZADA v0.7.0
+// MbpcDashboard.jsx - VERSIÓN MODERNIZADA v0.7.1
+// Cambios v0.7.1:
+//   REFACTOR — Se eliminó la instancia local de Axios y la constante API_BASE_URL.
+//              Todas las peticiones HTTP ahora se canalizan a través del cliente
+//              centralizado (axiosClient.js), que inyecta el JWT automáticamente
+//              y redirige al login en respuestas 401/403.
+//              · viajesApi  → getViajes, getBarcosEnPuerto, getHistorico, iniciarViaje
+//              · apiClient  → rutas de /carga/* (no tienen helper propio en el cliente)
 // Cambios v0.7.0:
 //   REFACTOR — Se eliminaron los botones Zarpar/Amarrar/Fondear en línea de la tabla.
 //              La columna Acciones conserva SOLO el botón "Ver Cargas".
@@ -9,17 +16,14 @@
 //   para alternar entre la vista de Grilla (Dashboard) y el Mapa Geoespacial.
 
 import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+// ── CLIENTE CENTRALIZADO ─────────────────────────────────────────────────────
+// apiClient → instancia base de Axios con JWT y baseURL configurados.
+// viajesApi → helpers tipados para el dominio de viajes.
+// (Las rutas de /carga/* no tienen helper en axiosClient, se usan via apiClient)
+import apiClient, { viajesApi } from './axiosClient';
+
 import MapaAIS from './MapaAIS';
 import ControlesEstadoBuque from './ControlesEstadoBuque';
-
-// Configuración API
-const API_BASE_URL = 'http://localhost:5009/api';
-
-const api = axios.create({
-    baseURL: API_BASE_URL,
-    headers: { 'Content-Type': 'application/json' }
-});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DATOS DEL ENUM DeclaracionMalvinasEnum — mapeados 1:1 al C#
@@ -213,13 +217,18 @@ const MbpcDashboard = () => {
     }, [selectedViajeId, viajes]);
 
     // ── LLAMADAS API ────────────────────────────────────────────────────────────
+
     const fetchViajes = async () => {
         setLoading(prev => ({ ...prev, viajes: true }));
         setError(null);
         try {
-            const response = await api.get(`/viajes?pagina=${paginaActual}&tamanio=${tamanioPagina}`);
+            // viajesApi.getViajes() encapsula GET /viajes con paginación.
+            // El interceptor del cliente inyecta el JWT automáticamente.
+            const response = await viajesApi.getViajes({ pagina: paginaActual, tamanio: tamanioPagina });
             setViajes(response.data);
         } catch (err) {
+            // El interceptor ya maneja los 401/403 redirigiendo al login.
+            // Aquí solo mostramos errores de red u otros fallos inesperados.
             console.error("Error fetching viajes:", err);
             setError("No se pudo conectar con el servicio de MBPC. Verifique que el Backend esté corriendo.");
         } finally {
@@ -230,7 +239,8 @@ const MbpcDashboard = () => {
     const fetchCargas = async (viajeId) => {
         setLoading(prev => ({ ...prev, cargas: true }));
         try {
-            const response = await api.get(`/carga/viaje/${viajeId}`);
+            // /carga/* no tiene helper propio en axiosClient → se usa apiClient directamente.
+            const response = await apiClient.get(`/carga/viaje/${viajeId}`);
             setCargas(response.data);
         } catch (err) {
             console.error("Error fetching cargas:", err);
@@ -312,7 +322,8 @@ const MbpcDashboard = () => {
                 default:
                     url = `/carga/${cargaIdSeguro}/fondear?zonaFondeo=Zona_General`;
             }
-            await api.put(url);
+            // /carga/* no tiene helper → apiClient con JWT ya inyectado por el interceptor.
+            await apiClient.put(url);
             await fetchCargas(selectedViajeId);
             cerrarModal();
         } catch (err) {
@@ -379,7 +390,8 @@ const MbpcDashboard = () => {
                 rioCanalKmPar:        nuevoViajeForm.rioCanalKmPar ? parseFloat(nuevoViajeForm.rioCanalKmPar) : null,
                 declaracionMalvinas:  nuevoViajeForm.declaracionMalvinas,
             };
-            await api.post('/viajes', payload);
+            // viajesApi.iniciarViaje() encapsula POST /viajes.
+            await viajesApi.iniciarViaje(payload);
             await fetchViajes();
             cerrarNuevoViaje();
         } catch (err) {
@@ -394,7 +406,8 @@ const MbpcDashboard = () => {
     const abrirModalPuerto = async () => {
         setModalPuerto({ show: true, loading: true, datos: [] });
         try {
-            const response = await api.get('/viajes/puerto');
+            // viajesApi.getBarcosEnPuerto() encapsula GET /viajes/en-puerto.
+            const response = await viajesApi.getBarcosEnPuerto();
             setModalPuerto({ show: true, loading: false, datos: response.data });
         } catch (err) {
             console.error("Error fetching barcos en puerto:", err);
@@ -422,15 +435,13 @@ const MbpcDashboard = () => {
     const buscarHistorico = async () => {
         setModalHistorico(prev => ({ ...prev, loading: true }));
         try {
-            const params = new URLSearchParams();
-            if (filtroHistorico.nombre)    params.append('nombre',    filtroHistorico.nombre);
-            if (filtroHistorico.omi)       params.append('omi',       filtroHistorico.omi);
-            if (filtroHistorico.matricula) params.append('matricula', filtroHistorico.matricula);
-            if (filtroHistorico.origen)    params.append('origen',    filtroHistorico.origen);
-            if (filtroHistorico.destino)   params.append('destino',   filtroHistorico.destino);
-            if (filtroHistorico.desde)     params.append('desde',     filtroHistorico.desde);
-            if (filtroHistorico.hasta)     params.append('hasta',     filtroHistorico.hasta);
-            const response = await api.get(`/viajes/historico?${params.toString()}`);
+            // viajesApi.getHistorico() encapsula GET /viajes/historico con params.
+            // El cliente construye internamente los query params desde el objeto filtro.
+            // Solo enviamos los campos con valor para no contaminar el SP de Oracle.
+            const filtroActivo = Object.fromEntries(
+                Object.entries(filtroHistorico).filter(([, v]) => v !== '')
+            );
+            const response = await viajesApi.getHistorico(filtroActivo);
             setModalHistorico(prev => ({ ...prev, loading: false, resultados: response.data, buscado: true }));
         } catch (err) {
             console.error("Error fetching histórico:", err);
@@ -455,7 +466,8 @@ const MbpcDashboard = () => {
         try {
             const idSeguro     = encodeURIComponent(modalAmarrarGlobal.barcazaId.trim());
             const muelleSeguro = encodeURIComponent(modalAmarrarGlobal.lugarAmarre.trim());
-            await api.put(`/carga/${idSeguro}/amarrar?nuevoMuelle=${muelleSeguro}`);
+            // /carga/* no tiene helper → apiClient con JWT inyectado por el interceptor.
+            await apiClient.put(`/carga/${idSeguro}/amarrar?nuevoMuelle=${muelleSeguro}`);
             cerrarAmarrarGlobal();
             if (selectedViajeId) await fetchCargas(selectedViajeId);
             alert(`Barcaza "${modalAmarrarGlobal.barcazaId}" amarrada exitosamente en "${modalAmarrarGlobal.lugarAmarre}".`);
@@ -504,7 +516,8 @@ const MbpcDashboard = () => {
                 tipo:     nuevaCargaForm.tipo,
                 tonelaje: parseFloat(nuevaCargaForm.tonelaje),
             };
-            await api.post(`/carga/viaje/${encodeURIComponent(nombreBuque)}`, payload);
+            // /carga/* no tiene helper → apiClient con JWT inyectado por el interceptor.
+            await apiClient.post(`/carga/viaje/${encodeURIComponent(nombreBuque)}`, payload);
             await fetchCargas(selectedViajeId);
             cerrarModalNuevaCarga();
         } catch (err) {
@@ -835,7 +848,7 @@ const MbpcDashboard = () => {
                                                                 <div className="flex gap-2">
                                                                     <button
                                                                         onClick={() => abrirModalAccion(carga, 'amarrar_buque')}
-                                                                        className="flex-1 text-center bg-[#104a8e] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#002454] transition disabled:opacity-50"
+                                                                        className="flex-1 text-center bg-[#104a8e] text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-[#002454] disabled:opacity-50"
                                                                         disabled={!!carga.muelleActual}
                                                                     >
                                                                         Amarrar
@@ -865,7 +878,7 @@ const MbpcDashboard = () => {
             {vistaActual === 'dashboard' && (
                 <footer className="border-t mt-12 p-6 bg-white text-center text-xs text-gray-400">
                     <p>&copy; 2026 Prefectura Naval Argentina - Dirección de Informática y Comunicaciones.</p>
-                    <p className="mt-1">Sistema de Gestión de Tráfico Marítimo (MBPC) - Módulo de Modernización - v0.7.0</p>
+                    <p className="mt-1">Sistema de Gestión de Tráfico Marítimo (MBPC) - Módulo de Modernización - v0.7.1</p>
                 </footer>
             )}
 

@@ -65209,15 +65209,22 @@ C:.
 ¦   ¦       icons.svg
 ¦   ¦       
 ¦   +---src
+¦       ¦   ControlesEstadoBuque.jsx
 ¦       ¦   index.css
 ¦       ¦   main.jsx
 ¦       ¦   MapaAIS.jsx
 ¦       ¦   MbpcDashboard.jsx
 ¦       ¦   
 ¦       +---assets
-¦               hero.png
-¦               react.svg
-¦               vite.svg
+¦       ¦       hero.png
+¦       ¦       react.svg
+¦       ¦       vite.svg
+¦       ¦       
+¦       +---pages
+¦       ¦       Login.jsx
+¦       ¦       
+¦       +---services
+¦               axiosClient.js
 ¦               
 +---Mbpc.Api
 ¦   ¦   appsettings.Development.json
@@ -65239,6 +65246,13 @@ C:.
 ¦   ¦           ¦   Mbpc.Api.pdb
 ¦   ¦           ¦   Mbpc.Api.runtimeconfig.json
 ¦   ¦           ¦   Mbpc.Api.staticwebassets.endpoints.json
+¦   ¦           ¦   Microsoft.AspNetCore.Authentication.JwtBearer.dll
+¦   ¦           ¦   Microsoft.IdentityModel.Abstractions.dll
+¦   ¦           ¦   Microsoft.IdentityModel.JsonWebTokens.dll
+¦   ¦           ¦   Microsoft.IdentityModel.Logging.dll
+¦   ¦           ¦   Microsoft.IdentityModel.Protocols.dll
+¦   ¦           ¦   Microsoft.IdentityModel.Protocols.OpenIdConnect.dll
+¦   ¦           ¦   Microsoft.IdentityModel.Tokens.dll
 ¦   ¦           ¦   Microsoft.OpenApi.dll
 ¦   ¦           ¦   MongoDB.Bson.dll
 ¦   ¦           ¦   MongoDB.Driver.dll
@@ -65253,6 +65267,7 @@ C:.
 ¦   ¦           ¦   System.Configuration.ConfigurationManager.dll
 ¦   ¦           ¦   System.Diagnostics.PerformanceCounter.dll
 ¦   ¦           ¦   System.DirectoryServices.Protocols.dll
+¦   ¦           ¦   System.IdentityModel.Tokens.Jwt.dll
 ¦   ¦           ¦   System.Security.Cryptography.Pkcs.dll
 ¦   ¦           ¦   System.Security.Cryptography.ProtectedData.dll
 ¦   ¦           ¦   ZstdSharp.dll
@@ -65279,6 +65294,7 @@ C:.
 ¦   ¦       MongoDbSettings.cs
 ¦   ¦       
 ¦   +---Controllers
+¦   ¦       AuthController.cs
 ¦   ¦       CargaController.cs
 ¦   ¦       ViajeController.cs
 ¦   ¦       

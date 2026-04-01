@@ -1,6 +1,7 @@
 // IViajeService.cs
-// Se agrega ReanudarAsync para completar la máquina de estados (EJE 2).
-// Sin ReanudarAsync no existe transición legal desde Fondeado → Navegando.
+// EJE 3 — Filtrado Multitenant Geográfico (CosteraId).
+// Todos los métodos de lectura principales reciben 'costeraId' obligatorio
+// para garantizar que cada usuario solo acceda a los datos de su jurisdicción.
 // Namespace: Mbpc.Api.Services
 
 using Mbpc.Api.Models.Mongo;
@@ -11,15 +12,41 @@ namespace Mbpc.Api.Services
     public interface IViajeService
     {
         // ── LECTURA (MongoDB) ────────────────────────────────────────────────
-        Task<List<ViajePosicionMongo>> GetViajesAsync(int pagina = 1, int tamanio = 50);
-        Task<ViajePosicionMongo?> GetViajeByMmsiAsync(string mmsi);
-        Task<List<BarcoPuertoDto>> GetBarcosEnPuertoAsync();
-        Task<List<ViajeHistoricoDto>> GetHistoricoAsync(FiltroHistoricoDto filtro);
+
+        /// <summary>
+        /// Retorna viajes paginados filtrados por la costera del usuario autenticado.
+        /// </summary>
+        Task<List<ViajePosicionMongo>> GetViajesAsync(string costeraId, int pagina = 1, int tamanio = 50);
+
+        /// <summary>
+        /// Retorna la última posición de un buque por MMSI, validando que pertenezca
+        /// a la costera del usuario autenticado.
+        /// </summary>
+        Task<ViajePosicionMongo?> GetViajeByMmsiAsync(string mmsi, string costeraId);
+
+        /// <summary>
+        /// Retorna barcos en puerto (Amarrado/Fondeado) dentro de la jurisdicción
+        /// de la costera indicada.
+        /// </summary>
+        Task<List<BarcoPuertoDto>> GetBarcosEnPuertoAsync(string costeraId);
+
+        /// <summary>
+        /// Retorna el histórico de viajes filtrado por costera. La costera se pasa
+        /// al stored procedure de Oracle como parámetro adicional.
+        /// </summary>
+        Task<List<ViajeHistoricoDto>> GetHistoricoAsync(FiltroHistoricoDto filtro, string costeraId);
 
         // ── MAPA (ArcGIS) ────────────────────────────────────────────────────
-        Task<List<MapaViajeDto>> GetMapaViajesAsync(string? mmsi = null, string? nombreBuque = null);
+
+        /// <summary>
+        /// Retorna los puntos del mapa restringidos a la costera del usuario.
+        /// Los filtros opcionales de mmsi/nombre se aplican en memoria sobre
+        /// el resultado ya acotado por costeraId.
+        /// </summary>
+        Task<List<MapaViajeDto>> GetMapaViajesAsync(string costeraId, string? mmsi = null, string? nombreBuque = null);
 
         // ── ESCRITURA (Oracle + CQRS) ────────────────────────────────────────
+
         Task<bool> IniciarViajeAsync(NuevoViajeDto nuevoViaje);
 
         // ── MÁQUINA DE ESTADOS (EJE 2) ───────────────────────────────────────
