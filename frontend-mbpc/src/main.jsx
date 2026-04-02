@@ -4,7 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 
 // Importamos nuestras dos pantallas principales
 import MbpcDashboard from './MbpcDashboard';
-import Login from './Login';
+import Login from "./pages/Login";
 
 // Estilos globales
 import './index.css';

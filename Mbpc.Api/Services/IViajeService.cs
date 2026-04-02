@@ -1,7 +1,8 @@
 // IViajeService.cs
 // EJE 3 — Filtrado Multitenant Geográfico (CosteraId).
-// Todos los métodos de lectura principales reciben 'costeraId' obligatorio
-// para garantizar que cada usuario solo acceda a los datos de su jurisdicción.
+// El CosteraId ya NO se pasa como parámetro desde el Controller.
+// Cada implementación lo resuelve internamente vía IHttpContextAccessor,
+// leyendo el Claim "CosteraId" del JWT del usuario autenticado.
 // Namespace: Mbpc.Api.Services
 
 using Mbpc.Api.Models.Mongo;
@@ -14,36 +15,38 @@ namespace Mbpc.Api.Services
         // ── LECTURA (MongoDB) ────────────────────────────────────────────────
 
         /// <summary>
-        /// Retorna viajes paginados filtrados por la costera del usuario autenticado.
+        /// Retorna viajes paginados. El filtro por CosteraId se aplica internamente
+        /// desde el contexto HTTP del usuario autenticado.
         /// </summary>
-        Task<List<ViajePosicionMongo>> GetViajesAsync(string costeraId, int pagina = 1, int tamanio = 50);
+        Task<List<ViajePosicionMongo>> GetViajesAsync(int pagina = 1, int tamanio = 50);
 
         /// <summary>
-        /// Retorna la última posición de un buque por MMSI, validando que pertenezca
-        /// a la costera del usuario autenticado.
+        /// Retorna la última posición de un buque por MMSI. Valida internamente
+        /// que el registro pertenezca a la costera del usuario autenticado.
         /// </summary>
-        Task<ViajePosicionMongo?> GetViajeByMmsiAsync(string mmsi, string costeraId);
+        Task<ViajePosicionMongo?> GetViajeByMmsiAsync(string mmsi);
 
         /// <summary>
         /// Retorna barcos en puerto (Amarrado/Fondeado) dentro de la jurisdicción
-        /// de la costera indicada.
+        /// de la costera del usuario autenticado.
         /// </summary>
-        Task<List<BarcoPuertoDto>> GetBarcosEnPuertoAsync(string costeraId);
+        Task<List<BarcoPuertoDto>> GetBarcosEnPuertoAsync();
 
         /// <summary>
-        /// Retorna el histórico de viajes filtrado por costera. La costera se pasa
-        /// al stored procedure de Oracle como parámetro adicional.
+        /// Retorna el histórico de viajes filtrado por la costera del usuario
+        /// autenticado. La costera se pasa al stored procedure de Oracle como
+        /// parámetro adicional de forma transparente.
         /// </summary>
-        Task<List<ViajeHistoricoDto>> GetHistoricoAsync(FiltroHistoricoDto filtro, string costeraId);
+        Task<List<ViajeHistoricoDto>> GetHistoricoAsync(FiltroHistoricoDto filtro);
 
         // ── MAPA (ArcGIS) ────────────────────────────────────────────────────
 
         /// <summary>
-        /// Retorna los puntos del mapa restringidos a la costera del usuario.
-        /// Los filtros opcionales de mmsi/nombre se aplican en memoria sobre
-        /// el resultado ya acotado por costeraId.
+        /// Retorna los puntos del mapa restringidos a la costera del usuario
+        /// autenticado. Los filtros opcionales de mmsi/nombre se aplican en memoria
+        /// sobre el resultado ya acotado por CosteraId.
         /// </summary>
-        Task<List<MapaViajeDto>> GetMapaViajesAsync(string costeraId, string? mmsi = null, string? nombreBuque = null);
+        Task<List<MapaViajeDto>> GetMapaViajesAsync(string? mmsi = null, string? nombreBuque = null);
 
         // ── ESCRITURA (Oracle + CQRS) ────────────────────────────────────────
 

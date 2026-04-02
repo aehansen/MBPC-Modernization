@@ -106,6 +106,11 @@ builder.Services.AddAuthorization();
 builder.Services.AddScoped<IViajeService, ViajeManagerService>();
 builder.Services.AddScoped<ICargaService, CargaManagerService>();
 
+// ── IHttpContextAccessor ─────────────────────────────────────────────────────
+// Necesario para que los servicios puedan leer los Claims del JWT
+// (en particular CosteraId) sin recibir parámetros desde el Controller.
+builder.Services.AddHttpContextAccessor();
+
 // ── CORS ─────────────────────────────────────────────────────────────────────
 // Origen leído desde configuración para no hardcodear en producción.
 // En appsettings.Development.json: "AllowedOrigins": "http://localhost:5173"

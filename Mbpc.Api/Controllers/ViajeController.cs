@@ -25,16 +25,18 @@ namespace Mbpc.Api.Controllers
 
         /// <summary>
         /// Lista paginada de posiciones activas desde MongoDB (max 200 por página).
-        /// Requiere el Claim "CosteraId" en el token para filtrado multitenant.
+        /// El filtrado multitenant por CosteraId se resuelve internamente en el servicio
+        /// a partir del Claim del JWT; el Controller solo valida que el Claim exista.
         /// </summary>
         [HttpGet]
+        [Authorize]
         public async Task<ActionResult<List<ViajeDto>>> GetViajes(
             [FromQuery] int pagina  = 1,
             [FromQuery] int tamanio = 50)
         {
-            var costeraId = User.FindFirstValue("CosteraId");
+            var costeraIdClaim = User.FindFirstValue("CosteraId");
 
-            if (string.IsNullOrWhiteSpace(costeraId))
+            if (string.IsNullOrWhiteSpace(costeraIdClaim))
             {
                 _logger.LogWarning(
                     "GetViajes rechazado: el token no contiene el Claim 'CosteraId'. Usuario: {User}",
@@ -47,9 +49,10 @@ namespace Mbpc.Api.Controllers
 
             _logger.LogInformation(
                 "GetViajes — CosteraId: {CosteraId} | Página: {Pagina} | Tamaño: {Tamanio}",
-                costeraId, pagina, tamanio);
+                costeraIdClaim, pagina, tamanio);
 
-            var posicionesMongo = await _viajeService.GetViajesAsync(costeraId, pagina, tamanio);
+            // El costeraId ya NO se pasa: el servicio lo resuelve internamente.
+            var posicionesMongo = await _viajeService.GetViajesAsync(pagina, tamanio);
 
             var viajesDto = posicionesMongo.Select(p => new ViajeDto
             {
@@ -65,17 +68,20 @@ namespace Mbpc.Api.Controllers
 
         /// <summary>
         /// Busca un buque específico por MMSI.
+        /// El filtro de costera se aplica internamente en el servicio.
         /// </summary>
         [HttpGet("{mmsi}")]
+        [Authorize]
         public async Task<ActionResult<ViajePosicionMongo>> GetViajeByMmsi(string mmsi)
         {
-            var costeraId = User.FindFirstValue("CosteraId");
-            if (string.IsNullOrWhiteSpace(costeraId)) return Forbid();
+            var costeraIdClaim = User.FindFirstValue("CosteraId");
+            if (string.IsNullOrWhiteSpace(costeraIdClaim)) return Forbid();
 
             if (string.IsNullOrWhiteSpace(mmsi))
                 return BadRequest(new { mensaje = "El MMSI no puede estar vacío." });
 
-            var viaje = await _viajeService.GetViajeByMmsiAsync(mmsi, costeraId);
+            // El costeraId ya NO se pasa: el servicio lo resuelve internamente.
+            var viaje = await _viajeService.GetViajeByMmsiAsync(mmsi);
 
             if (viaje == null)
                 return NotFound(new { mensaje = $"No se encontró posición para el buque con MMSI {mmsi}." });
@@ -85,13 +91,15 @@ namespace Mbpc.Api.Controllers
 
         /// <summary>
         /// Barcos actualmente en puerto (filtro por estado de navegación + datos Oracle).
+        /// El filtro de costera se aplica internamente en el servicio.
         /// </summary>
         [HttpGet("puerto")]
+        [Authorize]
         public async Task<ActionResult<List<BarcoPuertoDto>>> GetBarcosEnPuerto()
         {
-            var costeraId = User.FindFirstValue("CosteraId");
+            var costeraIdClaim = User.FindFirstValue("CosteraId");
 
-            if (string.IsNullOrWhiteSpace(costeraId))
+            if (string.IsNullOrWhiteSpace(costeraIdClaim))
             {
                 _logger.LogWarning(
                     "GetBarcosEnPuerto rechazado: el token no contiene el Claim 'CosteraId'. Usuario: {User}",
@@ -100,16 +108,19 @@ namespace Mbpc.Api.Controllers
             }
 
             _logger.LogInformation(
-                "Consultando barcos en puerto — CosteraId: {CosteraId}", costeraId);
+                "Consultando barcos en puerto — CosteraId: {CosteraId}", costeraIdClaim);
 
-            var barcos = await _viajeService.GetBarcosEnPuertoAsync(costeraId);
+            // El costeraId ya NO se pasa: el servicio lo resuelve internamente.
+            var barcos = await _viajeService.GetBarcosEnPuertoAsync();
             return Ok(barcos);
         }
 
         /// <summary>
         /// Búsqueda de viajes históricos por criterios múltiples. Fuente: Oracle.
+        /// El filtro de costera se aplica internamente en el servicio.
         /// </summary>
         [HttpGet("historico")]
+        [Authorize]
         public async Task<ActionResult<List<ViajeHistoricoDto>>> GetHistorico(
             [FromQuery] string?   nombre    = null,
             [FromQuery] string?   omi       = null,
@@ -119,9 +130,9 @@ namespace Mbpc.Api.Controllers
             [FromQuery] DateTime? desde     = null,
             [FromQuery] DateTime? hasta     = null)
         {
-            var costeraId = User.FindFirstValue("CosteraId");
+            var costeraIdClaim = User.FindFirstValue("CosteraId");
 
-            if (string.IsNullOrWhiteSpace(costeraId))
+            if (string.IsNullOrWhiteSpace(costeraIdClaim))
             {
                 _logger.LogWarning(
                     "GetHistorico rechazado: el token no contiene el Claim 'CosteraId'. Usuario: {User}",
@@ -131,7 +142,7 @@ namespace Mbpc.Api.Controllers
 
             _logger.LogInformation(
                 "Búsqueda histórica — CosteraId: {CosteraId} | Nombre:{Nombre} OMI:{Omi} Matrícula:{Matricula}",
-                costeraId, nombre, omi, matricula);
+                costeraIdClaim, nombre, omi, matricula);
 
             var filtro = new FiltroHistoricoDto
             {
@@ -144,7 +155,8 @@ namespace Mbpc.Api.Controllers
                 Hasta     = hasta
             };
 
-            var historico = await _viajeService.GetHistoricoAsync(filtro, costeraId);
+            // El costeraId ya NO se pasa: el servicio lo resuelve internamente.
+            var historico = await _viajeService.GetHistoricoAsync(filtro);
             return Ok(historico);
         }
 
@@ -152,16 +164,17 @@ namespace Mbpc.Api.Controllers
 
         /// <summary>
         /// Retorna los puntos GeoJSON-ready para el mapa ArcGIS.
-        /// Filtra por CosteraId del token para soporte multitenant geográfico.
+        /// El filtro multitenant por CosteraId se aplica internamente en el servicio.
         /// </summary>
         [HttpGet("mapa")]
+        [Authorize]
         public async Task<ActionResult<List<MapaViajeDto>>> GetMapaViajes(
             [FromQuery] string? mmsi        = null,
             [FromQuery] string? nombreBuque = null)
         {
-            var costeraId = User.FindFirstValue("CosteraId");
+            var costeraIdClaim = User.FindFirstValue("CosteraId");
 
-            if (string.IsNullOrWhiteSpace(costeraId))
+            if (string.IsNullOrWhiteSpace(costeraIdClaim))
             {
                 _logger.LogWarning(
                     "GetMapaViajes rechazado: el token no contiene el Claim 'CosteraId'. Usuario: {User}",
@@ -171,9 +184,10 @@ namespace Mbpc.Api.Controllers
 
             _logger.LogInformation(
                 "Consulta mapa AIS — CosteraId: '{CosteraId}' | MMSI: '{Mmsi}' | Nombre: '{Nombre}'",
-                costeraId, mmsi ?? "TODOS", nombreBuque ?? "TODOS");
+                costeraIdClaim, mmsi ?? "TODOS", nombreBuque ?? "TODOS");
 
-            var puntos = await _viajeService.GetMapaViajesAsync(costeraId, mmsi, nombreBuque);
+            // El costeraId ya NO se pasa: el servicio lo resuelve internamente.
+            var puntos = await _viajeService.GetMapaViajesAsync(mmsi, nombreBuque);
             return Ok(puntos);
         }
 
@@ -182,13 +196,15 @@ namespace Mbpc.Api.Controllers
         /// <summary>
         /// Inicia un nuevo viaje (escribe en Oracle + inserta en MongoDB).
         /// El buque nace con estado "Amarrado" según regla de negocio.
+        /// El CosteraId se inyecta en el DTO desde el Claim del token.
         /// </summary>
         [HttpPost]
+        [Authorize]
         public async Task<ActionResult> IniciarViaje([FromBody] NuevoViajeDto nuevoViaje)
         {
-            var costeraId = User.FindFirstValue("CosteraId");
+            var costeraIdClaim = User.FindFirstValue("CosteraId");
 
-            if (string.IsNullOrWhiteSpace(costeraId))
+            if (string.IsNullOrWhiteSpace(costeraIdClaim))
             {
                 _logger.LogWarning(
                     "IniciarViaje rechazado: el token no contiene el Claim 'CosteraId'. Usuario: {User}",
@@ -198,7 +214,7 @@ namespace Mbpc.Api.Controllers
 
             _logger.LogInformation(
                 "Despacho para buque: {Buque} | CosteraId: {CosteraId}",
-                nuevoViaje?.NombreBuque, costeraId);
+                nuevoViaje?.NombreBuque, costeraIdClaim);
 
             if (nuevoViaje == null
                 || string.IsNullOrWhiteSpace(nuevoViaje.NombreBuque)
@@ -211,8 +227,9 @@ namespace Mbpc.Api.Controllers
                 });
             }
 
-            // Inyectamos el CosteraId
-            nuevoViaje.CosteraId = costeraId;
+            // El Controller sigue siendo responsable de inyectar el CosteraId en el DTO
+            // para que el registro en MongoDB quede correctamente etiquetado con su costera.
+            nuevoViaje.CosteraId = costeraIdClaim;
 
             var exito = await _viajeService.IniciarViajeAsync(nuevoViaje);
 
@@ -227,6 +244,7 @@ namespace Mbpc.Api.Controllers
         /// Valida que el estado actual permita zarpar (No puede estar Fondeado).
         /// </summary>
         [HttpPut("{id}/zarpar")]
+        [Authorize]
         public async Task<ActionResult> ZarparViaje(string id)
         {
             if (string.IsNullOrWhiteSpace(id))
@@ -245,6 +263,7 @@ namespace Mbpc.Api.Controllers
         /// Amarra el buque → NavegationStatusDesc = "Amarrado".
         /// </summary>
         [HttpPut("{id}/amarrar")]
+        [Authorize]
         public async Task<ActionResult> AmarrarViaje(string id)
         {
             if (string.IsNullOrWhiteSpace(id))
@@ -263,6 +282,7 @@ namespace Mbpc.Api.Controllers
         /// Fondea el buque → NavegationStatusDesc = "Fondeado".
         /// </summary>
         [HttpPut("{id}/fondear")]
+        [Authorize]
         public async Task<ActionResult> FondearViaje(string id)
         {
             if (string.IsNullOrWhiteSpace(id))
@@ -282,6 +302,7 @@ namespace Mbpc.Api.Controllers
         /// Paso previo obligatorio para zarpar desde un estado de fondeo.
         /// </summary>
         [HttpPut("{id}/reanudar")]
+        [Authorize]
         public async Task<ActionResult> ReanudarViaje(string id)
         {
             if (string.IsNullOrWhiteSpace(id))

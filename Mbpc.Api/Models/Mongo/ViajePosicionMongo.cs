@@ -54,9 +54,12 @@ namespace Mbpc.Api.Models.Mongo
         [BsonElement("location")]
         public LocationMongo? Location { get; set; }
 
-        // ── NUEVO: MULTITENANT GEOGRÁFICO ──
+        // ── MULTITENANT GEOGRÁFICO ──
+        // El campo CosteraId en BSON es numérico (Int32).
+        // CosteraId == 0  →  registro global / Super Admin.
+        // CosteraId  > 0  →  registro restringido a esa jurisdicción costera.
         [BsonElement("CosteraId")]
-        public string? CosteraId { get; set; }
+        public int? CosteraId { get; set; }
     }
 
     public class LocationMongo

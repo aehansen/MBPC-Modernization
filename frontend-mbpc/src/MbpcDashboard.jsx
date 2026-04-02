@@ -1,58 +1,62 @@
-// MbpcDashboard.jsx - VERSIÓN MODERNIZADA v0.7.1
+// MbpcDashboard.jsx - VERSIÓN MODERNIZADA v0.7.2
+// Cambios v0.7.2:
+//   REFACTOR — Se eliminó la dependencia de axiosClient.js (con viajesApi helpers).
+//              Todas las peticiones HTTP ahora se canalizan a través del cliente
+//              centralizado apiClient (../services/apiClient), que inyecta el JWT
+//              automáticamente y redirige al login en respuestas 401/403.
+//              · fetchViajes      → apiClient.get('/api/viajes', { params })
+//              · fetchCargas      → apiClient.get('/api/carga/viaje/:id')
+//              · guardarNuevoViaje → apiClient.post('/api/viajes', payload)
+//              · abrirModalPuerto → apiClient.get('/api/viajes/en-puerto')
+//              · buscarHistorico  → apiClient.get('/api/viajes/historico', { params })
+//              · ejecutarAccionCarga / ejecutarAmarrarGlobal / guardarNuevaCarga
+//                                 → apiClient.put / apiClient.post con rutas /api/*
+//              · Se actualizó el footer a v0.7.2 con año dinámico.
 // Cambios v0.7.1:
 //   REFACTOR — Se eliminó la instancia local de Axios y la constante API_BASE_URL.
-//              Todas las peticiones HTTP ahora se canalizan a través del cliente
-//              centralizado (axiosClient.js), que inyecta el JWT automáticamente
-//              y redirige al login en respuestas 401/403.
-//              · viajesApi  → getViajes, getBarcosEnPuerto, getHistorico, iniciarViaje
-//              · apiClient  → rutas de /carga/* (no tienen helper propio en el cliente)
+//              Todas las peticiones HTTP se canalizaban a través de axiosClient.js.
 // Cambios v0.7.0:
-//   REFACTOR — Se eliminaron los botones Zarpar/Amarrar/Fondear en línea de la tabla.
-//              La columna Acciones conserva SOLO el botón "Ver Cargas".
-//              Se integró <ControlesEstadoBuque> en la sección de Manifiesto de Carga.
-//              Se añadió handleEstadoCambiado como callback que recarga la grilla.
-// Cambios v0.6.0:
 //   INTEGRACIÓN ARCGIS: Se importó MapaAIS.jsx y se cableó el botón "Ver Mapa"
 //   para alternar entre la vista de Grilla (Dashboard) y el Mapa Geoespacial.
 
 import React, { useState, useEffect } from 'react';
 // ── CLIENTE CENTRALIZADO ─────────────────────────────────────────────────────
-// apiClient → instancia base de Axios con JWT y baseURL configurados.
-// viajesApi → helpers tipados para el dominio de viajes.
-// (Las rutas de /carga/* no tienen helper en axiosClient, se usan via apiClient)
-import apiClient, { viajesApi } from './axiosClient';
+// apiClient → instancia de Axios con baseURL, JWT y manejo de 401/403
+//             configurados en src/services/apiClient.js
+import apiClient from './services/apiClient';
 
 import MapaAIS from './MapaAIS';
 import ControlesEstadoBuque from './ControlesEstadoBuque';
+import Navbar from './components/Navbar';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DATOS DEL ENUM DeclaracionMalvinasEnum — mapeados 1:1 al C#
 // ─────────────────────────────────────────────────────────────────────────────
 const DECLARACION_MALVINAS_OPTIONS = [
-    { value: 'NoVieneDeMalvinas_L',                                    label: 'No viene de Malvinas (L)' },
-    { value: 'VieneDeMalvinas_AutorizadoCPER_M',                       label: 'Viene de Malvinas: Autorizado por la CPER (M)' },
-    { value: 'VieneDeMalvinas_NoAutorizado_Infraccion_Extranjero_W',   label: 'Viene de Malvinas: No autorizado - Se labró infracción - Va al extranjero (W)' },
-    { value: 'VieneDeMalvinas_NoSolicitoAutorizacion_Amarra_Y',        label: 'Viene de Malvinas: No solicitó autorización (Amarra en el país) (Y)' },
-    { value: 'VieneDeMalvinas_SolicitoAutorizacion_Amarra_V',          label: 'Viene de Malvinas: Solicitó autorización (Amarra en el país) (V)' },
-    { value: 'NoVaAMalvinas_Exceptuado_MilitarOGC_D',                  label: 'No va a Malvinas: Exceptuado, Militar o GC - Cualquier bandera (D)' },
-    { value: 'NoVaAMalvinas_Exceptuado_NoNavegacionMaritima_F',        label: 'No va a Malvinas: Exceptuado, no realiza navegación marítima (F)' },
-    { value: 'NoVaAMalvinas_B',                                        label: 'No va a Malvinas (B)' },
-    { value: 'NoVaAMalvinas_Exceptuado_GiroInteriorPuerto_G',          label: 'No va a Malvinas: Exceptuado, giro interior puerto - misma jurisdicción (G)' },
-    { value: 'NoVaAMalvinas_Exceptuado_NavegacionRadaRiaCostera_E',    label: 'No va a Malvinas: Exceptuado, navegación Rada-Ría o Costera (E)' },
-    { value: 'NoVaAMalvinas_Exceptuado_OtrosMotivos_X',                label: 'No va a Malvinas: Exceptuado, por otros motivos (X)' },
-    { value: 'NoVaAMalvinas_NoPresentoDeclaracion_N',                  label: 'No va a Malvinas: No presentó Declaración Jurada (N)' },
-    { value: 'NoVaAMalvinas_PresentoDeclaracion_J',                    label: 'No va a Malvinas: Presentó Declaración Jurada (J)' },
-    { value: 'NoVaAMalvinas_ReiniciaNavegacion_PresentoDeclaracion_K', label: 'No va a Malvinas: Reinicia navegación - Presentó Declaración Jurada (K)' },
-    { value: 'VaAMalvinas_Exceptuado_MilitarOGC_Q',                    label: 'Va a Malvinas: Exceptuado, Militar o GC - Cualquier bandera (Q)' },
-    { value: 'VaAMalvinas_AutorizadoCPER_A',                           label: 'Va a Malvinas: Autorizado por la CPER (A)' },
-    { value: 'VaAMalvinas_AutorizadoCPER_ReiniciaNavegacion_R',        label: 'Va a Malvinas: Autorizado por la CPER - Reinicia navegación (R)' },
-    { value: 'VaAMalvinas_NoAutorizadoCPER_Z',                         label: 'Va a Malvinas: No autorizado por la CPER (Z)' },
-    { value: 'VaAMalvinas_NoAutorizadoCPER_Fondeo_P',                  label: 'Va a Malvinas: No autorizado por la CPER - Se ordenó fondeo (P)' },
+    { value: 'NoVieneDeMalvinas_L',                                      label: 'No viene de Malvinas (L)' },
+    { value: 'VieneDeMalvinas_AutorizadoCPER_M',                         label: 'Viene de Malvinas: Autorizado por la CPER (M)' },
+    { value: 'VieneDeMalvinas_NoAutorizado_Infraccion_Extranjero_W',     label: 'Viene de Malvinas: No autorizado - Se labró infracción - Va al extranjero (W)' },
+    { value: 'VieneDeMalvinas_NoSolicitoAutorizacion_Amarra_Y',          label: 'Viene de Malvinas: No solicitó autorización (Amarra en el país) (Y)' },
+    { value: 'VieneDeMalvinas_SolicitoAutorizacion_Amarra_V',            label: 'Viene de Malvinas: Solicitó autorización (Amarra en el país) (V)' },
+    { value: 'NoVaAMalvinas_Exceptuado_MilitarOGC_D',                    label: 'No va a Malvinas: Exceptuado, Militar o GC - Cualquier bandera (D)' },
+    { value: 'NoVaAMalvinas_Exceptuado_NoNavegacionMaritima_F',          label: 'No va a Malvinas: Exceptuado, no realiza navegación marítima (F)' },
+    { value: 'NoVaAMalvinas_B',                                          label: 'No va a Malvinas (B)' },
+    { value: 'NoVaAMalvinas_Exceptuado_GiroInteriorPuerto_G',            label: 'No va a Malvinas: Exceptuado, giro interior puerto - misma jurisdicción (G)' },
+    { value: 'NoVaAMalvinas_Exceptuado_NavegacionRadaRiaCostera_E',      label: 'No va a Malvinas: Exceptuado, navegación Rada-Ría o Costera (E)' },
+    { value: 'NoVaAMalvinas_Exceptuado_OtrosMotivos_X',                  label: 'No va a Malvinas: Exceptuado, por otros motivos (X)' },
+    { value: 'NoVaAMalvinas_NoPresentoDeclaracion_N',                    label: 'No va a Malvinas: No presentó Declaración Jurada (N)' },
+    { value: 'NoVaAMalvinas_PresentoDeclaracion_J',                      label: 'No va a Malvinas: Presentó Declaración Jurada (J)' },
+    { value: 'NoVaAMalvinas_ReiniciaNavegacion_PresentoDeclaracion_K',   label: 'No va a Malvinas: Reinicia navegación - Presentó Declaración Jurada (K)' },
+    { value: 'VaAMalvinas_Exceptuado_MilitarOGC_Q',                      label: 'Va a Malvinas: Exceptuado, Militar o GC - Cualquier bandera (Q)' },
+    { value: 'VaAMalvinas_AutorizadoCPER_A',                             label: 'Va a Malvinas: Autorizado por la CPER (A)' },
+    { value: 'VaAMalvinas_AutorizadoCPER_ReiniciaNavegacion_R',          label: 'Va a Malvinas: Autorizado por la CPER - Reinicia navegación (R)' },
+    { value: 'VaAMalvinas_NoAutorizadoCPER_Z',                           label: 'Va a Malvinas: No autorizado por la CPER (Z)' },
+    { value: 'VaAMalvinas_NoAutorizadoCPER_Fondeo_P',                    label: 'Va a Malvinas: No autorizado por la CPER - Se ordenó fondeo (P)' },
 ];
 
 const PUNTOS_CONTROL_OPTIONS = [
-    { value: 'RPNA_AMARR_ELDO',   label: 'Río Paraná - AMARR ELDO' },
-    { value: 'RPNA_PREFECT_ROS',  label: 'Río Paraná - Prefectura Rosario' },
+    { value: 'RPNA_AMARR_ELDO',    label: 'Río Paraná - AMARR ELDO' },
+    { value: 'RPNA_PREFECT_ROS',   label: 'Río Paraná - Prefectura Rosario' },
     { value: 'RPLATA_CANAL_MITRE', label: 'Río de la Plata - Canal Mitre KM 0' },
 ];
 
@@ -222,9 +226,10 @@ const MbpcDashboard = () => {
         setLoading(prev => ({ ...prev, viajes: true }));
         setError(null);
         try {
-            // viajesApi.getViajes() encapsula GET /viajes con paginación.
             // El interceptor del cliente inyecta el JWT automáticamente.
-            const response = await viajesApi.getViajes({ pagina: paginaActual, tamanio: tamanioPagina });
+            const response = await apiClient.get('/api/viajes', {
+                params: { pagina: paginaActual, tamanio: tamanioPagina }
+            });
             setViajes(response.data);
         } catch (err) {
             // El interceptor ya maneja los 401/403 redirigiendo al login.
@@ -239,8 +244,8 @@ const MbpcDashboard = () => {
     const fetchCargas = async (viajeId) => {
         setLoading(prev => ({ ...prev, cargas: true }));
         try {
-            // /carga/* no tiene helper propio en axiosClient → se usa apiClient directamente.
-            const response = await apiClient.get(`/carga/viaje/${viajeId}`);
+            // /api/carga/* se consume via apiClient con JWT ya inyectado.
+            const response = await apiClient.get(`/api/carga/viaje/${viajeId}`);
             setCargas(response.data);
         } catch (err) {
             console.error("Error fetching cargas:", err);
@@ -303,26 +308,27 @@ const MbpcDashboard = () => {
         try {
             const cargaIdSeguro = encodeURIComponent(modalState.cargaId);
             let url = '';
+            // Rutas validadas contra el controlador .NET
             switch (modalState.tipo) {
                 case 'amarrar_buque':
-                    url = `/carga/${cargaIdSeguro}/amarrar?nuevoMuelle=${encodeURIComponent(modalState.muelle)}`;
+                    url = `/api/viajes/${cargaIdSeguro}/amarrar?nuevoMuelle=${encodeURIComponent(modalState.muelle)}`;
                     break;
                 case 'fondear_buque':
-                    url = `/carga/${cargaIdSeguro}/fondear?zonaFondeo=${encodeURIComponent(modalState.zona)}`;
+                    url = `/api/viajes/${cargaIdSeguro}/fondear?zonaFondeo=${encodeURIComponent(modalState.zona)}`;
                     break;
                 case 'cargar':
-                    url = `/carga/${cargaIdSeguro}/cargar?toneladas=${encodeURIComponent(parseFloat(modalState.toneladas))}`;
+                    url = `/api/carga/${cargaIdSeguro}/cargar?toneladas=${encodeURIComponent(parseFloat(modalState.toneladas))}`;
                     break;
                 case 'descargar':
-                    url = `/carga/${cargaIdSeguro}/descargar?toneladas=${encodeURIComponent(parseFloat(modalState.toneladas))}`;
+                    url = `/api/carga/${cargaIdSeguro}/descargar?toneladas=${encodeURIComponent(parseFloat(modalState.toneladas))}`;
                     break;
                 case 'amarrar_barcaza':
-                    url = `/carga/${cargaIdSeguro}/amarrar?nuevoMuelle=${encodeURIComponent(modalState.posicion)}&fechaHora=${encodeURIComponent(modalState.fechaHora)}`;
+                    url = `/api/carga/${cargaIdSeguro}/amarrar?nuevoMuelle=${encodeURIComponent(modalState.posicion)}&fechaHora=${encodeURIComponent(modalState.fechaHora)}`;
                     break;
                 default:
-                    url = `/carga/${cargaIdSeguro}/fondear?zonaFondeo=Zona_General`;
+                    url = `/api/viajes/${cargaIdSeguro}/fondear?zonaFondeo=Zona_General`;
             }
-            // /carga/* no tiene helper → apiClient con JWT ya inyectado por el interceptor.
+            // apiClient inyecta el JWT vía interceptor.
             await apiClient.put(url);
             await fetchCargas(selectedViajeId);
             cerrarModal();
@@ -378,20 +384,19 @@ const MbpcDashboard = () => {
         setModalNuevoViaje(prev => ({ ...prev, loading: true }));
         try {
             const payload = {
-                nombreBuque:          nuevoViajeForm.nombreBuque,
-                origen:               nuevoViajeForm.origen,
-                destino:              nuevoViajeForm.destino,
-                muelleSalida:         nuevoViajeForm.muelleSalida || null,
-                proximoPuntoControl:  nuevoViajeForm.proximoPuntoControl,
-                fechaPartida:         nuevoViajeForm.fechaPartida,
-                eta:                  nuevoViajeForm.eta,
-                zoe:                  nuevoViajeForm.zoe || null,
-                posicion:             nuevoViajeForm.posicion || null,
-                rioCanalKmPar:        nuevoViajeForm.rioCanalKmPar ? parseFloat(nuevoViajeForm.rioCanalKmPar) : null,
-                declaracionMalvinas:  nuevoViajeForm.declaracionMalvinas,
+                nombreBuque:         nuevoViajeForm.nombreBuque,
+                origen:              nuevoViajeForm.origen,
+                destino:             nuevoViajeForm.destino,
+                muelleSalida:        nuevoViajeForm.muelleSalida || null,
+                proximoPuntoControl: nuevoViajeForm.proximoPuntoControl,
+                fechaPartida:        nuevoViajeForm.fechaPartida,
+                eta:                 nuevoViajeForm.eta,
+                zoe:                 nuevoViajeForm.zoe || null,
+                posicion:            nuevoViajeForm.posicion || null,
+                rioCanalKmPar:       nuevoViajeForm.rioCanalKmPar ? parseFloat(nuevoViajeForm.rioCanalKmPar) : null,
+                declaracionMalvinas: nuevoViajeForm.declaracionMalvinas,
             };
-            // viajesApi.iniciarViaje() encapsula POST /viajes.
-            await viajesApi.iniciarViaje(payload);
+            await apiClient.post('/api/viajes', payload);
             await fetchViajes();
             cerrarNuevoViaje();
         } catch (err) {
@@ -406,8 +411,7 @@ const MbpcDashboard = () => {
     const abrirModalPuerto = async () => {
         setModalPuerto({ show: true, loading: true, datos: [] });
         try {
-            // viajesApi.getBarcosEnPuerto() encapsula GET /viajes/en-puerto.
-            const response = await viajesApi.getBarcosEnPuerto();
+            const response = await apiClient.get('/api/viajes/en-puerto');
             setModalPuerto({ show: true, loading: false, datos: response.data });
         } catch (err) {
             console.error("Error fetching barcos en puerto:", err);
@@ -435,13 +439,11 @@ const MbpcDashboard = () => {
     const buscarHistorico = async () => {
         setModalHistorico(prev => ({ ...prev, loading: true }));
         try {
-            // viajesApi.getHistorico() encapsula GET /viajes/historico con params.
-            // El cliente construye internamente los query params desde el objeto filtro.
             // Solo enviamos los campos con valor para no contaminar el SP de Oracle.
             const filtroActivo = Object.fromEntries(
                 Object.entries(filtroHistorico).filter(([, v]) => v !== '')
             );
-            const response = await viajesApi.getHistorico(filtroActivo);
+            const response = await apiClient.get('/api/viajes/historico', { params: filtroActivo });
             setModalHistorico(prev => ({ ...prev, loading: false, resultados: response.data, buscado: true }));
         } catch (err) {
             console.error("Error fetching histórico:", err);
@@ -466,8 +468,8 @@ const MbpcDashboard = () => {
         try {
             const idSeguro     = encodeURIComponent(modalAmarrarGlobal.barcazaId.trim());
             const muelleSeguro = encodeURIComponent(modalAmarrarGlobal.lugarAmarre.trim());
-            // /carga/* no tiene helper → apiClient con JWT inyectado por el interceptor.
-            await apiClient.put(`/carga/${idSeguro}/amarrar?nuevoMuelle=${muelleSeguro}`);
+            // apiClient inyecta el JWT vía interceptor.
+            await apiClient.put(`/api/carga/${idSeguro}/amarrar?nuevoMuelle=${muelleSeguro}`);
             cerrarAmarrarGlobal();
             if (selectedViajeId) await fetchCargas(selectedViajeId);
             alert(`Barcaza "${modalAmarrarGlobal.barcazaId}" amarrada exitosamente en "${modalAmarrarGlobal.lugarAmarre}".`);
@@ -516,8 +518,8 @@ const MbpcDashboard = () => {
                 tipo:     nuevaCargaForm.tipo,
                 tonelaje: parseFloat(nuevaCargaForm.tonelaje),
             };
-            // /carga/* no tiene helper → apiClient con JWT inyectado por el interceptor.
-            await apiClient.post(`/carga/viaje/${encodeURIComponent(nombreBuque)}`, payload);
+            // apiClient inyecta el JWT vía interceptor.
+            await apiClient.post(`/api/carga/viaje/${encodeURIComponent(nombreBuque)}`, payload);
             await fetchCargas(selectedViajeId);
             cerrarModalNuevaCarga();
         } catch (err) {
@@ -542,10 +544,10 @@ const MbpcDashboard = () => {
 
     const getEstadoBadgeClass = (estado) => {
         const e = (estado || '').toLowerCase();
-        if (e.includes('amarr') || e.includes('moored')) return 'bg-green-100 text-green-800';
+        if (e.includes('amarr') || e.includes('moored'))  return 'bg-green-100 text-green-800';
         if (e.includes('fondea') || e.includes('anchor')) return 'bg-yellow-100 text-yellow-800';
-        if (e.includes('cancel')) return 'bg-red-100 text-red-800';
-        if (e.includes('finaliz')) return 'bg-gray-100 text-gray-600';
+        if (e.includes('cancel'))                          return 'bg-red-100 text-red-800';
+        if (e.includes('finaliz'))                         return 'bg-gray-100 text-gray-600';
         return 'bg-blue-100 text-blue-800';
     };
 
@@ -556,25 +558,10 @@ const MbpcDashboard = () => {
         <div className="min-h-screen bg-gray-50 flex flex-col font-sans text-gray-900">
 
             {/* ── ENCABEZADO ─────────────────────────────────────────────── */}
-            <header className="bg-[#002454] text-white shadow-lg p-4 flex items-center justify-between sticky top-0 z-40">
-                <div className="flex items-center">
-                    <img
-                        src="https://www.argentina.gob.ar/sites/default/files/styles/isotipo/public/imagenEncabezado/prefectura-escudo.png?itok=EywBfOaV"
-                        alt="PNA Logo"
-                        className="h-12 mr-4"
-                    />
-                    <div>
-                        <h1 className="text-2xl font-bold tracking-tight">MBPC - Modernización</h1>
-                        <p className="text-sm text-blue-200">Prefectura Naval Argentina - Gestión de Tráfico de Neri</p>
-                    </div>
-                </div>
-                <div className="flex items-center gap-2">
-                    <span className="text-xs bg-green-500 text-white px-2 py-1 rounded-full font-mono">BACKEND ONLINE</span>
-                    <div className="w-10 h-10 rounded-full bg-blue-800 flex items-center justify-center font-bold text-blue-100 border-2 border-blue-600">AN</div>
-                </div>
-            </header>
+            <Navbar />
 
             {/* ── BOTONERA SUPERIOR ─────────────────────────────────────── */}
+            
             <div className="bg-[#002454] border-t border-blue-800 px-6 py-2 flex items-center gap-2 flex-wrap">
                 {/* Ver Mapa / Volver al Dashboard */}
                 <button
@@ -877,8 +864,8 @@ const MbpcDashboard = () => {
             {/* ── PIE DE PÁGINA ─────────────────────────────────────────── */}
             {vistaActual === 'dashboard' && (
                 <footer className="border-t mt-12 p-6 bg-white text-center text-xs text-gray-400">
-                    <p>&copy; 2026 Prefectura Naval Argentina - Dirección de Informática y Comunicaciones.</p>
-                    <p className="mt-1">Sistema de Gestión de Tráfico Marítimo (MBPC) - Módulo de Modernización - v0.7.1</p>
+                    <p>&copy; {new Date().getFullYear()} Prefectura Naval Argentina - Dirección de Informática y Comunicaciones.</p>
+                    <p className="mt-1">Sistema de Gestión de Tráfico Marítimo (MBPC) - Módulo de Modernización - v0.7.2</p>
                 </footer>
             )}
 
