@@ -29,7 +29,6 @@ namespace Mbpc.Api.Controllers
         /// a partir del Claim del JWT; el Controller solo valida que el Claim exista.
         /// </summary>
         [HttpGet]
-        [Authorize]
         public async Task<ActionResult<List<ViajeDto>>> GetViajes(
             [FromQuery] int pagina  = 1,
             [FromQuery] int tamanio = 50)
@@ -51,7 +50,6 @@ namespace Mbpc.Api.Controllers
                 "GetViajes — CosteraId: {CosteraId} | Página: {Pagina} | Tamaño: {Tamanio}",
                 costeraIdClaim, pagina, tamanio);
 
-            // El costeraId ya NO se pasa: el servicio lo resuelve internamente.
             var posicionesMongo = await _viajeService.GetViajesAsync(pagina, tamanio);
 
             var viajesDto = posicionesMongo.Select(p => new ViajeDto
@@ -71,7 +69,6 @@ namespace Mbpc.Api.Controllers
         /// El filtro de costera se aplica internamente en el servicio.
         /// </summary>
         [HttpGet("{mmsi}")]
-        [Authorize]
         public async Task<ActionResult<ViajePosicionMongo>> GetViajeByMmsi(string mmsi)
         {
             var costeraIdClaim = User.FindFirstValue("CosteraId");
@@ -80,7 +77,6 @@ namespace Mbpc.Api.Controllers
             if (string.IsNullOrWhiteSpace(mmsi))
                 return BadRequest(new { mensaje = "El MMSI no puede estar vacío." });
 
-            // El costeraId ya NO se pasa: el servicio lo resuelve internamente.
             var viaje = await _viajeService.GetViajeByMmsiAsync(mmsi);
 
             if (viaje == null)
@@ -94,7 +90,6 @@ namespace Mbpc.Api.Controllers
         /// El filtro de costera se aplica internamente en el servicio.
         /// </summary>
         [HttpGet("puerto")]
-        [Authorize]
         public async Task<ActionResult<List<BarcoPuertoDto>>> GetBarcosEnPuerto()
         {
             var costeraIdClaim = User.FindFirstValue("CosteraId");
@@ -110,7 +105,6 @@ namespace Mbpc.Api.Controllers
             _logger.LogInformation(
                 "Consultando barcos en puerto — CosteraId: {CosteraId}", costeraIdClaim);
 
-            // El costeraId ya NO se pasa: el servicio lo resuelve internamente.
             var barcos = await _viajeService.GetBarcosEnPuertoAsync();
             return Ok(barcos);
         }
@@ -120,7 +114,6 @@ namespace Mbpc.Api.Controllers
         /// El filtro de costera se aplica internamente en el servicio.
         /// </summary>
         [HttpGet("historico")]
-        [Authorize]
         public async Task<ActionResult<List<ViajeHistoricoDto>>> GetHistorico(
             [FromQuery] string?   nombre    = null,
             [FromQuery] string?   omi       = null,
@@ -155,7 +148,6 @@ namespace Mbpc.Api.Controllers
                 Hasta     = hasta
             };
 
-            // El costeraId ya NO se pasa: el servicio lo resuelve internamente.
             var historico = await _viajeService.GetHistoricoAsync(filtro);
             return Ok(historico);
         }
@@ -167,7 +159,6 @@ namespace Mbpc.Api.Controllers
         /// El filtro multitenant por CosteraId se aplica internamente en el servicio.
         /// </summary>
         [HttpGet("mapa")]
-        [Authorize]
         public async Task<ActionResult<List<MapaViajeDto>>> GetMapaViajes(
             [FromQuery] string? mmsi        = null,
             [FromQuery] string? nombreBuque = null)
@@ -186,7 +177,6 @@ namespace Mbpc.Api.Controllers
                 "Consulta mapa AIS — CosteraId: '{CosteraId}' | MMSI: '{Mmsi}' | Nombre: '{Nombre}'",
                 costeraIdClaim, mmsi ?? "TODOS", nombreBuque ?? "TODOS");
 
-            // El costeraId ya NO se pasa: el servicio lo resuelve internamente.
             var puntos = await _viajeService.GetMapaViajesAsync(mmsi, nombreBuque);
             return Ok(puntos);
         }
@@ -194,14 +184,34 @@ namespace Mbpc.Api.Controllers
         // ── POSTs y PUTs de escritura (CQRS + MÁQUINA DE ESTADOS) ─────────────
 
         /// <summary>
-        /// Inicia un nuevo viaje (escribe en Oracle + inserta en MongoDB).
+        /// Inicia un nuevo viaje (escribe en Oracle + inserta en MongoDB y details_mbpc).
         /// El buque nace con estado "Amarrado" según regla de negocio.
         /// El CosteraId se inyecta en el DTO desde el Claim del token.
+        ///
+        /// Responsabilidades del Controller (y solo estas):
+        ///   1. Validar ModelState (DataAnnotations del DTO).
+        ///   2. Verificar que el Claim CosteraId exista en el JWT.
+        ///   3. Inyectar el CosteraId en el DTO antes de delegar.
+        ///   4. Delegar a IViajeService y traducir el resultado a HTTP.
         /// </summary>
         [HttpPost]
-        [Authorize]
         public async Task<ActionResult> IniciarViaje([FromBody] NuevoViajeDto nuevoViaje)
         {
+            // ── 1. Validación de ModelState (DataAnnotations) ─────────────────
+            // [ApiController] devuelve 400 automáticamente si ModelState es inválido,
+            // pero lo dejamos explícito para mayor claridad y trazabilidad en los logs.
+            if (!ModelState.IsValid)
+            {
+                _logger.LogWarning(
+                    "IniciarViaje rechazado por ModelState inválido. Errores: {@Errors}",
+                    ModelState.Values
+                              .SelectMany(v => v.Errors)
+                              .Select(e => e.ErrorMessage));
+
+                return ValidationProblem(ModelState);
+            }
+
+            // ── 2. Validación del Claim de identidad multitenant ──────────────
             var costeraIdClaim = User.FindFirstValue("CosteraId");
 
             if (string.IsNullOrWhiteSpace(costeraIdClaim))
@@ -212,31 +222,39 @@ namespace Mbpc.Api.Controllers
                 return Forbid();
             }
 
-            _logger.LogInformation(
-                "Despacho para buque: {Buque} | CosteraId: {CosteraId}",
-                nuevoViaje?.NombreBuque, costeraIdClaim);
-
-            if (nuevoViaje == null
-                || string.IsNullOrWhiteSpace(nuevoViaje.NombreBuque)
-                || string.IsNullOrWhiteSpace(nuevoViaje.Origen)
-                || string.IsNullOrWhiteSpace(nuevoViaje.Destino))
-            {
-                return BadRequest(new
-                {
-                    mensaje = "Todos los campos son requeridos: NombreBuque, Origen y Destino."
-                });
-            }
-
-            // El Controller sigue siendo responsable de inyectar el CosteraId en el DTO
-            // para que el registro en MongoDB quede correctamente etiquetado con su costera.
+            // ── 3. Inyección del CosteraId en el DTO ─────────────────────────
+            // El Controller es el único punto donde CosteraId se extrae del contexto HTTP
+            // y se asigna al DTO. El Service NUNCA debe leer el Claim para este flujo
+            // de escritura; ya llega correctamente etiquetado en el DTO.
             nuevoViaje.CosteraId = costeraIdClaim;
 
+            _logger.LogInformation(
+                "IniciarViaje — Buque: '{Buque}' | Origen: '{Origen}' | Destino: '{Destino}' | CosteraId: {CosteraId}",
+                nuevoViaje.NombreBuque, nuevoViaje.Origen, nuevoViaje.Destino, costeraIdClaim);
+
+            // ── 4. Delegación total al Service ────────────────────────────────
             var exito = await _viajeService.IniciarViajeAsync(nuevoViaje);
 
             if (!exito)
-                return StatusCode(500, new { mensaje = "Error interno al procesar el inicio de viaje." });
+            {
+                _logger.LogError(
+                    "IniciarViajeAsync retornó false para Buque: '{Buque}' CosteraId: {CosteraId}.",
+                    nuevoViaje.NombreBuque, costeraIdClaim);
 
-            return Ok(new { mensaje = $"Viaje para {nuevoViaje.NombreBuque} iniciado correctamente con estado 'Amarrado'." });
+                return StatusCode(StatusCodes.Status500InternalServerError, new
+                {
+                    mensaje = "Error interno al procesar el inicio de viaje. Intente nuevamente."
+                });
+            }
+
+            return Ok(new
+            {
+                mensaje   = $"Viaje para '{nuevoViaje.NombreBuque}' iniciado correctamente con estado 'Amarrado'.",
+                buque     = nuevoViaje.NombreBuque,
+                origen    = nuevoViaje.Origen,
+                destino   = nuevoViaje.Destino,
+                estadoInicial = "Amarrado"
+            });
         }
 
         /// <summary>
@@ -244,7 +262,6 @@ namespace Mbpc.Api.Controllers
         /// Valida que el estado actual permita zarpar (No puede estar Fondeado).
         /// </summary>
         [HttpPut("{id}/zarpar")]
-        [Authorize]
         public async Task<ActionResult> ZarparViaje(string id)
         {
             if (string.IsNullOrWhiteSpace(id))
@@ -263,7 +280,6 @@ namespace Mbpc.Api.Controllers
         /// Amarra el buque → NavegationStatusDesc = "Amarrado".
         /// </summary>
         [HttpPut("{id}/amarrar")]
-        [Authorize]
         public async Task<ActionResult> AmarrarViaje(string id)
         {
             if (string.IsNullOrWhiteSpace(id))
@@ -282,7 +298,6 @@ namespace Mbpc.Api.Controllers
         /// Fondea el buque → NavegationStatusDesc = "Fondeado".
         /// </summary>
         [HttpPut("{id}/fondear")]
-        [Authorize]
         public async Task<ActionResult> FondearViaje(string id)
         {
             if (string.IsNullOrWhiteSpace(id))
@@ -302,7 +317,6 @@ namespace Mbpc.Api.Controllers
         /// Paso previo obligatorio para zarpar desde un estado de fondeo.
         /// </summary>
         [HttpPut("{id}/reanudar")]
-        [Authorize]
         public async Task<ActionResult> ReanudarViaje(string id)
         {
             if (string.IsNullOrWhiteSpace(id))

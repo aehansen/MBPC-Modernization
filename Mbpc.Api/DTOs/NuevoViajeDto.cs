@@ -4,8 +4,14 @@ namespace Mbpc.Api.DTOs
 {
     /// <summary>
     /// Enum que mapea las opciones de la Declaración Jurada de Malvinas
-    /// según el sistema legacy de MBPC. El valor de la letra corresponde
-    /// al código de una sola letra que usa el SP subyacente.
+    /// según el sistema legacy de MBPC.
+    ///
+    /// CONVENCIÓN DE NOMBRES (obligatoria — no romper):
+    ///   El nombre de cada valor termina siempre con "_[LETRA]" donde LETRA
+    ///   es el código de una sola letra que usa el SP subyacente.
+    ///   El helper MapDeclaracionMalvinas() en ViajeManagerService extrae
+    ///   ese último segmento con Split('_').Last() para enviarlo al SP.
+    ///   Si se agrega un nuevo valor, DEBE seguir esta convención.
     /// </summary>
     public enum DeclaracionMalvinasEnum
     {
@@ -69,16 +75,30 @@ namespace Mbpc.Api.DTOs
 
     /// <summary>
     /// DTO para el inicio de un nuevo viaje.
-    /// Expande los campos requeridos por el SP PKG_MBPC_VIAJES.SP_CREAR_VIAJE
-    /// con los campos adicionales del formulario de la nueva UI.
+    ///
+    /// FLUJO DE VIDA DE ESTE OBJETO:
+    ///   1. El frontend serializa el formulario de "Nuevo Viaje" a este DTO.
+    ///   2. [ApiController] + ModelState validan las DataAnnotations automáticamente.
+    ///   3. El Controller inyecta CosteraId desde el Claim del JWT (es el único punto
+    ///      donde esto ocurre; el Service NO debe leer el Claim para este DTO).
+    ///   4. El Service lo consume para escribir en Oracle (SP) y en ambas colecciones Mongo.
+    ///
+    /// CAMPOS NO EXPUESTOS AL CLIENTE:
+    ///   CosteraId: se inyecta server-side desde el JWT; nunca debe venir del body del cliente.
+    ///              Si el cliente lo envía en el body, el Controller lo sobreescribe con el
+    ///              valor del Claim, garantizando que un operador nunca pueda crear un viaje
+    ///              en una costera que no le pertenece.
     /// </summary>
     public class NuevoViajeDto
     {
-        // ── NUEVO: MULTITENANT GEOGRÁFICO ──
+        // ── MULTITENANT GEOGRÁFICO (inyectado por el Controller, no por el cliente) ──
+        //
+        // Se inicializa como string.Empty porque el Controller lo sobreescribe SIEMPRE
+        // antes de pasar el DTO al Service. El Service falla explícitamente si recibe
+        // un valor no parseable a int (ver IniciarViajeAsync).
         public string CosteraId { get; set; } = string.Empty;
 
-        // ----------------------------------------------------------------
-        // CAMPOS ORIGINALES (requeridos por el SP)
+        // ── CAMPOS CORE (requeridos por el SP PKG_MBPC_VIAJES.SP_CREAR_VIAJE) ──
 
         [Required(ErrorMessage = "El nombre del buque es requerido.")]
         [StringLength(100, MinimumLength = 2, ErrorMessage = "El nombre del buque debe tener entre 2 y 100 caracteres.")]
@@ -92,16 +112,25 @@ namespace Mbpc.Api.DTOs
         [StringLength(100, MinimumLength = 2, ErrorMessage = "El destino debe tener entre 2 y 100 caracteres.")]
         public string Destino { get; set; } = null!;
 
-        // ----------------------------------------------------------------
-        // CAMPOS NUEVOS DE LA VENTANA "NUEVO VIAJE"
-        // ----------------------------------------------------------------
+        // ── CAMPOS ENRIQUECIDOS DEL FORMULARIO "NUEVO VIAJE" ─────────────────
 
         /// <summary>
-        /// Muelle de salida inicial del buque. Es opcional: el buque puede
+        /// Muelle de salida inicial del buque. Opcional: el buque puede
         /// iniciar el viaje desde zona de fondeo sin muelle asignado.
         /// </summary>
         [StringLength(150, ErrorMessage = "El muelle de salida no puede superar los 150 caracteres.")]
         public string? MuelleSalida { get; set; }
+        /// <summary>
+        /// Agencia Marítima responsable del buque.
+        /// Opcional.
+        /// </summary>
+        public string? AgenciaMaritima { get; set; }
+
+        /// <summary>
+        /// Motivo del viaje (ej: Carga Comercial, Reparaciones).
+        /// Opcional.
+        /// </summary>
+        public string? MotivoViaje { get; set; }
 
         /// <summary>
         /// Próximo punto de control o estación de inspección en la ruta.
@@ -119,7 +148,8 @@ namespace Mbpc.Api.DTOs
 
         /// <summary>
         /// Estimated Time of Arrival: fecha y hora estimada de llegada al destino.
-        /// Debe ser posterior a FechaPartida.
+        /// Debe ser posterior a FechaPartida. La validación temporal se realiza en el
+        /// Service (ValidarCoherenciaFechas) para mantener el Controller libre de lógica.
         /// </summary>
         [Required(ErrorMessage = "La ETA (Tiempo Estimado de Arribo) es requerida.")]
         public DateTime ETA { get; set; }
@@ -134,6 +164,9 @@ namespace Mbpc.Api.DTOs
         /// <summary>
         /// Posición geográfica inicial del buque al momento del registro del viaje.
         /// Formato libre del sistema legacy (ej: "34°36'S 058°22'W" o descripción de zona).
+        /// Se almacena como texto en el detalle operativo (ViajeDetalleMongo).
+        /// Los valores numéricos Latitude/Longitude en ViajePosicionMongo se inicializan en 0
+        /// y son actualizados por el feed AIS externo.
         /// </summary>
         [StringLength(200, ErrorMessage = "La posición no puede superar los 200 caracteres.")]
         public string? Posicion { get; set; }
@@ -147,7 +180,8 @@ namespace Mbpc.Api.DTOs
 
         /// <summary>
         /// Código de la Declaración Jurada de Malvinas según el sistema legacy.
-        /// Mapea al enum DeclaracionMalvinasEnum. Valor requerido para todo viaje.
+        /// El valor se envía al SP como una letra de código extraída del nombre del enum
+        /// mediante el helper MapDeclaracionMalvinas() en ViajeManagerService.
         /// </summary>
         [Required(ErrorMessage = "La declaración de Malvinas es requerida.")]
         [EnumDataType(typeof(DeclaracionMalvinasEnum), ErrorMessage = "El valor de Malvinas no corresponde a una opción válida del sistema.")]

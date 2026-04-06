@@ -332,13 +332,10 @@ namespace Mbpc.Api.Services
                         .Find(filtroCostera)
                         .ToListAsync();
 
-                    // Los detalles operativos (Oracle-backed) también se filtran por costera
-                    // para evitar cruces de información entre jurisdicciones.
                     var detalles = await _detallesCollection
                         .Find(filtroDetalleCostera)
                         .ToListAsync();
 
-                    // ToLookup agrupa documentos con el mismo VesselName (evita excepción por duplicados).
                     var lookupDetalles = detalles
                         .Where(d => !string.IsNullOrWhiteSpace(d.VesselName))
                         .ToLookup(d => d.VesselName, StringComparer.OrdinalIgnoreCase);
@@ -348,7 +345,6 @@ namespace Mbpc.Api.Services
                         var detallesHomonimos = lookupDetalles[p.VesselName ?? ""];
 
                         // TAREA PENDIENTE ARQUITECTURA: cruzar por p.TravelId == detalle.IdViaje.
-                        // Por ahora se toma el primer detalle disponible para ese nombre.
                         var detalle      = detallesHomonimos.FirstOrDefault();
                         var tieneDetalle = detalle != null;
 
@@ -367,8 +363,6 @@ namespace Mbpc.Api.Services
                             UltimaActualizacion = p.MsgTime != default
                                                     ? p.MsgTime.ToString("dd/MM/yyyy HH:mm")
                                                     : "N/A",
-
-                            // Priorizamos el origen/destino del detalle (Oracle-backed); fallback al AIS
                             Origen  = tieneDetalle && !string.IsNullOrWhiteSpace(detalle?.Origin)
                                         ? detalle.Origin
                                         : p.Origin,
@@ -376,13 +370,11 @@ namespace Mbpc.Api.Services
                                         ? detalle.Destination
                                         : p.Destination,
                             TieneDetalleOperativo = tieneDetalle,
-
                             CantidadBarcazas = tieneDetalle ? (detalle?.Barcazas?.Count ?? 0) : 0,
                             Remolcador       = tieneDetalle ? detalle?.Remolcador?.Nombre : null
                         };
                     }).ToList();
 
-                    // Guardar en caché particionada por costera
                     var serialized   = JsonSerializer.Serialize(listaCompleta);
                     var cacheOptions = new DistributedCacheEntryOptions
                     {
@@ -419,8 +411,7 @@ namespace Mbpc.Api.Services
 
         /// <summary>
         /// EJE 3: El costeraId se obtiene del contexto HTTP y se pasa al stored
-        /// procedure de Oracle como p_COSTERA_ID. El fallback mock también respeta
-        /// el filtro de costera. Admin (costeraId == 0) recibe todos los registros.
+        /// procedure de Oracle como p_COSTERA_ID.
         /// </summary>
         public async Task<List<ViajeHistoricoDto>> GetHistoricoAsync(FiltroHistoricoDto filtro)
         {
@@ -440,8 +431,6 @@ namespace Mbpc.Api.Services
                     parameters.Add("p_DESTINO",    filtro.Destino   ?? (object)DBNull.Value);
                     parameters.Add("p_DESDE",      filtro.Desde     ?? (object)DBNull.Value);
                     parameters.Add("p_HASTA",      filtro.Hasta     ?? (object)DBNull.Value);
-                    // EJE 3: parámetro de costera para filtrado en Oracle.
-                    // Si es 0 (Admin), el SP debe interpretar que no hay restricción de costera.
                     parameters.Add("p_COSTERA_ID", costeraId);
 
                     var resultado = await connection.QueryAsync<ViajeHistoricoDto>(
@@ -465,117 +454,244 @@ namespace Mbpc.Api.Services
 
         // ── ESCRITURA (Oracle + CQRS) ────────────────────────────────────────
 
+        /// <summary>
+        /// Orquesta la creación completa de un viaje siguiendo el patrón CQRS:
+        ///
+        ///   FASE 1 — Oracle (fuente de verdad transaccional):
+        ///     Llama a PKG_MBPC_VIAJES.SP_CREAR_VIAJE con reintentos Polly.
+        ///     El SP retorna el ID generado (p_ID_VIAJE_GENERADO, OUT).
+        ///     Si Oracle falla en producción, la excepción se propaga (sin bypass).
+        ///     En desarrollo, activa el bypass DEV y continúa con un TravelId ficticio.
+        ///
+        ///   FASE 2 — MongoDB, colección last_mbpc (ViajePosicionMongo):
+        ///     Inserta el documento de posición inicial con:
+        ///       - Estado inicial "Amarrado" (regla de negocio invariable).
+        ///       - TravelId obtenido de Oracle (o ficticio en DEV).
+        ///       - CosteraId proveniente del DTO (ya inyectado por el Controller desde el JWT).
+        ///       - Lat/Lon/Speed en 0 hasta que el feed AIS actualice la posición real.
+        ///
+        ///   FASE 3 — MongoDB, colección details_mbpc (ViajeDetalleMongo):
+        ///     Inserta el documento de detalle operativo con:
+        ///       - Los datos enriquecidos del DTO (muelle, ZOE, km, declaración Malvinas).
+        ///       - CosteraId para aislar el detalle en el filtrado multitenant del mapa.
+        ///       - Barcazas y Remolcador vacíos (se completan post-despacho por otro flujo).
+        ///
+        ///   FASE 4 — Invalidación de caché Redis:
+        ///     Elimina las claves "barcos:en_puerto:{costeraId}" y "viajes:mapa:{costeraId}"
+        ///     para que el frontend vea el nuevo buque en el próximo request sin esperar TTL.
+        ///     Si Redis no está disponible, se loguea como Warning y el flujo NO se aborta
+        ///     (degradación elegante: la caché se auto-expirará en CacheTtl = 2 min).
+        ///
+        /// Invariante de consistencia:
+        ///   El éxito del método se define por el éxito de Oracle (FASE 1).
+        ///   Un fallo en MongoDB (FASE 2 o 3) se loguea como Error pero NO revierte Oracle,
+        ///   ya que Oracle es la fuente de verdad y MongoDB es la proyección de lectura
+        ///   (consistencia eventual aceptada en el diseño CQRS del sistema).
+        /// </summary>
         public async Task<bool> IniciarViajeAsync(NuevoViajeDto nuevoViaje)
         {
-            _logger.LogInformation("Iniciando viaje en Oracle para el buque: {Buque}", nuevoViaje.NombreBuque);
-            bool exitoOracle = false;
+            _logger.LogInformation(
+                "IniciarViajeAsync — Inicio para Buque: '{Buque}' | Origen: '{Origen}' | Destino: '{Destino}' | CosteraId: '{CosteraId}'",
+                nuevoViaje.NombreBuque, nuevoViaje.Origen, nuevoViaje.Destino, nuevoViaje.CosteraId);
+
+            // ── Resolución del CosteraId numérico ─────────────────────────────
+            // El DTO trae CosteraId como string (para compatibilidad con el Claim del JWT).
+            // Lo convertimos a int una sola vez para todo el flujo.
+            if (!int.TryParse(nuevoViaje.CosteraId, out var costeraIdInt))
+            {
+                _logger.LogError(
+                    "IniciarViajeAsync abortado: CosteraId '{CosteraId}' no es un entero válido.",
+                    nuevoViaje.CosteraId);
+                return false;
+            }
+
+            // ── FASE 1: Escritura en Oracle ───────────────────────────────────
+            long travelIdGenerado = 0;
+            bool exitoOracle      = false;
 
             try
             {
-                exitoOracle = await _oracleRetryPolicy.ExecuteAsync(async () =>
+                (exitoOracle, travelIdGenerado) = await _oracleRetryPolicy.ExecuteAsync(async () =>
                 {
                     using var connection = new OracleConnection(_oracleConnectionString);
-                    var parameters = new DynamicParameters();
+                    var parameters       = new DynamicParameters();
 
-                    parameters.Add("p_BUQUE",        nuevoViaje.NombreBuque);
-                    parameters.Add("p_ORIGEN",        nuevoViaje.Origen);
-                    parameters.Add("p_DESTINO",       nuevoViaje.Destino);
-                    parameters.Add("p_MUELLE_SALIDA", nuevoViaje.MuelleSalida);
-                    parameters.Add("p_PTO_CONTROL",   nuevoViaje.ProximoPuntoControl);
-                    parameters.Add("p_FECHA_PARTIDA", nuevoViaje.FechaPartida);
-                    parameters.Add("p_ETA",           nuevoViaje.ETA);
-                    parameters.Add("p_ZOE",           nuevoViaje.ZOE);
-                    parameters.Add("p_POSICION",      nuevoViaje.Posicion);
-                    parameters.Add("p_KM_PAR",        nuevoViaje.RioCanalKmPar);
-                    parameters.Add("p_MALVINAS_COD",  nuevoViaje.DeclaracionMalvinas.ToString());
-                    parameters.Add("p_RESULTADO", dbType: DbType.Int32, direction: ParameterDirection.Output);
+                    // Parámetros de entrada al SP
+                    //
+                    // REGLA ORACLE + DAPPER: los parámetros opcionales (nullable) DEBEN
+                    // declararse con dbType explícito. Sin él, Dapper pasa DBNull sin
+                    // tipo y el driver ODP.NET lanza:
+                    //   "The member X of type System.DBNull cannot be used as a parameter value"
+                    // Los parámetros requeridos (non-nullable) no necesitan dbType porque
+                    // Dapper infiere el tipo del valor concreto.
+                    parameters.Add("p_BUQUE",        nuevoViaje.NombreBuque,            dbType: DbType.String);
+                    parameters.Add("p_ORIGEN",        nuevoViaje.Origen,                 dbType: DbType.String);
+                    parameters.Add("p_DESTINO",       nuevoViaje.Destino,                dbType: DbType.String);
+                    parameters.Add("p_MUELLE_SALIDA", nuevoViaje.MuelleSalida,           dbType: DbType.String);   // nullable — DbType obligatorio
+                    parameters.Add("p_PTO_CONTROL",   nuevoViaje.ProximoPuntoControl,    dbType: DbType.String);
+                    parameters.Add("p_FECHA_PARTIDA", nuevoViaje.FechaPartida,           dbType: DbType.DateTime);
+                    parameters.Add("p_ETA",           nuevoViaje.ETA,                    dbType: DbType.DateTime);
+                    parameters.Add("p_ZOE",           nuevoViaje.ZOE,                    dbType: DbType.String);   // nullable — DbType obligatorio
+                    parameters.Add("p_POSICION",      nuevoViaje.Posicion,               dbType: DbType.String);   // nullable — DbType obligatorio
+                    parameters.Add("p_KM_PAR",        nuevoViaje.RioCanalKmPar,          dbType: DbType.Decimal);  // nullable — DbType obligatorio
+
+                    // El enum se mapea a su letra de código para el SP legacy.
+                    // Ejemplo: DeclaracionMalvinasEnum.NoVieneDeMalvinas_L → "L"
+                    parameters.Add("p_MALVINAS_COD",  MapDeclaracionMalvinas(nuevoViaje.DeclaracionMalvinas), dbType: DbType.String);
+                    parameters.Add("p_COSTERA_ID",    costeraIdInt,                      dbType: DbType.Int32);
+
+                    // Parámetros de salida del SP
+                    parameters.Add("p_RESULTADO",         dbType: DbType.Int32, direction: ParameterDirection.Output);
+                    parameters.Add("p_ID_VIAJE_GENERADO", dbType: DbType.Int64, direction: ParameterDirection.Output);
 
                     await connection.ExecuteAsync(
                         "PKG_MBPC_VIAJES.SP_CREAR_VIAJE",
                         parameters,
                         commandType: CommandType.StoredProcedure);
 
-                    return parameters.Get<int>("p_RESULTADO") == 1;
+                    var resultado = parameters.Get<int>("p_RESULTADO");
+                    var idViaje   = parameters.Get<long>("p_ID_VIAJE_GENERADO");
+
+                    return (resultado == 1, idViaje);
                 });
+
+                if (!exitoOracle)
+                {
+                    _logger.LogError(
+                        "Oracle rechazó la creación del viaje (p_RESULTADO != 1) para Buque: '{Buque}'.",
+                        nuevoViaje.NombreBuque);
+                    return false;
+                }
+
+                _logger.LogInformation(
+                    "FASE 1 OK — Oracle creó el viaje. TravelId: {TravelId} | Buque: '{Buque}'.",
+                    travelIdGenerado, nuevoViaje.NombreBuque);
             }
             catch (OracleException ex)
             {
                 if (!_env.IsDevelopment())
                 {
-                    _logger.LogError(ex, "Error de Oracle en producción al crear viaje para {Buque}.", nuevoViaje.NombreBuque);
-                    throw;
+                    _logger.LogError(ex,
+                        "FASE 1 FALLO — Error de Oracle en producción al crear viaje para Buque: '{Buque}'.",
+                        nuevoViaje.NombreBuque);
+                    throw; // En producción, propagamos para que el Controller devuelva 500.
                 }
 
+                // Bypass DEV: permite trabajar sin Oracle en entorno de desarrollo.
                 _logger.LogWarning(
-                    "Oracle no disponible tras reintentos. Bypass DEV activado. Simulando éxito al crear viaje para: {Buque}. Error: {Message}",
+                    "FASE 1 BYPASS DEV — Oracle no disponible tras reintentos. " +
+                    "Simulando éxito. Buque: '{Buque}'. Error Oracle: {Message}",
                     nuevoViaje.NombreBuque, ex.Message);
 
-                exitoOracle = true; // Bypass de desarrollo
+                exitoOracle      = true;
+                travelIdGenerado = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(); // ID ficticio reproducible
             }
 
-            // --- INICIO LÓGICA CQRS (ACTUALIZACIÓN DUAL) ---
-            if (exitoOracle)
+            // ── FASE 2: Inserción en MongoDB — last_mbpc (ViajePosicionMongo) ─
+            // Esta fase es CQRS puro: Oracle es la fuente de verdad;
+            // MongoDB recibe la proyección para lectura/mapa.
+            try
             {
-                try
+                var nuevoDocumentoPosicion = new ViajePosicionMongo
                 {
-                    _logger.LogInformation(
-                        "Sincronizando estado en MongoDB (CQRS) para el nuevo viaje de {Buque}", nuevoViaje.NombreBuque);
+                    // Id es asignado por MongoDB al insertar (BsonId + ObjectId).
+                    TravelId             = travelIdGenerado,
+                    VesselName           = nuevoViaje.NombreBuque,
+                    // Los buques nacen "Amarrado" (en muelle). Regla de negocio invariable.
+                    NavegationStatusDesc = EstadoEtapa.Amarrado.ToString(),
+                    MsgTime              = DateTime.UtcNow,
+                    // Lat/Lon/Speed en 0: el feed AIS externo actualizará estos valores
+                    // una vez que el buque comience a transmitir su posición real.
+                    Latitude             = 0,
+                    Longitude            = 0,
+                    SpeedOverGround      = 0,
+                    CourseOverGround     = 0,
+                    Origin               = nuevoViaje.Origen,
+                    Destination          = nuevoViaje.Destino,
+                    // EJE 3: el CosteraId garantiza el aislamiento multitenant en las lecturas.
+                    CosteraId            = costeraIdInt
+                };
 
-                    // El CosteraId del nuevo registro en Mongo viene del DTO, que a su vez
-                    // fue inyectado por el Controller desde el Claim del token.
-                    var costeraIdMongo = int.TryParse(nuevoViaje.CosteraId, out var parsed) ? parsed : (int?)null;
+                await _viajesCollection.InsertOneAsync(nuevoDocumentoPosicion);
 
-                    var nuevoRegistroMongo = new ViajePosicionMongo
-                    {
-                        VesselName           = nuevoViaje.NombreBuque,
-                        // Los buques nacen "Amarrado" (en muelle), no navegando
-                        NavegationStatusDesc = EstadoEtapa.Amarrado.ToString(),
-                        MsgTime              = DateTime.UtcNow,
-                        Latitude             = 0,
-                        Longitude            = 0,
-                        SpeedOverGround      = 0,
-                        Origin               = nuevoViaje.Origen,
-                        Destination          = nuevoViaje.Destino,
-                        // EJE 3: el nuevo viaje hereda la costera del DTO de creación
-                        CosteraId            = costeraIdMongo
-                    };
-
-                    await _viajesCollection.InsertOneAsync(nuevoRegistroMongo);
-
-                    _logger.LogInformation(
-                        "¡CQRS Exitoso! Viaje insertado en Mongo con estado inicial '{Estado}' para CosteraId '{CosteraId}'.",
-                        EstadoEtapa.Amarrado, costeraIdMongo);
-
-                    // Invalidar caché de la costera correspondiente
-                    if (costeraIdMongo.HasValue)
-                    {
-                        try
-                        {
-                            await _redisRetryPolicy.ExecuteAsync(async () =>
-                            {
-                                await _cache.RemoveAsync(CacheKeyBarcosEnPuerto(costeraIdMongo.Value));
-                                await _cache.RemoveAsync(CacheKeyMapaViajes(costeraIdMongo.Value));
-                            });
-
-                            _logger.LogInformation(
-                                "Cachés de CosteraId '{CosteraId}' invalidadas tras nuevo viaje.", costeraIdMongo.Value);
-                        }
-                        catch (Exception redisEx)
-                        {
-                            _logger.LogWarning(redisEx,
-                                "No se pudo invalidar la caché de Redis tras crear viaje. Se auto-expirará en {Ttl}.", CacheTtl);
-                        }
-                    }
-                }
-                catch (Exception mongoEx)
-                {
-                    _logger.LogError(mongoEx,
-                        "Fallo al insertar en MongoDB para el nuevo viaje de {Buque}.", nuevoViaje.NombreBuque);
-                }
+                _logger.LogInformation(
+                    "FASE 2 OK — ViajePosicionMongo insertado. MongoId: '{MongoId}' | TravelId: {TravelId} | CosteraId: {CosteraId}.",
+                    nuevoDocumentoPosicion.Id, travelIdGenerado, costeraIdInt);
             }
-            // --- FIN LÓGICA CQRS ---
+            catch (Exception mongoEx)
+            {
+                // Un fallo en MongoDB NO cancela el viaje: Oracle ya lo registró.
+                // Se loguea como Error para alertar al equipo de ops sobre la inconsistencia temporal.
+                _logger.LogError(mongoEx,
+                    "FASE 2 FALLO — No se pudo insertar ViajePosicionMongo para Buque: '{Buque}', TravelId: {TravelId}. " +
+                    "Oracle fue exitoso. El documento se puede re-sincronizar manualmente o vía job de reconciliación.",
+                    nuevoViaje.NombreBuque, travelIdGenerado);
+                // No retornamos false: la operación de negocio fue exitosa (Oracle ok).
+            }
 
-            return exitoOracle;
+            // ── FASE 3: Inserción en MongoDB — details_mbpc (ViajeDetalleMongo) ─
+            // Documento de detalle operativo: complementa ViajePosicionMongo con los
+            // datos enriquecidos del formulario (muelle, ZOE, km, Malvinas, etc.).
+            // Este documento es el que se muestra en el panel lateral del mapa ArcGIS.
+            try
+            {
+                var nuevoDocumentoDetalle = new ViajeDetalleMongo
+                {
+                    // Id es asignado por MongoDB al insertar.
+                    IdViaje    = travelIdGenerado,
+                    VesselName = nuevoViaje.NombreBuque,
+                    Origin     = nuevoViaje.Origen,
+                    Destination = nuevoViaje.Destino,
+                    // Remolcador y Barcazas: vacíos en el momento de la creación.
+                    // Se completarán mediante llamadas separadas del flujo de despacho.
+                    Remolcador = null,
+                    Barcazas   = new List<BarcazaMongo>(),
+                    // EJE 3: misma costera que el ViajePosicionMongo para garantizar
+                    // que el cruce en GetMapaViajesAsync respete el aislamiento multitenant.
+                    CosteraId  = costeraIdInt
+                };
+
+                await _detallesCollection.InsertOneAsync(nuevoDocumentoDetalle);
+
+                _logger.LogInformation(
+                    "FASE 3 OK — ViajeDetalleMongo insertado. MongoId: '{MongoId}' | TravelId: {TravelId} | CosteraId: {CosteraId}.",
+                    nuevoDocumentoDetalle.Id, travelIdGenerado, costeraIdInt);
+            }
+            catch (Exception mongoExDetalle)
+            {
+                _logger.LogError(mongoExDetalle,
+                    "FASE 3 FALLO — No se pudo insertar ViajeDetalleMongo para Buque: '{Buque}', TravelId: {TravelId}. " +
+                    "La posición AIS fue insertada (Fase 2) pero el detalle operativo está ausente.",
+                    nuevoViaje.NombreBuque, travelIdGenerado);
+            }
+
+            // ── FASE 4: Invalidación de caché Redis ───────────────────────────
+            // Se eliminan las claves particionadas por CosteraId para que el frontend
+            // vea el nuevo viaje inmediatamente en el mapa y en la lista de barcos en puerto,
+            // sin esperar el TTL de 2 minutos.
+            try
+            {
+                await _redisRetryPolicy.ExecuteAsync(async () =>
+                {
+                    await _cache.RemoveAsync(CacheKeyBarcosEnPuerto(costeraIdInt));
+                    await _cache.RemoveAsync(CacheKeyMapaViajes(costeraIdInt));
+                });
+
+                _logger.LogInformation(
+                    "FASE 4 OK — Cachés invalidadas para CosteraId '{CosteraId}' tras nuevo viaje de '{Buque}'.",
+                    costeraIdInt, nuevoViaje.NombreBuque);
+            }
+            catch (Exception redisEx)
+            {
+                // Degradación elegante: si Redis no responde, la caché se auto-expirará en CacheTtl.
+                // El nuevo viaje será visible en el próximo ciclo de refresco del frontend.
+                _logger.LogWarning(redisEx,
+                    "FASE 4 ADVERTENCIA — No se pudo invalidar la caché de Redis para CosteraId '{CosteraId}'. " +
+                    "Las cachés se auto-expirarán en {Ttl}. El nuevo viaje de '{Buque}' será visible en ese plazo.",
+                    costeraIdInt, CacheTtl, nuevoViaje.NombreBuque);
+            }
+
+            return true;
         }
 
         // ── MÁQUINA DE ESTADOS (EJE 2) ───────────────────────────────────────
@@ -737,8 +853,7 @@ namespace Mbpc.Api.Services
                 _logger.LogInformation(
                     "¡CQRS Exitoso! NavegationStatusDesc actualizado a '{Estado}' para '{Id}'.", nuevoEstado, id);
 
-                // EJE 3: para invalidar la caché correcta, leemos el CosteraId del documento
-                // actualizado. Si no se puede obtener, no bloqueamos el flujo.
+                // EJE 3: para invalidar la caché correcta, leemos el CosteraId del documento actualizado.
                 try
                 {
                     var viajeActualizado = await _viajesCollection.Find(filtro).FirstOrDefaultAsync();
@@ -779,13 +894,37 @@ namespace Mbpc.Api.Services
             }
         }
 
-        // ── DATOS MOCKEADOS (solo DEV — fallback Oracle) ─────────────────────
+        // ── HELPER DE MAPEO DE ENUMS ─────────────────────────────────────────
 
         /// <summary>
-        /// EJE 3: El mock filtra por costeraId además de los filtros de búsqueda.
-        /// Admin (costeraId == 0) recibe todos los registros sin restricción de costera.
-        /// Los registros mock incluyen CosteraId numérico para simular el comportamiento real.
+        /// Extrae el código de una sola letra del nombre del valor del enum
+        /// DeclaracionMalvinasEnum para enviarlo al SP legacy.
+        ///
+        /// Convención de nombres del enum: [Descripcion]_[LETRA_CODIGO]
+        /// Ejemplo: NoVieneDeMalvinas_L → "L"
+        ///          VaAMalvinas_AutorizadoCPER_A → "A"
+        ///
+        /// Se extrae el último segmento después del último guion bajo (_),
+        /// que siempre es la letra de código de una sola letra.
         /// </summary>
+        private static string MapDeclaracionMalvinas(DeclaracionMalvinasEnum declaracion)
+        {
+            var nombreCompleto = declaracion.ToString();
+            var ultimoSegmento = nombreCompleto.Split('_').Last();
+
+            // Guardia defensiva: el segmento extraído debe ser exactamente una letra.
+            if (ultimoSegmento.Length == 1 && char.IsLetter(ultimoSegmento[0]))
+                return ultimoSegmento;
+
+            // Si la convención del enum se rompe por algún motivo, lanzamos una excepción
+            // clara durante el desarrollo para detectarlo temprano.
+            throw new InvalidOperationException(
+                $"El enum DeclaracionMalvinasEnum '{nombreCompleto}' no sigue la convención de nombres '_LETRA'. " +
+                $"Segmento extraído: '{ultimoSegmento}'. Revise los nombres de los valores del enum.");
+        }
+
+        // ── DATOS MOCKEADOS (solo DEV — fallback Oracle) ─────────────────────
+
         private static List<ViajeHistoricoDto> GetHistoricoMock(FiltroHistoricoDto filtro, int costeraId)
         {
             var todos = new List<ViajeHistoricoDto>
@@ -799,7 +938,6 @@ namespace Mbpc.Api.Services
                 new() { Id = "H-007", Buque = "LITORAL I",            Omi = "IMO9000007", Matricula = "ARG-0007", Origen = "Puerto Goya",         Destino = "Puerto Rosario",      FechaPartida = "10/03/2026 07:00", Eta = "11/03/2026 09:00", Estado = "Cancelado",  CosteraId = "1" },
             };
 
-            // Admin (costeraId == 0) recibe todos; Operador filtra por su costera
             var query = costeraId == 0
                 ? todos.AsEnumerable()
                 : todos.Where(v => v.CosteraId == costeraId.ToString());
