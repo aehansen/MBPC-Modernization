@@ -29,6 +29,8 @@ import MapaAIS from './MapaAIS';
 import ControlesEstadoBuque from './ControlesEstadoBuque';
 import Navbar from './components/Navbar';
 
+import ViajesDashboard from './components/viajes/ViajesDashboard';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // DATOS DEL ENUM DeclaracionMalvinasEnum — mapeados 1:1 al C#
 // ─────────────────────────────────────────────────────────────────────────────
@@ -646,6 +648,13 @@ const MbpcDashboard = () => {
                                 <span>{error}</span>
                             </div>
                         )}
+
+                        {/* ── PRUEBA NUEVO DASHBOARD REACT QUERY ── */}
+                        <div className="mb-8 border-4 border-dashed border-green-500 p-4 rounded-xl bg-white">
+                            <h2 className="text-xl font-bold text-green-700 mb-4">⬇️ NUEVO DASHBOARD (TanStack Query) ⬇️</h2>
+                            <ViajesDashboard />
+                        </div>
+                        {/* ──────────────────────────────────────── */}
 
                         {/* ── SECCIÓN VIAJES ────────────────────────────────────── */}
                         <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
