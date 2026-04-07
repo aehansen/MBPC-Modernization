@@ -30,6 +30,7 @@ import ControlesEstadoBuque from './ControlesEstadoBuque';
 import Navbar from './components/Navbar';
 
 import ViajesDashboard from './components/viajes/ViajesDashboard';
+import { ModalNuevoViaje } from './components/viajes/ModalNuevoViaje';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // DATOS DEL ENUM DeclaracionMalvinasEnum — mapeados 1:1 al C#
@@ -100,11 +101,6 @@ const IconoSpinner = () => (
 // ─────────────────────────────────────────────────────────────────────────────
 // ESTADO INICIAL DE FORMULARIOS
 // ─────────────────────────────────────────────────────────────────────────────
-const NUEVO_VIAJE_INITIAL = {
-    nombreBuque: '', origen: '', destino: '', muelleSalida: '',
-    proximoPuntoControl: '', fechaPartida: '', eta: '',
-    zoe: '', posicion: '', rioCanalKmPar: '', declaracionMalvinas: '',
-};
 
 const HISTORICO_FILTRO_INITIAL = {
     nombre: '', omi: '', matricula: '', origen: '', destino: '', desde: '', hasta: ''
@@ -184,9 +180,7 @@ const MbpcDashboard = () => {
     });
 
     // --- ESTADO MODAL NUEVO VIAJE ---
-    const [modalNuevoViaje, setModalNuevoViaje] = useState({ show: false, loading: false });
-    const [nuevoViajeForm, setNuevoViajeForm] = useState(NUEVO_VIAJE_INITIAL);
-    const [nuevoViajeErrors, setNuevoViajeErrors] = useState({});
+    const [modalNuevoViaje, setModalNuevoViaje] = useState({ show: false });
 
     // --- ESTADO MODAL BARCOS EN PUERTO ---
     const [modalPuerto, setModalPuerto] = useState({ show: false, loading: false, datos: [] });
@@ -355,58 +349,7 @@ const MbpcDashboard = () => {
 
     // ── MODAL NUEVO VIAJE ──────────────────────────────────────────────────────
     const abrirNuevoViaje = () => {
-        setNuevoViajeForm(NUEVO_VIAJE_INITIAL);
-        setNuevoViajeErrors({});
-        setModalNuevoViaje({ show: true, loading: false });
-    };
-
-    const cerrarNuevoViaje = () => setModalNuevoViaje({ show: false, loading: false });
-
-    const handleNuevoViajeChange = (e) => {
-        const { name, value } = e.target;
-        setNuevoViajeForm(prev => ({ ...prev, [name]: value }));
-        if (nuevoViajeErrors[name]) setNuevoViajeErrors(prev => ({ ...prev, [name]: null }));
-    };
-
-    const validarNuevoViaje = () => {
-        const errors = {};
-        if (!nuevoViajeForm.nombreBuque.trim()) errors.nombreBuque = "El nombre del buque es requerido.";
-        if (!nuevoViajeForm.origen.trim()) errors.origen = "El origen es requerido.";
-        if (!nuevoViajeForm.destino.trim()) errors.destino = "El destino es requerido.";
-        if (!nuevoViajeForm.proximoPuntoControl) errors.proximoPuntoControl = "El próximo punto de control es requerido.";
-        if (!nuevoViajeForm.fechaPartida) errors.fechaPartida = "La fecha de partida es requerida.";
-        if (!nuevoViajeForm.eta) errors.eta = "La ETA es requerida.";
-        if (!nuevoViajeForm.declaracionMalvinas) errors.declaracionMalvinas = "La declaración de Malvinas es requerida.";
-        return errors;
-    };
-
-    const guardarNuevoViaje = async () => {
-        const errors = validarNuevoViaje();
-        if (Object.keys(errors).length > 0) { setNuevoViajeErrors(errors); return; }
-        setModalNuevoViaje(prev => ({ ...prev, loading: true }));
-        try {
-            const payload = {
-                nombreBuque:         nuevoViajeForm.nombreBuque,
-                origen:              nuevoViajeForm.origen,
-                destino:             nuevoViajeForm.destino,
-                muelleSalida:        nuevoViajeForm.muelleSalida || null,
-                proximoPuntoControl: nuevoViajeForm.proximoPuntoControl,
-                fechaPartida:        nuevoViajeForm.fechaPartida,
-                eta:                 nuevoViajeForm.eta,
-                zoe:                 nuevoViajeForm.zoe || null,
-                posicion:            nuevoViajeForm.posicion || null,
-                rioCanalKmPar:       nuevoViajeForm.rioCanalKmPar ? parseFloat(nuevoViajeForm.rioCanalKmPar) : null,
-                declaracionMalvinas: nuevoViajeForm.declaracionMalvinas,
-            };
-            await apiClient.post('/api/viajes', payload);
-            await fetchViajes();
-            cerrarNuevoViaje();
-        } catch (err) {
-            console.error("Error al crear viaje:", err);
-            alert("No se pudo crear el viaje. Verificá la consola y el Backend.");
-        } finally {
-            setModalNuevoViaje(prev => ({ ...prev, loading: false }));
-        }
+        setModalNuevoViaje({ show: true });
     };
 
     // ── MODAL BARCOS EN PUERTO ─────────────────────────────────────────────────
@@ -1225,163 +1168,7 @@ const MbpcDashboard = () => {
                 </Modal>
             )}
 
-            {/* ════════════════════════════════════════════════════════════
-                MODAL NUEVO VIAJE
-            ════════════════════════════════════════════════════════════ */}
-            {modalNuevoViaje.show && (
-                <Modal onClose={cerrarNuevoViaje} maxWidth="max-w-3xl">
-                    <ModalHeader
-                        titulo="Registrar Nuevo Viaje"
-                        subtitulo="El buque será creado con estado 'Amarrado' según regla de negocio."
-                        icono={<IconoBarco className="w-6 h-6 text-blue-300" />}
-                        onClose={cerrarNuevoViaje}
-                    />
-                    <div className="p-6 space-y-6">
-                        {/* ── Datos del Buque ── */}
-                        <fieldset>
-                            <legend className="text-xs font-bold text-[#002454] uppercase tracking-wider mb-3 pb-1 border-b border-blue-100 w-full">Datos del Buque</legend>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <div className="md:col-span-3">
-                                    <Campo label="Nombre del Buque" required>
-                                        <input name="nombreBuque" type="text"
-                                            className={`${inputCls} ${nuevoViajeErrors.nombreBuque ? 'border-red-400 ring-1 ring-red-300' : ''}`}
-                                            placeholder="Ej: ARA Libertad / BARCAZA-001"
-                                            value={nuevoViajeForm.nombreBuque} onChange={handleNuevoViajeChange} autoFocus />
-                                        {nuevoViajeErrors.nombreBuque && <p className="text-xs text-red-500 mt-1">{nuevoViajeErrors.nombreBuque}</p>}
-                                    </Campo>
-                                </div>
-                                <div className="md:col-span-1">
-                                    <Campo label="Puerto de Origen" required>
-                                        <input name="origen" type="text"
-                                            className={`${inputCls} ${nuevoViajeErrors.origen ? 'border-red-400 ring-1 ring-red-300' : ''}`}
-                                            placeholder="Ej: Buenos Aires"
-                                            value={nuevoViajeForm.origen} onChange={handleNuevoViajeChange} />
-                                        {nuevoViajeErrors.origen && <p className="text-xs text-red-500 mt-1">{nuevoViajeErrors.origen}</p>}
-                                    </Campo>
-                                </div>
-                                <div className="md:col-span-1">
-                                    <Campo label="Puerto de Destino" required>
-                                        <input name="destino" type="text"
-                                            className={`${inputCls} ${nuevoViajeErrors.destino ? 'border-red-400 ring-1 ring-red-300' : ''}`}
-                                            placeholder="Ej: Montevideo"
-                                            value={nuevoViajeForm.destino} onChange={handleNuevoViajeChange} />
-                                        {nuevoViajeErrors.destino && <p className="text-xs text-red-500 mt-1">{nuevoViajeErrors.destino}</p>}
-                                    </Campo>
-                                </div>
-                            </div>
-                        </fieldset>
-
-                        {/* ── Muelle y Control ── */}
-                        <fieldset>
-                            <legend className="text-xs font-bold text-[#002454] uppercase tracking-wider mb-3 pb-1 border-b border-blue-100 w-full">Muelle y Control</legend>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <Campo label="Muelle de Salida (opcional)">
-                                    <input name="muelleSalida" type="text" className={inputCls}
-                                        placeholder="Ej: Muelle Alte. Storni - Sitio 2"
-                                        value={nuevoViajeForm.muelleSalida} onChange={handleNuevoViajeChange} />
-                                </Campo>
-                                <Campo label="Próximo Punto de Control" required>
-                                    <select name="proximoPuntoControl"
-                                        className={`${inputCls} ${nuevoViajeErrors.proximoPuntoControl ? 'border-red-400 ring-1 ring-red-300' : ''}`}
-                                        value={nuevoViajeForm.proximoPuntoControl} onChange={handleNuevoViajeChange}>
-                                        <option value="">-- Seleccionar punto --</option>
-                                        {PUNTOS_CONTROL_OPTIONS.map(opt => (
-                                            <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                        ))}
-                                    </select>
-                                    {nuevoViajeErrors.proximoPuntoControl && <p className="text-xs text-red-500 mt-1">{nuevoViajeErrors.proximoPuntoControl}</p>}
-                                </Campo>
-                            </div>
-                        </fieldset>
-
-                        {/* ── Fechas ── */}
-                        <fieldset>
-                            <legend className="text-xs font-bold text-[#002454] uppercase tracking-wider mb-3 pb-1 border-b border-blue-100 w-full">Fechas y Tiempos</legend>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <Campo label="Fecha de Partida" required>
-                                    <input name="fechaPartida" type="datetime-local"
-                                        className={`${inputCls} ${nuevoViajeErrors.fechaPartida ? 'border-red-400 ring-1 ring-red-300' : ''}`}
-                                        value={nuevoViajeForm.fechaPartida} onChange={handleNuevoViajeChange} />
-                                    {nuevoViajeErrors.fechaPartida && <p className="text-xs text-red-500 mt-1">{nuevoViajeErrors.fechaPartida}</p>}
-                                </Campo>
-                                <Campo label="ETA (Tiempo Estimado de Arribo)" required>
-                                    <input name="eta" type="datetime-local"
-                                        className={`${inputCls} ${nuevoViajeErrors.eta ? 'border-red-400 ring-1 ring-red-300' : ''}`}
-                                        value={nuevoViajeForm.eta} onChange={handleNuevoViajeChange} />
-                                    {nuevoViajeErrors.eta && <p className="text-xs text-red-500 mt-1">{nuevoViajeErrors.eta}</p>}
-                                </Campo>
-                            </div>
-                        </fieldset>
-
-                        {/* ── Posición y Zona ── */}
-                        <fieldset>
-                            <legend className="text-xs font-bold text-[#002454] uppercase tracking-wider mb-3 pb-1 border-b border-blue-100 w-full">Posición y Zona</legend>
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                <Campo label="ZOE (Zona de Operación Especial)">
-                                    <input name="zoe" type="text" className={inputCls}
-                                        placeholder="Ej: ZOE-LITORAL"
-                                        value={nuevoViajeForm.zoe} onChange={handleNuevoViajeChange} />
-                                </Campo>
-                                <Campo label="Posición Inicial">
-                                    <input name="posicion" type="text" className={inputCls}
-                                        placeholder="Ej: 34°36'S 058°22'W"
-                                        value={nuevoViajeForm.posicion} onChange={handleNuevoViajeChange} />
-                                </Campo>
-                                <Campo label="Río/Canal - Km Par">
-                                    <input name="rioCanalKmPar" type="number" min="0" max="9999.9" step="0.1" className={inputCls}
-                                        placeholder="Ej: 588.5"
-                                        value={nuevoViajeForm.rioCanalKmPar} onChange={handleNuevoViajeChange} />
-                                </Campo>
-                            </div>
-                        </fieldset>
-
-                        {/* ── Declaración Malvinas ── */}
-                        <fieldset>
-                            <legend className="text-xs font-bold text-[#002454] uppercase tracking-wider mb-3 pb-1 border-b border-blue-100 w-full">Declaración Jurada de Malvinas</legend>
-                            <Campo label="Código de Declaración" required>
-                                <select name="declaracionMalvinas"
-                                    className={`${inputCls} ${nuevoViajeErrors.declaracionMalvinas ? 'border-red-400 ring-1 ring-red-300' : ''}`}
-                                    value={nuevoViajeForm.declaracionMalvinas} onChange={handleNuevoViajeChange}>
-                                    <option value="">-- Seleccionar declaración --</option>
-                                    {DECLARACION_MALVINAS_OPTIONS.map(opt => (
-                                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                    ))}
-                                </select>
-                                {nuevoViajeErrors.declaracionMalvinas && <p className="text-xs text-red-500 mt-1">{nuevoViajeErrors.declaracionMalvinas}</p>}
-                            </Campo>
-                        </fieldset>
-                    </div>
-
-                    <div className="sticky bottom-0 bg-gray-50 border-t px-6 py-4 flex justify-end gap-3 rounded-b-2xl">
-                        <button
-                            type="button"
-                            onClick={cerrarNuevoViaje}
-                            disabled={modalNuevoViaje.loading}
-                            className="px-5 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 transition disabled:opacity-50"
-                        >
-                            Cancelar
-                        </button>
-                        <button
-                            type="button"
-                            onClick={guardarNuevoViaje}
-                            disabled={modalNuevoViaje.loading}
-                            className="flex items-center gap-2 px-6 py-2 bg-[#002454] hover:bg-[#104a8e] text-white text-sm font-semibold rounded-lg transition disabled:opacity-50 shadow-sm"
-                        >
-                            {modalNuevoViaje.loading ? (
-                                <><IconoSpinner /> Guardando...</>
-                            ) : (
-                                <>
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" />
-                                    </svg>
-                                    Registrar Viaje
-                                </>
-                            )}
-                        </button>
-                    </div>
-                </Modal>
-            )}
-
+            
             {/* CSS animación fade-in */}
             <style>{`
                 .fade-in {
@@ -1392,6 +1179,11 @@ const MbpcDashboard = () => {
                     to   { opacity: 1; transform: translateY(0); }
                 }
             `}</style>
+            {/* Modal de Nuevo Viaje */}
+            <ModalNuevoViaje 
+                isOpen={modalNuevoViaje.show} 
+                onClose={() => setModalNuevoViaje({ show: false })} 
+            />
         </div>
     );
 };

@@ -6,20 +6,21 @@ using Mbpc.Api.Models.Config;
 using Mbpc.Api.Services;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization; // <-- ¡Este era el using que faltaba!
 
 var builder = WebApplication.CreateBuilder(args);
 
 // ── Serialización JSON ──────────────────────────────────────────────────────
-// CamelCase para que el frontend React reciba los campos correctamente
-// (buque, ruta, estadoActual en lugar de Buque, Ruta, EstadoActual)
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
+        // Restauramos tu CamelCase original (vital para React)
         options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
-        options.JsonSerializerOptions.DefaultIgnoreCondition =
-            System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull;
-        options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+        options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+        // Mantenemos el conversor de Enums
+        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
     });
+
 builder.Services.AddDistributedMemoryCache();
 builder.Services.AddMemoryCache();
 builder.Services.AddEndpointsApiExplorer();
@@ -54,7 +55,6 @@ builder.Services.AddSwaggerGen(options =>
 builder.Services.Configure<MongoDbSettings>(
     builder.Configuration.GetSection("MongoDbSettings"));
 
-// MongoClient es thread-safe por diseño → Singleton correcto
 builder.Services.AddSingleton<IMongoClient>(sp =>
 {
     var settings = sp.GetRequiredService<IOptions<MongoDbSettings>>().Value;
@@ -66,8 +66,6 @@ builder.Services.Configure<OracleDbSettings>(
     builder.Configuration.GetSection("OracleDbSettings"));
 
 // ── JWT ──────────────────────────────────────────────────────────────────────
-// Leemos la sección JwtSettings desde appsettings.json.
-// La SigningKey se convierte a bytes y se usa para validar la firma HMAC-SHA256.
 var jwtSection  = builder.Configuration.GetSection("JwtSettings");
 var secretKey   = jwtSection["SecretKey"]   ?? throw new InvalidOperationException("JwtSettings:SecretKey no está configurada.");
 var issuer      = jwtSection["Issuer"]      ?? throw new InvalidOperationException("JwtSettings:Issuer no está configurado.");
@@ -91,8 +89,6 @@ builder.Services.AddAuthentication(options =>
         ValidIssuer              = issuer,
         ValidAudience            = audience,
         IssuerSigningKey         = signingKey,
-        // Tolerancia cero de desvío de reloj en producción; en desarrollo podés
-        // relajarlo con ClockSkew = TimeSpan.FromMinutes(1).
         ClockSkew                = TimeSpan.Zero
     };
 });
@@ -100,21 +96,13 @@ builder.Services.AddAuthentication(options =>
 builder.Services.AddAuthorization();
 
 // ── Servicios de negocio ─────────────────────────────────────────────────────
-// Scoped (por request) para evitar problemas si en el futuro se agrega
-// alguna dependencia con scope de request (ej: IHttpContextAccessor).
-// MongoClient sigue siendo Singleton arriba, así que no hay problema.
 builder.Services.AddScoped<IViajeService, ViajeManagerService>();
 builder.Services.AddScoped<ICargaService, CargaManagerService>();
 
 // ── IHttpContextAccessor ─────────────────────────────────────────────────────
-// Necesario para que los servicios puedan leer los Claims del JWT
-// (en particular CosteraId) sin recibir parámetros desde el Controller.
 builder.Services.AddHttpContextAccessor();
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
-// Origen leído desde configuración para no hardcodear en producción.
-// En appsettings.Development.json: "AllowedOrigins": "http://localhost:5173"
-// En appsettings.Production.json:  "AllowedOrigins": "https://mbpc.prefectura.gob.ar"
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowFrontend", policy =>
@@ -131,8 +119,6 @@ builder.Services.AddCors(options =>
 var app = builder.Build();
 
 // ── Middleware de excepciones global ─────────────────────────────────────────
-// Captura cualquier excepción no manejada y devuelve un JSON limpio
-// sin exponer stack traces al cliente.
 app.UseExceptionHandler(errApp =>
 {
     errApp.Run(async context =>
@@ -152,13 +138,11 @@ app.UseExceptionHandler(errApp =>
         await context.Response.WriteAsJsonAsync(new
         {
             mensaje = "Ocurrió un error interno. Por favor contacte al administrador.",
-            // Solo mostramos el tipo de error en desarrollo
             detalle = app.Environment.IsDevelopment() ? error?.Message : null
         });
     });
 });
 
-// CORS debe ir antes de Authentication/Authorization
 app.UseCors("AllowFrontend");
 
 if (app.Environment.IsDevelopment())
@@ -167,10 +151,6 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-// Habilitar para producción cuando se configure HTTPS
-// app.UseHttpsRedirection();
-
-// ⚠️ Orden crítico: Authentication SIEMPRE antes de Authorization
 app.UseAuthentication();
 app.UseAuthorization();
 

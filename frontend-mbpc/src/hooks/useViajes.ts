@@ -86,3 +86,16 @@ export function useReanudarViaje(): UseMutationResult<AccionViajeResponse, Error
     },
   });
 }
+
+
+export function useCrearViaje() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: NuevoViajeDto) => viajesService.crearViaje(payload),
+    onSuccess: () => {
+      // Invalida TODAS las queries de viajes para forzar refetch en el listado
+      queryClient.invalidateQueries({ queryKey: viajesKeys.all });
+    },
+  });
+}
