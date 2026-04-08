@@ -17,8 +17,10 @@ namespace Mbpc.Api.Services
         /// <summary>
         /// Retorna viajes paginados. El filtro por CosteraId se aplica internamente
         /// desde el contexto HTTP del usuario autenticado.
+        /// El parámetro opcional <paramref name="nombre"/> aplica un filtro Regex
+        /// case-insensitive sobre VesselName directamente en MongoDB, antes de paginar.
         /// </summary>
-        Task<List<ViajePosicionMongo>> GetViajesAsync(int pagina = 1, int tamanio = 50);
+        Task<List<ViajePosicionMongo>> GetViajesAsync(string? nombre = null, int pagina = 1, int tamanio = 50);
 
         /// <summary>
         /// Retorna la última posición de un buque por MMSI. Valida internamente

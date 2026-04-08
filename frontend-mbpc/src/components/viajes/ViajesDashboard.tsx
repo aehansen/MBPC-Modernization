@@ -1,22 +1,24 @@
-import React, { useState } from 'react';
+// src/components/viajes/ViajesDashboard.tsx
+import { useState, useEffect } from 'react';
 import {
+  useViajes,
+  useZarparViaje,
   useAmarrarViaje,
   useFondearViaje,
   useReanudarViaje,
-  useViajes,
-  useZarparViaje,
-} from '../../hooks/useViajes';
+} from '../../hooks/useViajesApi';
 import type { ViajeDto } from '../../types/viajes.types';
 import ModalActualizarPosicion from './ModalActualizarPosicion';
+import CargasModal from '../cargas/CargasModal';
 
 const PAGE_SIZE = 10;
 
 // ─── Estado badge ─────────────────────────────────────────────────────────────
 
 const ESTADO_STYLES: Record<string, string> = {
-  EnViaje: 'bg-green-100 text-green-800 border border-green-200',
-  Amarrado: 'bg-blue-100 text-blue-800 border border-blue-200',
-  Fondeado: 'bg-yellow-100 text-yellow-800 border border-yellow-200',
+  EnViaje:    'bg-green-100 text-green-800 border border-green-200',
+  Amarrado:   'bg-blue-100 text-blue-800 border border-blue-200',
+  Fondeado:   'bg-yellow-100 text-yellow-800 border border-yellow-200',
   Programado: 'bg-gray-100 text-gray-800 border border-gray-200',
 };
 
@@ -24,7 +26,9 @@ function EstadoBadge({ estado }: { estado: string }) {
   const classes =
     ESTADO_STYLES[estado] ?? 'bg-gray-100 text-gray-800 border border-gray-200';
   return (
-    <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold tracking-wide ${classes}`}>
+    <span
+      className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold tracking-wide ${classes}`}
+    >
       {estado || 'Desconocido'}
     </span>
   );
@@ -39,6 +43,7 @@ interface AccionesProps {
   onFondear: (id: string) => void;
   onReanudar: (id: string) => void;
   onActualizarPosicion: (viaje: ViajeDto) => void;
+  onVerCargas: (viaje: ViajeDto) => void;
   isLoading: boolean;
 }
 
@@ -49,15 +54,16 @@ function AccionesRow({
   onFondear,
   onReanudar,
   onActualizarPosicion,
+  onVerCargas,
   isLoading,
 }: AccionesProps) {
   const btnBase =
-    'px-3 py-1.5 rounded text-xs font-semibold tracking-wide transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed';
+    'px-3 py-1.5 rounded text-xs font-semibold tracking-wide transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed border';
 
   return (
     <div className="flex flex-wrap justify-end gap-1.5">
       <button
-        className={`${btnBase} bg-green-50 text-green-700 border border-green-200 hover:bg-green-100`}
+        className={`${btnBase} bg-green-50 text-green-700 border-green-200 hover:bg-green-100`}
         disabled={isLoading || viaje.estadoActual === 'EnViaje'}
         onClick={() => onZarpar(viaje.id)}
         title="Zarpar"
@@ -65,7 +71,7 @@ function AccionesRow({
         Zarpar
       </button>
       <button
-        className={`${btnBase} bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100`}
+        className={`${btnBase} bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100`}
         disabled={isLoading || viaje.estadoActual === 'Amarrado'}
         onClick={() => onAmarrar(viaje.id)}
         title="Amarrar"
@@ -73,7 +79,7 @@ function AccionesRow({
         Amarrar
       </button>
       <button
-        className={`${btnBase} bg-yellow-50 text-yellow-700 border border-yellow-200 hover:bg-yellow-100`}
+        className={`${btnBase} bg-yellow-50 text-yellow-700 border-yellow-200 hover:bg-yellow-100`}
         disabled={isLoading || viaje.estadoActual === 'Fondeado'}
         onClick={() => onFondear(viaje.id)}
         title="Fondear"
@@ -81,61 +87,96 @@ function AccionesRow({
         Fondear
       </button>
       <button
-        className={`${btnBase} bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`}
+        className={`${btnBase} bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100`}
         disabled={isLoading || viaje.estadoActual !== 'Fondeado'}
         onClick={() => onReanudar(viaje.id)}
         title="Reanudar"
       >
         Reanudar
       </button>
-      
-      {/* NUEVO BOTÓN DE POSICIÓN */}
       <button
-        className={`${btnBase} bg-[#002454] text-white border border-[#002454] hover:bg-[#104a8e]`}
+        className={`${btnBase} bg-[#002454] text-white border-[#002454] hover:bg-[#104a8e]`}
         disabled={isLoading}
         onClick={() => onActualizarPosicion(viaje)}
         title="Actualizar Posición"
       >
         📍 Posición
       </button>
+      <button
+        className={`${btnBase} bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100`}
+        disabled={isLoading}
+        onClick={() => onVerCargas(viaje)}
+        title="Ver Cargas"
+      >
+        📦 Cargas
+      </button>
     </div>
   );
+}
+
+// ─── Estado modal genérico ────────────────────────────────────────────────────
+
+interface ModalViajeState {
+  isOpen: boolean;
+  viaje: ViajeDto | null;
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function ViajesDashboard() {
   const [page, setPage] = useState(1);
-  const { data, isLoading, isError, error } = useViajes(page, PAGE_SIZE);
+  const [filtro, setFiltro] = useState('');
+  const [debouncedFiltro, setDebouncedFiltro] = useState('');
 
-  const mutZarpar = useZarparViaje();
+  // Debounce: espera 500ms tras el último cambio del filtro antes de disparar la query.
+  // Cuando el valor debounced cambia, se resetea la página a 1 para evitar que el usuario
+  // esté en una página que no existe para el nuevo criterio de búsqueda.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedFiltro(filtro);
+      setPage(1);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [filtro]);
+
+  const { data: dataPaginada, isLoading, isError, error } = useViajes(page, PAGE_SIZE, debouncedFiltro);
+
+  const mutZarpar  = useZarparViaje();
   const mutAmarrar = useAmarrarViaje();
   const mutFondear = useFondearViaje();
   const mutReanudar = useReanudarViaje();
 
   const anyMutating =
-    mutZarpar.isPending || mutAmarrar.isPending || mutFondear.isPending || mutReanudar.isPending;
+    mutZarpar.isPending ||
+    mutAmarrar.isPending ||
+    mutFondear.isPending ||
+    mutReanudar.isPending;
 
-  // Estado para controlar nuestro Modal de Posición
-  const [modalPosicion, setModalPosicion] = useState<{ isOpen: boolean; viaje: ViajeDto | null }>({
+  const [modalPosicion, setModalPosicion] = useState<ModalViajeState>({
     isOpen: false,
     viaje: null,
   });
 
-  const handleZarpar = (id: string) => mutZarpar.mutate(id);
-  const handleAmarrar = (id: string) => mutAmarrar.mutate(id);
-  const handleFondear = (id: string) => mutFondear.mutate(id);
-  const handleReanudar = (id: string) => mutReanudar.mutate(id);
+  const [modalCargas, setModalCargas] = useState<ModalViajeState>({
+    isOpen: false,
+    viaje: null,
+  });
 
-  // Función que atrapa el viaje y abre el modal
-  const handleAbrirPosicion = (viaje: ViajeDto) => {
-    setModalPosicion({ isOpen: true, viaje });
-  };
+  const handleZarpar          = (id: string) => mutZarpar.mutate(id);
+  const handleAmarrar         = (id: string) => mutAmarrar.mutate(id);
+  const handleFondear         = (id: string) => mutFondear.mutate(id);
+  const handleReanudar        = (id: string) => mutReanudar.mutate(id);
+  const handleAbrirPosicion   = (viaje: ViajeDto) => setModalPosicion({ isOpen: true, viaje });
+  const handleAbrirCargas     = (viaje: ViajeDto) => setModalCargas({ isOpen: true, viaje });
+
+  // Los datos ya vienen filtrados desde el servidor; no se aplica ningún .filter() local.
+  const filas: ViajeDto[] = dataPaginada ?? [];
 
   return (
     <div className="bg-gray-50 text-gray-900 font-sans p-6 rounded-xl">
       {/* Header */}
-      <div className="mb-6 flex items-center justify-between">
+      <div className="mb-6 flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h2 className="text-xl font-bold tracking-tight text-[#002454]">
             Grilla Operativa de Tráfico
@@ -144,12 +185,24 @@ export default function ViajesDashboard() {
             Módulo de Viajes — Acciones y posicionamiento
           </p>
         </div>
-        {anyMutating && (
-          <div className="flex items-center gap-2 rounded-full bg-blue-50 border border-blue-200 px-4 py-1.5 text-sm text-blue-700">
-            <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
-            Procesando acción…
-          </div>
-        )}
+
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Filtro server-side por nombre de buque con debounce de 500ms */}
+          <input
+            type="text"
+            placeholder="Filtrar por buque…"
+            value={filtro}
+            onChange={(e) => setFiltro(e.target.value)}
+            className="px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#104a8e] focus:border-transparent outline-none transition-all w-52"
+          />
+
+          {anyMutating && (
+            <div className="flex items-center gap-2 rounded-full bg-blue-50 border border-blue-200 px-4 py-1.5 text-sm text-blue-700">
+              <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+              Procesando acción…
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Error banner */}
@@ -177,19 +230,25 @@ export default function ViajesDashboard() {
             <tbody className="divide-y divide-gray-100">
               {isLoading ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-gray-500">Cargando viajes...</td>
+                  <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
+                    Cargando viajes…
+                  </td>
                 </tr>
-              ) : !data || data.length === 0 ? (
+              ) : filas.length === 0 ? (
                 <tr>
                   <td colSpan={6} className="px-4 py-16 text-center text-gray-500">
                     <div className="flex flex-col items-center gap-2">
                       <span className="text-3xl">🚢</span>
-                      <span>No se encontraron viajes registrados.</span>
+                      <span>
+                        {debouncedFiltro.trim() !== ''
+                          ? 'Sin resultados para el filtro aplicado.'
+                          : 'No se encontraron viajes registrados.'}
+                      </span>
                     </div>
                   </td>
                 </tr>
               ) : (
-                data.map((viaje: ViajeDto) => (
+                filas.map((viaje) => (
                   <tr key={viaje.id} className="transition-colors hover:bg-gray-50">
                     <td className="px-4 py-3 font-semibold text-[#002454]">
                       {viaje.buque || 'N/D'}
@@ -212,6 +271,7 @@ export default function ViajesDashboard() {
                         onFondear={handleFondear}
                         onReanudar={handleReanudar}
                         onActualizarPosicion={handleAbrirPosicion}
+                        onVerCargas={handleAbrirCargas}
                         isLoading={anyMutating}
                       />
                     </td>
@@ -222,19 +282,22 @@ export default function ViajesDashboard() {
           </table>
         </div>
 
-        {data && (
+        {/* Paginación */}
+        {dataPaginada && (
           <div className="flex gap-2 justify-end px-4 py-3 border-t border-gray-100 bg-gray-50">
             <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page === 1}
               className="px-3 py-1 border border-gray-300 rounded text-gray-700 disabled:opacity-40 hover:bg-white transition-colors"
             >
               Anterior
             </button>
-            <span className="px-3 py-1 text-gray-600 text-sm font-medium flex items-center">Página {page}</span>
+            <span className="px-3 py-1 text-gray-600 text-sm font-medium flex items-center">
+              Página {page}
+            </span>
             <button
-              onClick={() => setPage(p => p + 1)}
-              disabled={data.length < PAGE_SIZE}
+              onClick={() => setPage((p) => p + 1)}
+              disabled={dataPaginada.length < PAGE_SIZE}
               className="px-3 py-1 border border-gray-300 rounded text-gray-700 disabled:opacity-40 hover:bg-white transition-colors"
             >
               Siguiente
@@ -243,12 +306,21 @@ export default function ViajesDashboard() {
         )}
       </div>
 
-      {/* Renderizado del Modal de Posición */}
+      {/* Modal de Posición */}
       {modalPosicion.isOpen && modalPosicion.viaje && (
         <ModalActualizarPosicion
           viajeId={modalPosicion.viaje.id}
           nombreBuque={modalPosicion.viaje.buque}
           onClose={() => setModalPosicion({ isOpen: false, viaje: null })}
+        />
+      )}
+
+      {/* Modal de Cargas */}
+      {modalCargas.isOpen && modalCargas.viaje && (
+        <CargasModal
+          viajeId={modalCargas.viaje.id}
+          viajeNombreBuque={modalCargas.viaje.buque}
+          onClose={() => setModalCargas({ isOpen: false, viaje: null })}
         />
       )}
     </div>

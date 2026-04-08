@@ -27,11 +27,17 @@ namespace Mbpc.Api.Controllers
         /// Lista paginada de posiciones activas desde MongoDB (max 200 por página).
         /// El filtrado multitenant por CosteraId se resuelve internamente en el servicio
         /// a partir del Claim del JWT; el Controller solo valida que el Claim exista.
+        ///
+        /// El parámetro opcional <paramref name="nombre"/> se propaga al servicio para
+        /// aplicar un filtro Regex case-insensitive sobre VesselName directamente en MongoDB,
+        /// antes de paginar, garantizando que la búsqueda cubra toda la colección de la costera
+        /// y no solo la página visual activa.
         /// </summary>
         [HttpGet]
         public async Task<ActionResult<List<ViajeDto>>> GetViajes(
-            [FromQuery] int pagina  = 1,
-            [FromQuery] int tamanio = 50)
+            [FromQuery] string? nombre  = null,
+            [FromQuery] int pagina      = 1,
+            [FromQuery] int tamanio     = 50)
         {
             var costeraIdClaim = User.FindFirstValue("CosteraId");
 
@@ -47,10 +53,10 @@ namespace Mbpc.Api.Controllers
             tamanio = Math.Clamp(tamanio, 1, 200);
 
             _logger.LogInformation(
-                "GetViajes — CosteraId: {CosteraId} | Página: {Pagina} | Tamaño: {Tamanio}",
-                costeraIdClaim, pagina, tamanio);
+                "GetViajes — CosteraId: {CosteraId} | Nombre: '{Nombre}' | Página: {Pagina} | Tamaño: {Tamanio}",
+                costeraIdClaim, nombre ?? "TODOS", pagina, tamanio);
 
-            var posicionesMongo = await _viajeService.GetViajesAsync(pagina, tamanio);
+            var posicionesMongo = await _viajeService.GetViajesAsync(nombre, pagina, tamanio);
 
             var viajesDto = posicionesMongo.Select(p => new ViajeDto
             {

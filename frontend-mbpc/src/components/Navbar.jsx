@@ -133,12 +133,12 @@ export default function Navbar() {
                 MBPC{" "}
                 <span style={{ color: "#C8A84B" }}>Geo</span>
                 <span className="hidden sm:inline text-white/40 font-normal text-base">
-                  {" "}· Modernización
+                  {" "}· H2
                 </span>
               </h1>
               <p className="text-blue-200 text-xs mt-0.5 truncate max-w-[300px]">
                 Prefectura Naval Argentina
-                {costera ? ` · ${costera}` : " · Gestión de Tráfico Marítimo"}
+                {costera ? ` · ${costera}` : " · DICO - DSIG"}
               </p>
             </div>
           </div>

@@ -173,12 +173,24 @@ namespace Mbpc.Api.Services
         /// <summary>
         /// EJE 3: El CosteraId se obtiene del contexto HTTP via GetCurrentCosteraId().
         /// Si es 0 (Admin), se usa Filter.Empty. Si es mayor a 0, se filtra estrictamente.
+        ///
+        /// EJE FILTRADO POR NOMBRE: Si se proporciona <paramref name="nombre"/>, se combina
+        /// al filtro existente un Regex case-insensitive sobre VesselName, ejecutado directamente
+        /// en MongoDB antes de paginar. Esto garantiza que la búsqueda recorra toda la colección
+        /// de la costera y no solo la página visual activa.
         /// </summary>
-        public async Task<List<ViajePosicionMongo>> GetViajesAsync(int pagina = 1, int tamanio = 50)
+        public async Task<List<ViajePosicionMongo>> GetViajesAsync(string? nombre = null, int pagina = 1, int tamanio = 50)
         {
             var costeraId = GetCurrentCosteraId();
             var skip      = (pagina - 1) * tamanio;
             var filtro    = BuildFiltroCostera(costeraId);
+
+            if (!string.IsNullOrEmpty(nombre))
+            {
+                filtro &= Builders<ViajePosicionMongo>.Filter.Regex(
+                    v => v.VesselName,
+                    new BsonRegularExpression(nombre, "i"));
+            }
 
             return await _viajesCollection
                 .Find(filtro)
@@ -435,15 +447,16 @@ namespace Mbpc.Api.Services
                 {
                     using var connection = new OracleConnection(_oracleConnectionString);
                     var parameters = new DynamicParameters();
+                    // Le agregamos DbType.String para que Dapper sepa de qué tipo es el nulo
+                    parameters.Add("p_Nombre", string.IsNullOrEmpty(filtro.Nombre) ? (object)DBNull.Value : filtro.Nombre, DbType.String);
+                    parameters.Add("p_OMI", string.IsNullOrEmpty(filtro.Omi) ? (object)DBNull.Value : filtro.Omi, DbType.String);
+                    parameters.Add("p_Matricula", string.IsNullOrEmpty(filtro.Matricula) ? (object)DBNull.Value : filtro.Matricula, DbType.String);
+                    parameters.Add("p_Origen", string.IsNullOrEmpty(filtro.Origen) ? (object)DBNull.Value : filtro.Origen, DbType.String);
+                    parameters.Add("p_Destino", string.IsNullOrEmpty(filtro.Destino) ? (object)DBNull.Value : filtro.Destino, DbType.String);
 
-                    parameters.Add("p_NOMBRE",     filtro.Nombre    ?? (object)DBNull.Value);
-                    parameters.Add("p_OMI",        filtro.Omi       ?? (object)DBNull.Value);
-                    parameters.Add("p_MATRICULA",  filtro.Matricula ?? (object)DBNull.Value);
-                    parameters.Add("p_ORIGEN",     filtro.Origen    ?? (object)DBNull.Value);
-                    parameters.Add("p_DESTINO",    filtro.Destino   ?? (object)DBNull.Value);
-                    parameters.Add("p_DESDE",      filtro.Desde     ?? (object)DBNull.Value);
-                    parameters.Add("p_HASTA",      filtro.Hasta     ?? (object)DBNull.Value);
-                    parameters.Add("p_COSTERA_ID", costeraId);
+                    // Para las fechas (si las hay), usamos DbType.Date
+                    parameters.Add("p_Desde", filtro.Desde.HasValue ? (object)filtro.Desde.Value : DBNull.Value, DbType.Date);
+                    parameters.Add("p_Hasta", filtro.Hasta.HasValue ? (object)filtro.Hasta.Value : DBNull.Value, DbType.Date);
 
                     var resultado = await connection.QueryAsync<ViajeHistoricoDto>(
                         "PKG_MBPC_VIAJES.SP_HISTORICO",
