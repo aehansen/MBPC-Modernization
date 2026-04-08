@@ -75,5 +75,21 @@ namespace Mbpc.Api.Services
         /// Paso previo OBLIGATORIO para que un buque Fondeado pueda volver a Zarpar.
         /// </summary>
         Task<bool> ReanudarViajeAsync(string id);
+
+        // ── POSICIONAMIENTO AIS (EJE 4) ──────────────────────────────────────
+
+        /// <summary>
+        /// Actualiza la posición geográfica de un buque (lat/lng + timestamp).
+        ///
+        /// Reglas de negocio aplicadas internamente:
+        ///   • Haversine: calcula distancia entre posición anterior y nueva.
+        ///   • Cinemática: si velocidad calculada > 60 kn → lanza InvalidOperationException.
+        ///   • Persistencia dual: actualiza el doc activo en MongoDB E inserta copia en tracklog.
+        ///
+        /// Retorna null si no existe el documento con ese Id para la costera autenticada.
+        /// Lanza InvalidOperationException (mensaje comienza con "Cinemática inválida")
+        /// si la velocidad calculada supera el límite físico permitido.
+        /// </summary>
+        Task<PosicionActualizadaResultDto?> ActualizarPosicionAsync(string id, ActualizarPosicionDto dto);
     }
 }

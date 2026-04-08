@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-
 import {
   useAmarrarViaje,
   useFondearViaje,
@@ -8,19 +7,22 @@ import {
   useZarparViaje,
 } from '../../hooks/useViajes';
 import type { ViajeDto } from '../../types/viajes.types';
+import ModalActualizarPosicion from './ModalActualizarPosicion';
+
+const PAGE_SIZE = 10;
 
 // ─── Estado badge ─────────────────────────────────────────────────────────────
 
 const ESTADO_STYLES: Record<string, string> = {
-  EnViaje: 'bg-emerald-900/60 text-emerald-300 border border-emerald-700',
-  Amarrado: 'bg-sky-900/60 text-sky-300 border border-sky-700',
-  Fondeado: 'bg-amber-900/60 text-amber-300 border border-amber-700',
-  Programado: 'bg-slate-700/60 text-slate-300 border border-slate-600',
+  EnViaje: 'bg-green-100 text-green-800 border border-green-200',
+  Amarrado: 'bg-blue-100 text-blue-800 border border-blue-200',
+  Fondeado: 'bg-yellow-100 text-yellow-800 border border-yellow-200',
+  Programado: 'bg-gray-100 text-gray-800 border border-gray-200',
 };
 
 function EstadoBadge({ estado }: { estado: string }) {
   const classes =
-    ESTADO_STYLES[estado] ?? 'bg-slate-700/60 text-slate-300 border border-slate-600';
+    ESTADO_STYLES[estado] ?? 'bg-gray-100 text-gray-800 border border-gray-200';
   return (
     <span className={`inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold tracking-wide ${classes}`}>
       {estado || 'Desconocido'}
@@ -36,6 +38,7 @@ interface AccionesProps {
   onAmarrar: (id: string) => void;
   onFondear: (id: string) => void;
   onReanudar: (id: string) => void;
+  onActualizarPosicion: (viaje: ViajeDto) => void;
   isLoading: boolean;
 }
 
@@ -45,135 +48,105 @@ function AccionesRow({
   onAmarrar,
   onFondear,
   onReanudar,
+  onActualizarPosicion,
   isLoading,
 }: AccionesProps) {
   const btnBase =
     'px-3 py-1.5 rounded text-xs font-semibold tracking-wide transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed';
 
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <div className="flex flex-wrap justify-end gap-1.5">
       <button
-        className={`${btnBase} bg-emerald-600 hover:bg-emerald-500 text-white`}
+        className={`${btnBase} bg-green-50 text-green-700 border border-green-200 hover:bg-green-100`}
         disabled={isLoading || viaje.estadoActual === 'EnViaje'}
         onClick={() => onZarpar(viaje.id)}
         title="Zarpar"
       >
-        ⚓ Zarpar
+        Zarpar
       </button>
       <button
-        className={`${btnBase} bg-sky-600 hover:bg-sky-500 text-white`}
+        className={`${btnBase} bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100`}
         disabled={isLoading || viaje.estadoActual === 'Amarrado'}
         onClick={() => onAmarrar(viaje.id)}
         title="Amarrar"
       >
-        🔗 Amarrar
+        Amarrar
       </button>
       <button
-        className={`${btnBase} bg-amber-600 hover:bg-amber-500 text-white`}
+        className={`${btnBase} bg-yellow-50 text-yellow-700 border border-yellow-200 hover:bg-yellow-100`}
         disabled={isLoading || viaje.estadoActual === 'Fondeado'}
         onClick={() => onFondear(viaje.id)}
         title="Fondear"
       >
-        🪝 Fondear
+        Fondear
       </button>
       <button
-        className={`${btnBase} bg-violet-600 hover:bg-violet-500 text-white`}
-        disabled={isLoading}
+        className={`${btnBase} bg-gray-50 text-gray-700 border border-gray-200 hover:bg-gray-100`}
+        disabled={isLoading || viaje.estadoActual !== 'Fondeado'}
         onClick={() => onReanudar(viaje.id)}
         title="Reanudar"
       >
-        ▶ Reanudar
+        Reanudar
+      </button>
+      
+      {/* NUEVO BOTÓN DE POSICIÓN */}
+      <button
+        className={`${btnBase} bg-[#002454] text-white border border-[#002454] hover:bg-[#104a8e]`}
+        disabled={isLoading}
+        onClick={() => onActualizarPosicion(viaje)}
+        title="Actualizar Posición"
+      >
+        📍 Posición
       </button>
     </div>
   );
 }
 
-// ─── Skeleton loader ──────────────────────────────────────────────────────────
-
-function TableSkeleton({ rows = 6 }: { rows?: number }) {
-  return (
-    <>
-      {Array.from({ length: rows }).map((_, i) => (
-        <tr key={i} className="border-b border-slate-700/50">
-          {Array.from({ length: 6 }).map((__, j) => (
-            <td key={j} className="px-4 py-3">
-              <div className="h-4 rounded bg-slate-700 animate-pulse" style={{ width: `${60 + Math.random() * 30}%` }} />
-            </td>
-          ))}
-        </tr>
-      ))}
-    </>
-  );
-}
-
-// ─── Toast notification ───────────────────────────────────────────────────────
-
-interface ToastProps {
-  message: string;
-  type: 'success' | 'error';
-  onClose: () => void;
-}
-
-function Toast({ message, type, onClose }: ToastProps) {
-  const bg = type === 'success' ? 'bg-emerald-800 border-emerald-600' : 'bg-red-900 border-red-700';
-  const icon = type === 'success' ? '✓' : '✕';
-  return (
-    <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-lg border px-4 py-3 shadow-2xl text-sm text-white ${bg}`}>
-      <span className="text-base font-bold">{icon}</span>
-      <span>{message}</span>
-      <button onClick={onClose} className="ml-2 opacity-60 hover:opacity-100 transition-opacity text-base leading-none">×</button>
-    </div>
-  );
-}
-
-// ─── Main Dashboard ───────────────────────────────────────────────────────────
-
-const PAGE_SIZE = 10;
+// ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function ViajesDashboard() {
   const [page, setPage] = useState(1);
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-
-  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 4000);
-  };
-
   const { data, isLoading, isError, error } = useViajes(page, PAGE_SIZE);
 
-  const mutationConfig = {
-    onSuccess: (res: { mensaje: string }) => showToast(res.mensaje),
-    onError: (err: Error) => showToast(err.message, 'error'),
-  };
-
-  const zarpar = useZarparViaje();
-  const amarrar = useAmarrarViaje();
-  const fondear = useFondearViaje();
-  const reanudar = useReanudarViaje();
+  const mutZarpar = useZarparViaje();
+  const mutAmarrar = useAmarrarViaje();
+  const mutFondear = useFondearViaje();
+  const mutReanudar = useReanudarViaje();
 
   const anyMutating =
-    zarpar.isPending || amarrar.isPending || fondear.isPending || reanudar.isPending;
+    mutZarpar.isPending || mutAmarrar.isPending || mutFondear.isPending || mutReanudar.isPending;
 
-  const handleZarpar = (id: string) => zarpar.mutate(id, mutationConfig);
-  const handleAmarrar = (id: string) => amarrar.mutate(id, mutationConfig);
-  const handleFondear = (id: string) => fondear.mutate(id, mutationConfig);
-  const handleReanudar = (id: string) => reanudar.mutate(id, mutationConfig);
+  // Estado para controlar nuestro Modal de Posición
+  const [modalPosicion, setModalPosicion] = useState<{ isOpen: boolean; viaje: ViajeDto | null }>({
+    isOpen: false,
+    viaje: null,
+  });
+
+  const handleZarpar = (id: string) => mutZarpar.mutate(id);
+  const handleAmarrar = (id: string) => mutAmarrar.mutate(id);
+  const handleFondear = (id: string) => mutFondear.mutate(id);
+  const handleReanudar = (id: string) => mutReanudar.mutate(id);
+
+  // Función que atrapa el viaje y abre el modal
+  const handleAbrirPosicion = (viaje: ViajeDto) => {
+    setModalPosicion({ isOpen: true, viaje });
+  };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 font-sans p-6">
+    <div className="bg-gray-50 text-gray-900 font-sans p-6 rounded-xl">
       {/* Header */}
       <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-white">
-            Gestión de Tráfico Marítimo
-          </h1>
-          <p className="mt-1 text-sm text-slate-400">
-            Módulo de Viajes — vista operativa en tiempo real
+          <h2 className="text-xl font-bold tracking-tight text-[#002454]">
+            Grilla Operativa de Tráfico
+          </h2>
+          <p className="mt-1 text-sm text-gray-500">
+            Módulo de Viajes — Acciones y posicionamiento
           </p>
         </div>
         {anyMutating && (
-          <div className="flex items-center gap-2 rounded-full bg-amber-900/40 border border-amber-700 px-4 py-1.5 text-sm text-amber-300">
-            <span className="inline-block h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
+          <div className="flex items-center gap-2 rounded-full bg-blue-50 border border-blue-200 px-4 py-1.5 text-sm text-blue-700">
+            <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
             Procesando acción…
           </div>
         )}
@@ -181,32 +154,34 @@ export default function ViajesDashboard() {
 
       {/* Error banner */}
       {isError && (
-        <div className="mb-4 rounded-lg border border-red-700 bg-red-900/40 px-4 py-3 text-sm text-red-300">
+        <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           <span className="font-semibold">Error al cargar viajes:</span>{' '}
           {error instanceof Error ? error.message : 'Error desconocido'}
         </div>
       )}
 
       {/* Table card */}
-      <div className="rounded-xl border border-slate-700 bg-slate-900 shadow-xl overflow-hidden">
+      <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm text-left">
             <thead>
-              <tr className="border-b border-slate-700 bg-slate-800/80 text-xs uppercase tracking-wider text-slate-400">
-                <th className="px-4 py-3 text-left font-semibold">Buque</th>
-                <th className="px-4 py-3 text-left font-semibold">Ruta</th>
-                <th className="px-4 py-3 text-left font-semibold">Fecha Inicio</th>
-                <th className="px-4 py-3 text-left font-semibold">Estado</th>
-                <th className="px-4 py-3 text-left font-semibold">Costera</th>
-                <th className="px-4 py-3 text-left font-semibold">Acciones</th>
+              <tr className="border-b border-gray-200 bg-[#002454] text-xs uppercase tracking-wider text-white">
+                <th className="px-4 py-3 font-semibold">Buque</th>
+                <th className="px-4 py-3 font-semibold">Ruta</th>
+                <th className="px-4 py-3 font-semibold">Fecha Inicio</th>
+                <th className="px-4 py-3 font-semibold">Estado</th>
+                <th className="px-4 py-3 font-semibold">Costera</th>
+                <th className="px-4 py-3 font-semibold text-right">Acciones</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-gray-100">
               {isLoading ? (
-                <TableSkeleton rows={PAGE_SIZE} />
+                <tr>
+                  <td colSpan={6} className="px-4 py-8 text-center text-gray-500">Cargando viajes...</td>
+                </tr>
               ) : !data || data.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-16 text-center text-slate-500">
+                  <td colSpan={6} className="px-4 py-16 text-center text-gray-500">
                     <div className="flex flex-col items-center gap-2">
                       <span className="text-3xl">🚢</span>
                       <span>No se encontraron viajes registrados.</span>
@@ -214,38 +189,29 @@ export default function ViajesDashboard() {
                   </td>
                 </tr>
               ) : (
-                data?.map((viaje: ViajeDto) => (
-                  <tr
-                    key={viaje.id}
-                    className="border-b border-slate-700/50 transition-colors hover:bg-slate-800/50"
-                  >
-                    <td className="px-4 py-3 font-semibold text-white">
+                data.map((viaje: ViajeDto) => (
+                  <tr key={viaje.id} className="transition-colors hover:bg-gray-50">
+                    <td className="px-4 py-3 font-semibold text-[#002454]">
                       {viaje.buque || 'N/D'}
-                      {viaje.barcazas && viaje.barcazas.length > 0 && (
-                        <span className="ml-2 text-xs text-slate-400">
-                          +{viaje.barcazas.length} barcaza{viaje.barcazas.length > 1 ? 's' : ''}
-                        </span>
-                      )}
                     </td>
-                    <td className="px-4 py-3 text-slate-300">{viaje.ruta || 'N/D'}</td>
-                    <td className="px-4 py-3 text-slate-400 tabular-nums">
+                    <td className="px-4 py-3 text-gray-600">{viaje.ruta || 'N/D'}</td>
+                    <td className="px-4 py-3 text-gray-500 tabular-nums">
                       {viaje.fechaInicioFormateada || 'N/D'}
                     </td>
                     <td className="px-4 py-3">
                       <EstadoBadge estado={viaje.estadoActual} />
                     </td>
-                    <td className="px-4 py-3 text-slate-400">
-                      {viaje.costeraId ?? (
-                        <span className="text-slate-600 italic">—</span>
-                      )}
+                    <td className="px-4 py-3 text-gray-500">
+                      {viaje.costeraId ?? <span className="italic">—</span>}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 text-right">
                       <AccionesRow
                         viaje={viaje}
                         onZarpar={handleZarpar}
                         onAmarrar={handleAmarrar}
                         onFondear={handleFondear}
                         onReanudar={handleReanudar}
+                        onActualizarPosicion={handleAbrirPosicion}
                         isLoading={anyMutating}
                       />
                     </td>
@@ -257,20 +223,32 @@ export default function ViajesDashboard() {
         </div>
 
         {data && (
-          <div className="mt-4 flex gap-2 justify-end px-4 py-3 border-t border-slate-700">
-            <button onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1} className="px-3 py-1 border border-slate-600 rounded disabled:opacity-50 hover:bg-slate-800">Anterior</button>
-            <span className="px-3 py-1">Página {page}</span>
-            <button onClick={() => setPage(p => p + 1)} disabled={data.length < PAGE_SIZE} className="px-3 py-1 border border-slate-600 rounded disabled:opacity-50 hover:bg-slate-800">Siguiente</button>
+          <div className="flex gap-2 justify-end px-4 py-3 border-t border-gray-100 bg-gray-50">
+            <button
+              onClick={() => setPage(p => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="px-3 py-1 border border-gray-300 rounded text-gray-700 disabled:opacity-40 hover:bg-white transition-colors"
+            >
+              Anterior
+            </button>
+            <span className="px-3 py-1 text-gray-600 text-sm font-medium flex items-center">Página {page}</span>
+            <button
+              onClick={() => setPage(p => p + 1)}
+              disabled={data.length < PAGE_SIZE}
+              className="px-3 py-1 border border-gray-300 rounded text-gray-700 disabled:opacity-40 hover:bg-white transition-colors"
+            >
+              Siguiente
+            </button>
           </div>
         )}
       </div>
 
-      {/* Toast */}
-      {toast && (
-        <Toast
-          message={toast.message}
-          type={toast.type}
-          onClose={() => setToast(null)}
+      {/* Renderizado del Modal de Posición */}
+      {modalPosicion.isOpen && modalPosicion.viaje && (
+        <ModalActualizarPosicion
+          viajeId={modalPosicion.viaje.id}
+          nombreBuque={modalPosicion.viaje.buque}
+          onClose={() => setModalPosicion({ isOpen: false, viaje: null })}
         />
       )}
     </div>

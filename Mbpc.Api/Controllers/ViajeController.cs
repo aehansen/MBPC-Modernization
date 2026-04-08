@@ -330,5 +330,105 @@ namespace Mbpc.Api.Controllers
 
             return Ok(new { mensaje = $"Buque '{id}' reanudado. Estado → 'Reanudado'." });
         }
+
+        /// <summary>
+        /// Actualiza la posición geográfica de un buque (lat/lng + timestamp).
+        ///
+        /// Reglas de negocio aplicadas en IViajeService.ActualizarPosicionAsync:
+        ///   • Haversine: calcula distancia entre posición anterior y nueva.
+        ///   • Cinemática: si velocidad calculada > 60 kn → HTTP 400 "Cinemática inválida".
+        ///   • Persistencia dual: actualiza el doc activo en MongoDB E inserta copia en tracklog.
+        ///
+        /// Responsabilidades del Controller (y solo estas):
+        ///   1. Validar ModelState (DataAnnotations del DTO).
+        ///   2. Verificar que el Claim CosteraId exista.
+        ///   3. Delegar a IViajeService y traducir resultado a HTTP.
+        /// </summary>
+        [HttpPut("{id}/posicion")]
+        public async Task<ActionResult> ActualizarPosicion(
+            string id,
+            [FromBody] ActualizarPosicionDto dto)
+        {
+            // ── 1. Validación de ModelState ───────────────────────────────────
+            if (!ModelState.IsValid)
+            {
+                _logger.LogWarning(
+                    "ActualizarPosicion rechazado por ModelState inválido para Id: {Id}. Errores: {@Errors}",
+                    id,
+                    ModelState.Values
+                              .SelectMany(v => v.Errors)
+                              .Select(e => e.ErrorMessage));
+
+                return ValidationProblem(ModelState);
+            }
+
+            // ── 2. Validación del Claim multitenant ───────────────────────────
+            var costeraIdClaim = User.FindFirstValue("CosteraId");
+
+            if (string.IsNullOrWhiteSpace(costeraIdClaim))
+            {
+                _logger.LogWarning(
+                    "ActualizarPosicion rechazado: token sin Claim 'CosteraId'. Usuario: {User}",
+                    User.Identity?.Name ?? "desconocido");
+                return Forbid();
+            }
+
+            if (string.IsNullOrWhiteSpace(id))
+                return BadRequest(new { mensaje = "El ID del viaje es requerido." });
+
+            // Tolerancia de 5 minutos para timestamps de transponders con deriva de reloj.
+            if (dto.FechaReporte > DateTime.UtcNow.AddMinutes(5))
+            {
+                return BadRequest(new
+                {
+                    mensaje = $"FechaReporte ({dto.FechaReporte:O}) es futura. Verificá el transponder AIS."
+                });
+            }
+
+            _logger.LogInformation(
+                "ActualizarPosicion — Id: '{Id}' | Lat: {Lat} | Lng: {Lng} | FechaReporte: {Fecha} | CosteraId: {CosteraId}",
+                id, dto.Latitud, dto.Longitud, dto.FechaReporte, costeraIdClaim);
+
+            // ── 3. Delegación al Service ──────────────────────────────────────
+            PosicionActualizadaResultDto? resultado;
+
+            try
+            {
+                resultado = await _viajeService.ActualizarPosicionAsync(id, dto);
+            }
+            catch (InvalidOperationException ex) when (ex.Message.StartsWith("Cinemática inválida"))
+            {
+                // El servicio lanza esta excepción tipada cuando la velocidad calculada > 60 kn.
+                _logger.LogWarning(
+                    "ActualizarPosicion bloqueada por cinemática inválida para Id: '{Id}'. Detalle: {Msg}",
+                    id, ex.Message);
+
+                return BadRequest(new { mensaje = ex.Message });
+            }
+
+            if (resultado == null)
+            {
+                _logger.LogError(
+                    "ActualizarPosicionAsync retornó null para Id: '{Id}' CosteraId: {CosteraId}.",
+                    id, costeraIdClaim);
+
+                return NotFound(new
+                {
+                    mensaje = $"No se encontró el viaje con Id '{id}' para la costera {costeraIdClaim}."
+                });
+            }
+
+            return Ok(new
+            {
+                mensaje              = $"Posición del buque '{resultado.VesselName}' actualizada correctamente.",
+                vesselName           = resultado.VesselName,
+                latitud              = resultado.Latitud,
+                longitud             = resultado.Longitud,
+                velocidadCalculadaKn = resultado.VelocidadCalculadaKn,
+                distanciaRecorridaNM = resultado.DistanciaRecorridaNM,
+                tracklogId           = resultado.TracklogId,
+                fechaReporte         = dto.FechaReporte,
+            });
+        }
     }
 }

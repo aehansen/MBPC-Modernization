@@ -3,6 +3,7 @@ using Oracle.ManagedDataAccess.Client;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Caching.Distributed;
 using MongoDB.Driver;
+using MongoDB.Bson;
 using Mbpc.Api.Models.Config;
 using Mbpc.Api.Models.Mongo;
 using Mbpc.Api.Models;
@@ -17,13 +18,14 @@ namespace Mbpc.Api.Services
 {
     public class ViajeManagerService : IViajeService
     {
-        private readonly IMongoCollection<ViajePosicionMongo> _viajesCollection;
-        private readonly IMongoCollection<ViajeDetalleMongo>  _detallesCollection;
-        private readonly string                               _oracleConnectionString;
-        private readonly ILogger<ViajeManagerService>         _logger;
-        private readonly IWebHostEnvironment                  _env;
-        private readonly IDistributedCache                    _cache;
-        private readonly IHttpContextAccessor                 _httpContextAccessor;
+        private readonly IMongoCollection<ViajePosicionMongo>  _viajesCollection;
+        private readonly IMongoCollection<ViajeDetalleMongo>   _detallesCollection;
+        private readonly IMongoCollection<ViajeTracklogMongo>  _tracklogCollection;
+        private readonly string                                _oracleConnectionString;
+        private readonly ILogger<ViajeManagerService>          _logger;
+        private readonly IWebHostEnvironment                   _env;
+        private readonly IDistributedCache                     _cache;
+        private readonly IHttpContextAccessor                  _httpContextAccessor;
 
         // ── POLÍTICAS POLLY ──────────────────────────────────────────────────
         // Retry para Oracle: 3 intentos con espera exponencial (2s, 4s, 8s)
@@ -70,6 +72,13 @@ namespace Mbpc.Api.Services
                 [EstadoEtapa.Reanudado] = new HashSet<EstadoEtapa> { EstadoEtapa.Navegando, EstadoEtapa.Amarrado, EstadoEtapa.Fondeado },
             };
 
+        // ── CONSTANTES FÍSICAS (Posicionamiento AIS) ─────────────────────────
+        private const double RADIO_TIERRA_KM              = 6371.0;
+        private const double KM_POR_MILLA_NAUTICA         = 1.852;
+        private const double MAX_VELOCIDAD_KNOTS          = 60.0;
+        // Tolerancia de 1 segundo para evitar división por cero en reportes duplicados.
+        private const double MIN_SEGUNDOS_ENTRE_REPORTES  = 1.0;
+
         public ViajeManagerService(
             IMongoClient                  mongoClient,
             IOptions<MongoDbSettings>     mongoSettings,
@@ -86,6 +95,9 @@ namespace Mbpc.Api.Services
 
             _detallesCollection = database.GetCollection<ViajeDetalleMongo>(
                 mongoSettings.Value.DetailsMbpcCollectionName);
+
+            _tracklogCollection = database.GetCollection<ViajeTracklogMongo>(
+                mongoSettings.Value.TracklogCollectionName);
 
             _oracleConnectionString = oracleSettings.Value.ConnectionString;
             _logger              = logger;
@@ -694,6 +706,125 @@ namespace Mbpc.Api.Services
             return true;
         }
 
+        // ── POSICIONAMIENTO AIS (EJE 4) ──────────────────────────────────────
+
+        /// <summary>
+        /// Actualiza la posición geográfica de un buque y registra el punto en el tracklog.
+        ///
+        /// Flujo:
+        ///   1. Recupera el documento activo de ViajePosicionMongo.
+        ///   2. Calcula distancia (Haversine) y velocidad en nudos.
+        ///   3. Rechaza si velocidad > 60 kn (excepción de dominio tipada).
+        ///   4. Actualiza el documento activo con las nuevas coordenadas y timestamp.
+        ///   5. Inserta un registro inmutable en la colección de tracklog.
+        ///
+        /// Retorna null si no existe el documento con ese Id para la costera autenticada.
+        /// Lanza InvalidOperationException si la cinemática es físicamente inválida.
+        /// </summary>
+        public async Task<PosicionActualizadaResultDto?> ActualizarPosicionAsync(
+            string id,
+            ActualizarPosicionDto dto)
+        {
+            // ── 1. Recuperar posición actual ──────────────────────────────────
+            var filtroId = Builders<ViajePosicionMongo>.Filter.Eq(p => p.Id, id);
+
+            var posicionActual = await _viajesCollection
+                .Find(filtroId)
+                .FirstOrDefaultAsync();
+
+            if (posicionActual is null)
+                return null;
+
+            // ── 2. Cálculo cinemático ─────────────────────────────────────────
+            double distanciaKm = CalcularHaversineKm(
+                posicionActual.Latitude,  posicionActual.Longitude,
+                dto.Latitud,              dto.Longitud);
+
+            double distanciaNM = distanciaKm / KM_POR_MILLA_NAUTICA;
+
+            double segundosTranscurridos = (dto.FechaReporte - posicionActual.MsgTime).TotalSeconds;
+
+            double velocidadKn = 0.0;
+
+            if (segundosTranscurridos > MIN_SEGUNDOS_ENTRE_REPORTES)
+            {
+                double horasTranscurridas = segundosTranscurridos / 3600.0;
+                velocidadKn = distanciaNM / horasTranscurridas;
+            }
+
+            // ── 3. Validación cinemática ──────────────────────────────────────
+            // Ningún buque de superficie puede superar 60 nudos.
+            // Velocidades mayores indican un salto de coordenadas inválido
+            // (transponder defectuoso, inyección de datos errónea, etc.).
+            if (velocidadKn > MAX_VELOCIDAD_KNOTS)
+            {
+                throw new InvalidOperationException(
+                    $"Cinemática inválida: velocidad calculada de {velocidadKn:F1} kn supera el límite de " +
+                    $"{MAX_VELOCIDAD_KNOTS} kn. " +
+                    $"Distancia: {distanciaNM:F2} NM en {segundosTranscurridos:F0} segundos. " +
+                    $"Verificá las coordenadas o el timestamp del transponder.");
+            }
+
+            // ── 4. Construir GeoJSON point para el campo "location" ───────────
+            var nuevaLocation = new LocationMongo
+            {
+                Geo = new GeoMongo
+                {
+                    Type        = "Point",
+                    Coordinates = new[] { dto.Longitud, dto.Latitud },  // GeoJSON: [lng, lat]
+                }
+            };
+
+            // ── 5. Actualizar documento activo en MongoDB ─────────────────────
+            var update = Builders<ViajePosicionMongo>.Update
+                .Set(p => p.Latitude,        dto.Latitud)
+                .Set(p => p.Longitude,       dto.Longitud)
+                .Set(p => p.MsgTime,         dto.FechaReporte)
+                .Set(p => p.SpeedOverGround, velocidadKn)
+                .Set(p => p.Location,        nuevaLocation);
+
+            var updateResult = await _viajesCollection.UpdateOneAsync(filtroId, update);
+
+            if (updateResult.ModifiedCount == 0)
+            {
+                // El documento existía (lo encontramos arriba) pero no se modificó.
+                // Puede ocurrir si las coordenadas son idénticas; no es un error crítico.
+                _logger.LogWarning(
+                    "ActualizarPosicionAsync: UpdateOne no modificó ningún documento para Id '{Id}'.", id);
+            }
+
+            // ── 6. Insertar en tracklog (colección inmutable de historial) ─────
+            var tracklogEntry = new ViajeTracklogMongo
+            {
+                PosicionId           = posicionActual.Id,
+                TravelId             = posicionActual.TravelId,
+                VesselName           = posicionActual.VesselName,
+                Mmsi                 = posicionActual.Mmsi,
+                Latitude             = dto.Latitud,
+                Longitude            = dto.Longitud,
+                SpeedOverGround      = velocidadKn,
+                CalculatedSpeedKnots = velocidadKn,
+                DistanceNM           = distanciaNM,
+                NavegationStatusDesc = posicionActual.NavegationStatusDesc,
+                MsgTime              = dto.FechaReporte,
+                InsertedAt           = DateTime.UtcNow,
+                CosteraId            = posicionActual.CosteraId,
+                Location             = nuevaLocation,
+            };
+
+            await _tracklogCollection.InsertOneAsync(tracklogEntry);
+
+            return new PosicionActualizadaResultDto
+            {
+                VesselName           = posicionActual.VesselName,
+                Latitud              = dto.Latitud,
+                Longitud             = dto.Longitud,
+                VelocidadCalculadaKn = Math.Round(velocidadKn,  2),
+                DistanciaRecorridaNM = Math.Round(distanciaNM,  3),
+                TracklogId           = tracklogEntry.Id,
+            };
+        }
+
         // ── MÁQUINA DE ESTADOS (EJE 2) ───────────────────────────────────────
 
         /// <summary>
@@ -893,6 +1024,31 @@ namespace Mbpc.Api.Services
                 return false;
             }
         }
+
+        // ── FÓRMULA DE HAVERSINE ─────────────────────────────────────────────
+
+        /// <summary>
+        /// Calcula la distancia en kilómetros entre dos puntos WGS-84
+        /// usando la fórmula de Haversine (error &lt; 0.5 % para distancias &lt; 20 000 km).
+        /// </summary>
+        private static double CalcularHaversineKm(
+            double lat1, double lng1,
+            double lat2, double lng2)
+        {
+            double dLat = ToRadians(lat2 - lat1);
+            double dLng = ToRadians(lng2 - lng1);
+
+            double a =
+                Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
+                Math.Cos(ToRadians(lat1)) * Math.Cos(ToRadians(lat2)) *
+                Math.Sin(dLng / 2) * Math.Sin(dLng / 2);
+
+            double c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+
+            return RADIO_TIERRA_KM * c;
+        }
+
+        private static double ToRadians(double grados) => grados * Math.PI / 180.0;
 
         // ── HELPER DE MAPEO DE ENUMS ─────────────────────────────────────────
 

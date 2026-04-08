@@ -18,56 +18,6 @@ import { useState, useId } from "react";
 import { COSTERAS } from "../constants/costeras";
 import apiClient from "../services/apiClient";
 
-// ── Escudo SVG de la Prefectura Naval Argentina ───────────────────────────────
-// Representación esquemática para uso en interfaz digital.
-// No reproduce artwork oficial con fines de lucro.
-const EscudoPNA = ({ size = 72 }) => (
-  <svg
-    width={size}
-    height={size}
-    viewBox="0 0 80 80"
-    aria-label="Escudo Prefectura Naval Argentina"
-    role="img"
-  >
-    {/* Base: círculo exterior dorado */}
-    <circle cx="40" cy="40" r="39" fill="#0a1628" stroke="#C8A84B" strokeWidth="2.5" />
-    {/* Fondo interior azul profundo */}
-    <circle cx="40" cy="40" r="33" fill="#0d1f3c" />
-    {/* Ancla vertical */}
-    <line x1="40" y1="16" x2="40" y2="58" stroke="#C8A84B" strokeWidth="2.8" strokeLinecap="round" />
-    {/* Travesaño */}
-    <line x1="27" y1="25" x2="53" y2="25" stroke="#C8A84B" strokeWidth="2.4" strokeLinecap="round" />
-    {/* Argolla superior */}
-    <circle cx="40" cy="18" r="3.5" fill="none" stroke="#C8A84B" strokeWidth="2.2" />
-    {/* Brazos del ancla */}
-    <path d="M27 52 Q25 60 34 62" fill="none" stroke="#C8A84B" strokeWidth="2.2" strokeLinecap="round" />
-    <path d="M53 52 Q55 60 46 62" fill="none" stroke="#C8A84B" strokeWidth="2.2" strokeLinecap="round" />
-    {/* Olas decorativas */}
-    <path
-      d="M20 70 Q26 66 32 70 Q38 74 44 70 Q50 66 56 70 Q60 72 60 70"
-      fill="none"
-      stroke="#C8A84B"
-      strokeWidth="1.6"
-      strokeLinecap="round"
-    />
-    {/* Segunda ola */}
-    <path
-      d="M22 75 Q28 71 34 75 Q40 79 46 75 Q52 71 58 75"
-      fill="none"
-      stroke="#C8A84B"
-      strokeWidth="1"
-      strokeLinecap="round"
-      opacity="0.5"
-    />
-    {/* Estrella en la parte superior */}
-    <polygon
-      points="40,8 41.5,12.5 46,12.5 42.5,15 43.8,19.5 40,17 36.2,19.5 37.5,15 34,12.5 38.5,12.5"
-      fill="#C8A84B"
-      opacity="0.9"
-    />
-  </svg>
-);
-
 // ── Íconos inline ─────────────────────────────────────────────────────────────
 const IconLock = () => (
   <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
@@ -182,102 +132,57 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center px-4 relative overflow-hidden">
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4 relative overflow-hidden">
 
-      {/* ── Fondo: gradiente radial + patrón de puntos ── */}
+      {/* ── Fondo: patrón de puntos sutil ── */}
       <div
-        className="absolute inset-0 pointer-events-none"
-        aria-hidden="true"
-        style={{
-          background:
-            "radial-gradient(ellipse 80% 60% at 50% -10%, rgba(14,30,70,0.9) 0%, transparent 70%), " +
-            "radial-gradient(ellipse 60% 40% at 80% 110%, rgba(10,22,50,0.7) 0%, transparent 65%)",
-        }}
-      />
-
-      {/* Patrón de grilla sutil */}
-      <div
-        className="absolute inset-0 pointer-events-none opacity-[0.03]"
+        className="absolute inset-0 pointer-events-none opacity-[0.05]"
         aria-hidden="true"
         style={{
           backgroundImage:
-            "linear-gradient(rgba(200,168,75,1) 1px, transparent 1px), " +
-            "linear-gradient(90deg, rgba(200,168,75,1) 1px, transparent 1px)",
+            "linear-gradient(#002454 1px, transparent 1px), " +
+            "linear-gradient(90deg, #002454 1px, transparent 1px)",
           backgroundSize: "40px 40px",
         }}
       />
 
-      {/* Línea de acento superior */}
-      <div
-        className="absolute top-0 left-0 right-0 h-[2px] pointer-events-none"
-        aria-hidden="true"
-        style={{
-          background:
-            "linear-gradient(90deg, transparent 0%, #C8A84B 30%, #e8c86b 50%, #C8A84B 70%, transparent 100%)",
-        }}
-      />
-
-      {/* ── Olas decorativas inferiores ── */}
-      <div className="absolute bottom-0 left-0 w-full pointer-events-none" aria-hidden="true">
-        <svg viewBox="0 0 1440 130" preserveAspectRatio="none" className="w-full opacity-[0.06]">
-          <path
-            d="M0,80 C240,130 480,30 720,80 C960,130 1200,30 1440,80 L1440,130 L0,130 Z"
-            fill="#C8A84B"
-          />
-        </svg>
-        <svg viewBox="0 0 1440 100" preserveAspectRatio="none"
-          className="w-full opacity-[0.04] absolute bottom-0">
-          <path
-            d="M0,60 C360,20 720,100 1080,60 C1260,40 1380,80 1440,60 L1440,100 L0,100 Z"
-            fill="#ffffff"
-          />
-        </svg>
-      </div>
-
       {/* ── Card principal ── */}
       <div className="relative w-full max-w-[420px]">
+        <div className="relative bg-white border border-gray-200 rounded-2xl shadow-2xl overflow-hidden">
 
-        {/* Borde luminoso decorativo */}
-        <div
-          className="absolute -inset-[1px] rounded-2xl pointer-events-none"
-          aria-hidden="true"
-          style={{
-            background:
-              "linear-gradient(135deg, rgba(200,168,75,0.35) 0%, rgba(200,168,75,0.05) 40%, rgba(200,168,75,0.05) 60%, rgba(200,168,75,0.2) 100%)",
-            borderRadius: "inherit",
-          }}
-        />
-
-        <div className="relative bg-slate-900/90 backdrop-blur-xl border border-white/[0.06] rounded-2xl shadow-2xl overflow-hidden">
-
-          {/* Banda superior dorada */}
-          <div className="h-[3px] w-full bg-gradient-to-r from-transparent via-[#C8A84B] to-transparent" />
+          {/* Banda superior azul marino institucional */}
+          <div className="h-[4px] w-full bg-[#002454]" />
 
           <div className="px-8 py-9">
 
             {/* ── Encabezado institucional ── */}
             <header className="flex flex-col items-center gap-4 mb-9">
-              <EscudoPNA size={72} />
+              {/* Escudo Oficial PNA desde URL */}
+              <img 
+                src="https://www.argentina.gob.ar/sites/default/files/styles/isotipo/public/imagenEncabezado/prefectura-escudo.png?itok=EywBfOaV" 
+                alt="Escudo Prefectura Naval Argentina" 
+                className="h-[72px] w-auto object-contain"
+              />
 
               <div className="text-center space-y-0.5">
-                <p className="text-[#C8A84B] text-[10px] font-bold tracking-[0.3em] uppercase">
+                <p className="text-gray-500 text-[10px] font-bold tracking-[0.3em] uppercase">
                   República Argentina
                 </p>
-                <h1 className="text-white text-[1.05rem] font-bold tracking-wide leading-snug mt-1">
+                <h1 className="text-[#002454] text-[1.05rem] font-bold tracking-wide leading-snug mt-1">
                   Prefectura Naval Argentina
                 </h1>
-                <p className="text-slate-400 text-xs tracking-wide mt-1">
-                  Sistema MBPC Geo — Control de Tráfico Fluvial
+                <p className="text-gray-500 text-xs tracking-wide mt-1">
+                  Sistema MBPC Geo H2
                 </p>
               </div>
 
               {/* Separador */}
               <div className="flex items-center gap-3 w-full mt-1">
-                <div className="flex-1 h-px bg-gradient-to-r from-transparent to-white/10" />
-                <span className="text-white/20 text-[10px] tracking-[0.2em] uppercase font-medium">
+                <div className="flex-1 h-px bg-gray-200" />
+                <span className="text-gray-400 text-[10px] tracking-[0.2em] uppercase font-bold">
                   Acceso Operativo
                 </span>
-                <div className="flex-1 h-px bg-gradient-to-l from-transparent to-white/10" />
+                <div className="flex-1 h-px bg-gray-200" />
               </div>
             </header>
 
@@ -288,13 +193,13 @@ export default function Login() {
               <div>
                 <label
                   htmlFor={costeraFieldId}
-                  className="block text-slate-300 text-[11px] font-semibold tracking-widest uppercase mb-2"
+                  className="block text-gray-700 text-[11px] font-bold tracking-widest uppercase mb-2"
                 >
                   Costera / Sección
                 </label>
                 <div className="relative">
-                  {/* Ícono de ancla / ubicación */}
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">
+                  {/* Ícono de ubicación */}
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
                     <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
                       <path strokeLinecap="round" strokeLinejoin="round"
                         d="M15 10.5a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
@@ -310,35 +215,34 @@ export default function Login() {
                     disabled={loading}
                     className="
                       w-full appearance-none
-                      bg-slate-800/70 border border-slate-700/80 rounded-lg
+                      bg-white border border-gray-300 rounded-lg
                       pl-10 pr-9 py-2.5
-                      text-sm text-white
-                      focus:outline-none focus:ring-2 focus:ring-[#C8A84B]/60 focus:border-[#C8A84B]/60
-                      disabled:opacity-50 disabled:cursor-not-allowed
+                      text-sm text-gray-900
+                      focus:outline-none focus:ring-2 focus:ring-[#104a8e] focus:border-transparent
+                      disabled:opacity-50 disabled:bg-gray-50 disabled:cursor-not-allowed
                       transition duration-150
                     "
-                    style={{ colorScheme: "dark" }}
                   >
                     {/* Opción placeholder */}
-                    <option value="" disabled className="bg-slate-800 text-slate-400">
+                    <option value="" disabled className="text-gray-400">
                       — Seleccioná tu sección —
                     </option>
 
                     {/* ── Super Admin: inyectado manualmente, value=0 ── */}
-                    <option value={0} className="bg-slate-800 font-semibold text-amber-400">
+                    <option value={0} className="font-semibold text-[#002454]">
                       🏢 DIRECCIÓN DE TRÁFICO MARÍTIMO (ADMIN)
                     </option>
 
                     {/* ── Costeras desde el catálogo importado ── */}
                     {COSTERAS.map(({ id, etiqueta }) => (
-                      <option key={id} value={id} className="bg-slate-800 text-white">
+                      <option key={id} value={id}>
                         {etiqueta}
                       </option>
                     ))}
                   </select>
 
                   {/* Chevron decorativo */}
-                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500">
+                  <span className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400">
                     <IconChevron />
                   </span>
                 </div>
@@ -348,12 +252,12 @@ export default function Login() {
               <div>
                 <label
                   htmlFor={passwordFieldId}
-                  className="block text-slate-300 text-[11px] font-semibold tracking-widest uppercase mb-2"
+                  className="block text-gray-700 text-[11px] font-bold tracking-widest uppercase mb-2"
                 >
                   Contraseña Operativa
                 </label>
                 <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none">
                     <IconLock />
                   </span>
                   <input
@@ -365,11 +269,11 @@ export default function Login() {
                     placeholder="••••••••"
                     disabled={loading}
                     className="
-                      w-full bg-slate-800/70 border border-slate-700/80 rounded-lg
+                      w-full bg-white border border-gray-300 rounded-lg
                       pl-10 pr-10 py-2.5
-                      text-sm text-white placeholder-slate-600
-                      focus:outline-none focus:ring-2 focus:ring-[#C8A84B]/60 focus:border-[#C8A84B]/60
-                      disabled:opacity-50 disabled:cursor-not-allowed
+                      text-sm text-gray-900 placeholder-gray-400
+                      focus:outline-none focus:ring-2 focus:ring-[#104a8e] focus:border-transparent
+                      disabled:opacity-50 disabled:bg-gray-50 disabled:cursor-not-allowed
                       transition duration-150
                     "
                   />
@@ -381,7 +285,7 @@ export default function Login() {
                     disabled={loading}
                     className="
                       absolute right-3 top-1/2 -translate-y-1/2
-                      text-slate-500 hover:text-slate-300
+                      text-gray-400 hover:text-gray-600
                       transition-colors duration-150 disabled:pointer-events-none
                     "
                   >
@@ -397,14 +301,14 @@ export default function Login() {
                   aria-live="assertive"
                   className="
                     flex items-start gap-2.5
-                    bg-red-950/60 border border-red-500/30 rounded-lg
+                    bg-red-50 border border-red-200 rounded-lg
                     px-4 py-3
                   "
                 >
-                  <span className="text-red-400 mt-0.5">
+                  <span className="text-red-500 mt-0.5">
                     <IconAlert />
                   </span>
-                  <p className="text-red-300 text-sm leading-snug">{error}</p>
+                  <p className="text-red-700 text-sm leading-snug">{error}</p>
                 </div>
               )}
 
@@ -414,14 +318,14 @@ export default function Login() {
                 disabled={loading}
                 className="
                   w-full mt-1
-                  bg-[#C8A84B] hover:bg-[#d4b45a] active:bg-[#b8943c]
-                  text-slate-900 font-bold text-sm tracking-wide
+                  bg-[#104a8e] hover:bg-[#002454] active:bg-[#001a3d]
+                  text-white font-bold text-sm tracking-wide
                   py-3 rounded-lg
                   flex items-center justify-center gap-2
                   transition-all duration-150 ease-in-out
                   disabled:opacity-60 disabled:cursor-not-allowed
-                  shadow-lg shadow-amber-900/20
-                  focus:outline-none focus:ring-2 focus:ring-[#C8A84B] focus:ring-offset-2 focus:ring-offset-slate-900
+                  shadow-md shadow-blue-900/20
+                  focus:outline-none focus:ring-2 focus:ring-[#104a8e] focus:ring-offset-2 focus:ring-offset-white
                 "
               >
                 {loading ? (
@@ -439,12 +343,12 @@ export default function Login() {
             </form>
 
             {/* ── Footer ── */}
-            <footer className="mt-7 pt-5 border-t border-white/[0.06] text-center space-y-1">
-              <p className="text-slate-600 text-[11px]">
+            <footer className="mt-7 pt-5 border-t border-gray-100 text-center space-y-1">
+              <p className="text-gray-400 text-[11px]">
                 Acceso restringido a personal autorizado · PNA © {new Date().getFullYear()}
               </p>
-              <p className="text-slate-700 text-[10px]">
-                MBPC Geo v2 — Dirección de Modernización Digital
+              <p className="text-gray-400 text-[10px]">
+                MBPC Geo H2 — Dirección de Informática y Comunicaciones <br /> Divisón Sistemas de Información Geográfica
               </p>
             </footer>
           </div>
