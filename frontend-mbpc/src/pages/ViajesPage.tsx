@@ -1,5 +1,5 @@
-// src/pages/ViajesPage.tsx
-import { useState } from "react";
+import React, { useState } from 'react';
+import ModalAmarrarBarcaza from '../components/ModalAmarrarBarcaza';
 import MapaAIS         from "../MapaAIS.jsx";
 import ViajesDashboard from "../components/viajes/ViajesDashboard";
 import ModalHistorico  from "../components/viajes/ModalHistorico";
@@ -9,6 +9,7 @@ type Vista = "dashboard" | "mapa";
 export default function ViajesPage() {
   const [vistaActual, setVistaActual]     = useState<Vista>("dashboard");
   const [showHistorico, setShowHistorico] = useState(false);
+  const [isModalAmarrarOpen, setIsModalAmarrarOpen] = useState(false);
 
   const toggleVista = () =>
     setVistaActual((v) => (v === "mapa" ? "dashboard" : "mapa"));
@@ -51,7 +52,7 @@ export default function ViajesPage() {
 
         {/* ── 2. Amarrar Barcaza ─────────────────────────────────────────── */}
         <button
-          onClick={() => alert("Funcionalidad en migración")}
+          onClick={() => setIsModalAmarrarOpen(true)}
           className="flex items-center gap-1.5 px-4 py-1.5 bg-[#104a8e] hover:bg-[#1a5fa8] text-white text-xs font-semibold rounded transition border border-blue-600"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -119,6 +120,10 @@ export default function ViajesPage() {
         <ModalHistorico onClose={() => setShowHistorico(false)} />
       )}
 
+    <ModalAmarrarBarcaza 
+        isOpen={isModalAmarrarOpen} 
+        onClose={() => setIsModalAmarrarOpen(false)} 
+      />
     </div>
   );
 }

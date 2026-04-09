@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Mbpc.Api")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+b7cb5fe8bd1a73a81927e257dac6214fa31ec40b")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+d6c0ca769eae40abb8c2e9198be0b22394e0fcc3")]
 [assembly: System.Reflection.AssemblyProductAttribute("Mbpc.Api")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Mbpc.Api")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
