@@ -14,7 +14,7 @@ const apiClient = axios.create({
   // En Vite, el proxy de desarrollo en vite.config.js redirige /api → backend.
   // En producción, la variable de entorno VITE_API_BASE_URL apunta al gateway.
   baseURL: import.meta.env.VITE_API_BASE_URL ?? "/api",
-  timeout: 15_000,
+  timeout: 30_000,
   headers: {
     "Content-Type": "application/json",
     Accept: "application/json",

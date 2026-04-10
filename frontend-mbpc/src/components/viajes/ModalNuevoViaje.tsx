@@ -1,189 +1,202 @@
 // src/components/viajes/ModalNuevoViaje.tsx
-import { useState, useEffect, useCallback } from 'react';
-import { useCrearViaje } from '@/hooks/useViajes';
+// ──────────────────────────────────────────────────────────────────────────────
+// Modal para registrar un nuevo viaje en el sistema MBPC.
+// Usa react-hook-form para manejo del formulario y validaciones,
+// Tailwind CSS para estilos, y el hook useNuevoViaje para la mutación.
+// ──────────────────────────────────────────────────────────────────────────────
 
-// ─── Tipos ────────────────────────────────────────────────────────────────────
+import { useEffect } from "react";
+import { useForm, type SubmitHandler } from "react-hook-form";
+import { useNuevoViaje } from "@/hooks/useNuevoViaje";
+import {
+  DeclaracionMalvinasEnum,
+  DECLARACION_MALVINAS_LABELS,
+  type NuevoViajeFormValues,
+  type NuevoViajeRequest,
+  type NuevoViajeResponse, // ← import agregado para tipar onSuccess
+  type NuevoViajeError,
+} from "@/types/viajes.types";
 
-type ProximoPuntoControl =
-  | 'RPNA_AMARR_ELDO'
-  | 'RPNA_PREFECT_ROS'
-  | 'RPLATA_CANAL_MITRE';
-
-type DeclaracionMalvinas =
-  | 'NoVieneDeMalvinas_L'
-  | 'VieneDeMalvinas_M'
-  | 'NoAplica_NA'
-  | 'EnTransito_T';
-
-interface NuevoViajeDto {
-  // Requeridos
-  nombreBuque: string;
-  origen: string;
-  destino: string;
-  proximoPuntoControl: ProximoPuntoControl;
-  fechaPartida: string; // ISO
-  eta: string;          // ISO
-  declaracionMalvinas: DeclaracionMalvinas;
-  // Opcionales
-  muelleSalida: string | null;
-  agenciaMaritima: string | null;
-  motivoViaje: string | null;
-  zoe: string | null;
-  posicion: string | null;
-  rioCanalKmPar: number | null;
-}
+// ─── Props ────────────────────────────────────────────────────────────────────
 
 interface ModalNuevoViajeProps {
+  /** Controla la visibilidad del modal */
   isOpen: boolean;
+  /** Callback para cerrar el modal (desde botón cancelar, overlay, o éxito) */
   onClose: () => void;
+  /**
+   * Callback opcional para notificar éxito al componente padre.
+   * Recibe el objeto completo NuevoViajeResponse para que el padre
+   * pueda mostrar el mensaje descriptivo que viene del servidor.
+   */
+  onSuccess?: (response: NuevoViajeResponse) => void; // ← era (viajeId: number)
+  /**
+   * Callback opcional para notificar error al componente padre.
+   */
+  onError?: (error: NuevoViajeError) => void;
 }
-
-// ─── Constantes ───────────────────────────────────────────────────────────────
-
-const PUNTOS_CONTROL: { value: ProximoPuntoControl; label: string }[] = [
-  { value: 'RPNA_AMARR_ELDO', label: 'Amarras El Dorado (RPNA)' },
-  { value: 'RPNA_PREFECT_ROS', label: 'Prefectura Rosario (RPNA)' },
-  { value: 'RPLATA_CANAL_MITRE', label: 'Canal Mitre (R. de la Plata)' },
-];
-
-const DECLARACIONES_MALVINAS: { value: DeclaracionMalvinas; label: string }[] = [
-  { value: 'NoVieneDeMalvinas_L', label: 'No viene de Malvinas (L)' },
-  { value: 'VieneDeMalvinas_M',   label: 'Viene de Malvinas (M)' },
-  { value: 'NoAplica_NA',         label: 'No aplica (NA)' },
-  { value: 'EnTransito_T',        label: 'En tránsito (T)' },
-];
-
-const FORM_INICIAL: NuevoViajeDto = {
-  nombreBuque:         '',
-  origen:              '',
-  destino:             '',
-  proximoPuntoControl: 'RPNA_AMARR_ELDO',
-  fechaPartida:        '',
-  eta:                 '',
-  declaracionMalvinas: 'NoVieneDeMalvinas_L',
-  muelleSalida:        null,
-  agenciaMaritima:     null,
-  motivoViaje:         null,
-  zoe:                 null,
-  posicion:            null,
-  rioCanalKmPar:       null,
-};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Convierte datetime-local string → ISO 8601, o null si está vacío */
-const toIso = (value: string): string =>
-  value ? new Date(value).toISOString() : '';
-
-/** Convierte ISO 8601 → datetime-local string para el input */
-const toLocalDatetime = (iso: string): string => {
-  if (!iso) return '';
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-};
-
-// ─── Subcomponentes de UI ─────────────────────────────────────────────────────
-
-interface FieldProps {
-  label: string;
-  required?: boolean;
-  children: React.ReactNode;
-  error?: string;
+/**
+ * Convierte un string datetime-local ("YYYY-MM-DDTHH:mm") a ISO 8601 UTC.
+ * El input datetime-local devuelve hora local del navegador; la convertimos
+ * explícitamente a UTC antes de enviar al servidor.
+ */
+function toIsoUtcString(localDateTimeString: string): string {
+  return new Date(localDateTimeString).toISOString();
 }
 
-function Field({ label, required, children, error }: FieldProps) {
+/**
+ * Devuelve el valor mínimo para datetime-local (ahora mismo)
+ * para evitar que el operador registre viajes con fechas pasadas.
+ */
+function getNowLocalMin(): string {
+  const now = new Date();
+  const offset = now.getTimezoneOffset() * 60_000;
+  return new Date(now.getTime() - offset).toISOString().slice(0, 16);
+}
+
+// ─── Subcomponentes internos ──────────────────────────────────────────────────
+
+interface FieldErrorProps {
+  message?: string;
+}
+
+function FieldError({ message }: FieldErrorProps) {
+  if (!message) return null;
   return (
-    <div className="flex flex-col gap-1">
-      <label className="text-xs font-semibold uppercase tracking-widest text-slate-400">
-        {label}
-        {required && <span className="ml-1 text-cyan-400">*</span>}
-      </label>
-      {children}
-      {error && <p className="text-xs text-red-400">{error}</p>}
-    </div>
+    <p className="mt-1 text-xs text-red-400 flex items-center gap-1">
+      <span aria-hidden="true">⚠</span>
+      {message}
+    </p>
   );
 }
 
-const inputClass =
-  'w-full rounded-md border border-slate-700 bg-slate-800/60 px-3 py-2 text-sm text-slate-100 placeholder-slate-500 outline-none transition focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500 disabled:opacity-50';
-
-// ─── Validación ───────────────────────────────────────────────────────────────
-
-type FormErrors = Partial<Record<keyof NuevoViajeDto, string>>;
-
-function validarFormulario(form: NuevoViajeDto): FormErrors {
-  const errors: FormErrors = {};
-  if (!form.nombreBuque.trim())    errors.nombreBuque    = 'El nombre del buque es requerido.';
-  if (!form.origen.trim())         errors.origen         = 'El origen es requerido.';
-  if (!form.destino.trim())        errors.destino        = 'El destino es requerido.';
-  if (!form.fechaPartida)          errors.fechaPartida   = 'La fecha de partida es requerida.';
-  if (!form.eta)                   errors.eta            = 'El ETA es requerido.';
-  if (form.fechaPartida && form.eta && new Date(form.eta) <= new Date(form.fechaPartida)) {
-    errors.eta = 'El ETA debe ser posterior a la fecha de partida.';
-  }
-  return errors;
+interface LabelProps {
+  htmlFor: string;
+  children: React.ReactNode;
+  required?: boolean;
 }
 
-// ─── Componente Principal ─────────────────────────────────────────────────────
+function Label({ htmlFor, children, required = false }: LabelProps) {
+  return (
+    <label
+      htmlFor={htmlFor}
+      className="block text-xs font-semibold tracking-widest uppercase text-slate-400 mb-1"
+    >
+      {children}
+      {required && (
+        <span className="text-cyan-400 ml-1" aria-label="requerido">
+          *
+        </span>
+      )}
+    </label>
+  );
+}
 
-export function ModalNuevoViaje({ isOpen, onClose }: ModalNuevoViajeProps) {
-  const crearViaje = useCrearViaje();
-  const [form, setForm]       = useState<NuevoViajeDto>(FORM_INICIAL);
-  const [errors, setErrors]   = useState<FormErrors>({});
-  const [touched, setTouched] = useState(false);
+// Clases base reutilizables para inputs y selects
+const inputClass =
+  "w-full bg-slate-800/60 border border-slate-600/50 text-slate-100 text-sm " +
+  "rounded px-3 py-2 placeholder-slate-500 " +
+  "focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/40 " +
+  "disabled:opacity-50 disabled:cursor-not-allowed " +
+  "transition-colors duration-150";
 
-  // Resetear al abrir/cerrar
+const errorInputClass =
+  "w-full bg-slate-800/60 border border-red-500/60 text-slate-100 text-sm " +
+  "rounded px-3 py-2 placeholder-slate-500 " +
+  "focus:outline-none focus:border-red-400 focus:ring-1 focus:ring-red-400/40 " +
+  "disabled:opacity-50 transition-colors duration-150";
+
+function getInputClass(hasError: boolean): string {
+  return hasError ? errorInputClass : inputClass;
+}
+
+// ─── Componente principal ─────────────────────────────────────────────────────
+
+export function ModalNuevoViaje({
+  isOpen,
+  onClose,
+  onSuccess,
+  onError,
+}: ModalNuevoViajeProps) {
+  const nowMin = getNowLocalMin();
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    watch,
+    formState: { errors },
+  } = useForm<NuevoViajeFormValues>({
+    defaultValues: {
+      nombreBuque: "",
+      origen: "",
+      destino: "",
+      proximoPuntoControl: "",
+      fechaPartida: "",
+      eta: "",
+      declaracionMalvinas: DeclaracionMalvinasEnum.NoVieneDeMalvinas_L,
+      muelleSalida: "",
+      agenciaMaritima: "",
+      motivoViaje: "",
+      zoe: "",
+      posicion: "",
+      rioCanalKmPar: undefined,
+    },
+  });
+
+  const { mutate, isPending } = useNuevoViaje();
+
+  // Resetear el formulario cuando el modal se cierra
   useEffect(() => {
     if (!isOpen) {
-      setForm(FORM_INICIAL);
-      setErrors({});
-      setTouched(false);
+      reset();
     }
-  }, [isOpen]);
+  }, [isOpen, reset]);
 
   // Cerrar con Escape
   useEffect(() => {
     if (!isOpen) return;
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !crearViaje.isPending) onClose();
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !isPending) onClose();
     };
-    window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, [isOpen, onClose, crearViaje.isPending]);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, isPending, onClose]);
 
-  const handleChange = useCallback(
-    <K extends keyof NuevoViajeDto>(field: K, value: NuevoViajeDto[K]) => {
-      setForm((prev) => {
-        const next = { ...prev, [field]: value };
-        if (touched) setErrors(validarFormulario(next));
-        return next;
-      });
-    },
-    [touched],
-  );
+  // Leer FechaPartida para validar que ETA sea posterior
+  const fechaPartidaValue = watch("fechaPartida");
 
-  const handleOptionalString = (field: keyof NuevoViajeDto, raw: string) =>
-    handleChange(field, raw.trim() === '' ? null : (raw as NuevoViajeDto[typeof field]));
-
-  const handleOptionalNumber = (field: keyof NuevoViajeDto, raw: string) =>
-    handleChange(field, raw === '' ? null : (Number(raw) as NuevoViajeDto[typeof field]));
-
-  const handleSubmit = () => {
-    setTouched(true);
-    const newErrors = validarFormulario(form);
-    setErrors(newErrors);
-    if (Object.keys(newErrors).length > 0) return;
-
-    const payload: NuevoViajeDto = {
-      ...form,
-      fechaPartida: toIso(form.fechaPartida),
-      eta:          toIso(form.eta),
+  const onSubmit: SubmitHandler<NuevoViajeFormValues> = (formValues) => {
+    const payload: NuevoViajeRequest = {
+      nombreBuque: formValues.nombreBuque,
+      origen: formValues.origen,
+      destino: formValues.destino,
+      proximoPuntoControl: formValues.proximoPuntoControl,
+      fechaPartida: toIsoUtcString(formValues.fechaPartida),
+      eta: toIsoUtcString(formValues.eta),
+      declaracionMalvinas: formValues.declaracionMalvinas,
+      muelleSalida: formValues.muelleSalida || undefined,
+      agenciaMaritima: formValues.agenciaMaritima || undefined,
+      motivoViaje: formValues.motivoViaje || undefined,
+      zoe: formValues.zoe || undefined,
+      posicion: formValues.posicion || undefined,
+      rioCanalKmPar:
+        formValues.rioCanalKmPar != null &&
+        formValues.rioCanalKmPar !== (undefined as unknown as number)
+          ? Number(formValues.rioCanalKmPar)
+          : undefined,
     };
 
-    crearViaje.mutate(payload, {
-      onSuccess: () => {
+    mutate(payload, {
+      onSuccess: (response) => {
+        onSuccess?.(response); // ← era onSuccess?.(response.viajeId)
         onClose();
+      },
+      onError: (error) => {
+        onError?.(error);
       },
     });
   };
@@ -191,261 +204,416 @@ export function ModalNuevoViaje({ isOpen, onClose }: ModalNuevoViajeProps) {
   if (!isOpen) return null;
 
   return (
-    /* Overlay */
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
-      onClick={(e) => { if (e.target === e.currentTarget && !crearViaje.isPending) onClose(); }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="modal-nuevo-viaje-title"
     >
-      {/* Panel */}
-      <div className="relative flex max-h-[90vh] w-full max-w-2xl flex-col rounded-xl border border-slate-700 bg-slate-900 shadow-2xl shadow-black/60">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm"
+        onClick={!isPending ? onClose : undefined}
+        aria-hidden="true"
+      />
 
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-slate-700/60 px-6 py-4">
+      {/* ── Panel del modal ─────────────────────────────────────────── */}
+      <div className="relative z-10 w-full max-w-3xl max-h-[92vh] flex flex-col bg-slate-900 border border-slate-700/60 rounded-lg shadow-2xl shadow-black/60 overflow-hidden">
+
+        {/* Franja de color superior */}
+        <div className="h-1 w-full bg-gradient-to-r from-cyan-500 via-sky-400 to-cyan-600" />
+
+        {/* ── Header ──────────────────────────────────────────────────── */}
+        <div className="px-6 py-4 border-b border-slate-700/60 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-500/10 text-cyan-400">
-              {/* Ícono de barco */}
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} className="h-5 w-5">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 18l1.5-9h15L21 18M3 18H2m1 0h18m0 0h1M12 3v6m-4 0h8" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 21c1.333-1 2.667-1 4 0s2.667 1 4 0 2.667-1 4 0" />
-              </svg>
-            </span>
+            <span className="text-2xl" aria-hidden="true">⚓</span>
             <div>
-              <h2 className="text-base font-semibold text-slate-100">Iniciar Nuevo Viaje</h2>
-              <p className="text-xs text-slate-500">Complete los datos para registrar el viaje</p>
+              <h2
+                id="modal-nuevo-viaje-title"
+                className="text-base font-bold text-slate-100 leading-tight"
+              >
+                Registrar Nuevo Viaje
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Completá los datos del buque y la ruta para iniciar el viaje.
+              </p>
             </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            disabled={crearViaje.isPending}
-            className="rounded-md p-1.5 text-slate-500 transition hover:bg-slate-800 hover:text-slate-300 disabled:opacity-40"
+            disabled={isPending}
+            aria-label="Cerrar modal"
+            className="text-slate-500 hover:text-slate-200 disabled:opacity-40 
+                       disabled:cursor-not-allowed transition-colors duration-150 
+                       rounded p-1 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
           >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         </div>
 
-        {/* Body (scrollable) */}
-        <div className="flex-1 overflow-y-auto px-6 py-5">
+        {/* ── Cuerpo scrollable ────────────────────────────────────────── */}
+        <form
+          id="form-nuevo-viaje"
+          onSubmit={handleSubmit(onSubmit)}
+          noValidate
+          className="overflow-y-auto flex-1 px-6 py-5 space-y-6 scrollbar-thin scrollbar-track-slate-800 scrollbar-thumb-slate-600"
+        >
 
-          {/* Error global de mutación */}
-          {crearViaje.isError && (
-            <div className="mb-5 flex items-start gap-2 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="mt-0.5 h-4 w-4 shrink-0">
-                <circle cx="12" cy="12" r="10" /><path strokeLinecap="round" d="M12 8v4m0 4h.01" />
-              </svg>
-              <span>
-                {crearViaje.error instanceof Error
-                  ? crearViaje.error.message
-                  : 'Ocurrió un error al crear el viaje. Intente nuevamente.'}
-              </span>
+          {/* ── SECCIÓN 1: Identificación del Buque ─────────────────── */}
+          <section>
+            <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-500 mb-3 flex items-center gap-2">
+              <span className="block w-4 h-px bg-cyan-500/50" aria-hidden="true" />
+              Identificación del Buque
+            </h3>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4">
+
+              {/* Nombre del Buque */}
+              <div className="sm:col-span-2">
+                <Label htmlFor="nombreBuque" required>
+                  Nombre del Buque
+                </Label>
+                <input
+                  id="nombreBuque"
+                  type="text"
+                  placeholder="Ej: ARA San Martín"
+                  disabled={isPending}
+                  className={getInputClass(!!errors.nombreBuque)}
+                  {...register("nombreBuque", {
+                    required: "El nombre del buque es requerido.",
+                    minLength: { value: 2, message: "Mínimo 2 caracteres." },
+                    maxLength: { value: 200, message: "Máximo 200 caracteres." },
+                  })}
+                />
+                <FieldError message={errors.nombreBuque?.message} />
+              </div>
+
+              {/* Agencia Marítima */}
+              <div>
+                <Label htmlFor="agenciaMaritima">Agencia Marítima</Label>
+                <input
+                  id="agenciaMaritima"
+                  type="text"
+                  placeholder="Ej: Agencia del Plata S.A."
+                  disabled={isPending}
+                  className={getInputClass(!!errors.agenciaMaritima)}
+                  {...register("agenciaMaritima", {
+                    maxLength: { value: 200, message: "Máximo 200 caracteres." },
+                  })}
+                />
+                <FieldError message={errors.agenciaMaritima?.message} />
+              </div>
+
+              {/* Muelle de Salida */}
+              <div>
+                <Label htmlFor="muelleSalida">Muelle de Salida</Label>
+                <input
+                  id="muelleSalida"
+                  type="text"
+                  placeholder="Ej: Muelle 5 - Puerto Nuevo"
+                  disabled={isPending}
+                  className={getInputClass(!!errors.muelleSalida)}
+                  {...register("muelleSalida", {
+                    maxLength: { value: 200, message: "Máximo 200 caracteres." },
+                  })}
+                />
+                <FieldError message={errors.muelleSalida?.message} />
+              </div>
+
+              {/* Motivo del Viaje */}
+              <div className="sm:col-span-2">
+                <Label htmlFor="motivoViaje">Motivo del Viaje</Label>
+                <input
+                  id="motivoViaje"
+                  type="text"
+                  placeholder="Ej: Transporte de carga general"
+                  disabled={isPending}
+                  className={getInputClass(!!errors.motivoViaje)}
+                  {...register("motivoViaje", {
+                    maxLength: { value: 500, message: "Máximo 500 caracteres." },
+                  })}
+                />
+                <FieldError message={errors.motivoViaje?.message} />
+              </div>
+
             </div>
-          )}
+          </section>
 
-          <div className="space-y-5">
+          {/* ── SECCIÓN 2: Ruta y Tiempos ───────────────────────────── */}
+          <section>
+            <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-500 mb-3 flex items-center gap-2">
+              <span className="block w-4 h-px bg-cyan-500/50" aria-hidden="true" />
+              Ruta y Tiempos
+            </h3>
 
-            {/* ── Sección: Identificación ── */}
-            <section>
-              <SectionTitle>Identificación del Buque</SectionTitle>
-              <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <Field label="Nombre del Buque" required error={errors.nombreBuque}>
-                  <input
-                    type="text"
-                    className={inputClass}
-                    placeholder="Ej: MV Patagonia"
-                    value={form.nombreBuque}
-                    onChange={(e) => handleChange('nombreBuque', e.target.value)}
-                  />
-                </Field>
-                <Field label="Agencia Marítima">
-                  <input
-                    type="text"
-                    className={inputClass}
-                    placeholder="Ej: Maruba S.A."
-                    value={form.agenciaMaritima ?? ''}
-                    onChange={(e) => handleOptionalString('agenciaMaritima', e.target.value)}
-                  />
-                </Field>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4">
+
+              {/* Origen */}
+              <div>
+                <Label htmlFor="origen" required>Origen</Label>
+                <input
+                  id="origen"
+                  type="text"
+                  placeholder="Ej: Buenos Aires"
+                  disabled={isPending}
+                  className={getInputClass(!!errors.origen)}
+                  {...register("origen", {
+                    required: "El origen es requerido.",
+                    minLength: { value: 2, message: "Mínimo 2 caracteres." },
+                    maxLength: { value: 200, message: "Máximo 200 caracteres." },
+                  })}
+                />
+                <FieldError message={errors.origen?.message} />
               </div>
-            </section>
 
-            {/* ── Sección: Ruta ── */}
-            <section>
-              <SectionTitle>Ruta del Viaje</SectionTitle>
-              <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <Field label="Origen" required error={errors.origen}>
-                  <input
-                    type="text"
-                    className={inputClass}
-                    placeholder="Ej: Puerto de Buenos Aires"
-                    value={form.origen}
-                    onChange={(e) => handleChange('origen', e.target.value)}
-                  />
-                </Field>
-                <Field label="Destino" required error={errors.destino}>
-                  <input
-                    type="text"
-                    className={inputClass}
-                    placeholder="Ej: Puerto de Rosario"
-                    value={form.destino}
-                    onChange={(e) => handleChange('destino', e.target.value)}
-                  />
-                </Field>
-                <Field label="Muelle de Salida">
-                  <input
-                    type="text"
-                    className={inputClass}
-                    placeholder="Ej: Muelle 5"
-                    value={form.muelleSalida ?? ''}
-                    onChange={(e) => handleOptionalString('muelleSalida', e.target.value)}
-                  />
-                </Field>
-                <Field label="Próximo Punto de Control" required>
-                  <select
-                    className={inputClass}
-                    value={form.proximoPuntoControl}
-                    onChange={(e) => handleChange('proximoPuntoControl', e.target.value as ProximoPuntoControl)}
-                  >
-                    {PUNTOS_CONTROL.map((p) => (
-                      <option key={p.value} value={p.value}>{p.label}</option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="Río/Canal Km Par">
-                  <input
-                    type="number"
-                    className={inputClass}
-                    placeholder="Ej: 342"
-                    min={0}
-                    step={0.1}
-                    value={form.rioCanalKmPar ?? ''}
-                    onChange={(e) => handleOptionalNumber('rioCanalKmPar', e.target.value)}
-                  />
-                </Field>
-                <Field label="Posición">
-                  <input
-                    type="text"
-                    className={inputClass}
-                    placeholder="Ej: 34°35'S 58°22'W"
-                    value={form.posicion ?? ''}
-                    onChange={(e) => handleOptionalString('posicion', e.target.value)}
-                  />
-                </Field>
+              {/* Destino */}
+              <div>
+                <Label htmlFor="destino" required>Destino</Label>
+                <input
+                  id="destino"
+                  type="text"
+                  placeholder="Ej: Montevideo"
+                  disabled={isPending}
+                  className={getInputClass(!!errors.destino)}
+                  {...register("destino", {
+                    required: "El destino es requerido.",
+                    minLength: { value: 2, message: "Mínimo 2 caracteres." },
+                    maxLength: { value: 200, message: "Máximo 200 caracteres." },
+                  })}
+                />
+                <FieldError message={errors.destino?.message} />
               </div>
-            </section>
 
-            {/* ── Sección: Fechas ── */}
-            <section>
-              <SectionTitle>Fechas</SectionTitle>
-              <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <Field label="Fecha de Partida" required error={errors.fechaPartida}>
-                  <input
-                    type="datetime-local"
-                    className={inputClass}
-                    value={toLocalDatetime(form.fechaPartida)}
-                    onChange={(e) => handleChange('fechaPartida', e.target.value)}
-                  />
-                </Field>
-                <Field label="ETA (Llegada Estimada)" required error={errors.eta}>
-                  <input
-                    type="datetime-local"
-                    className={inputClass}
-                    value={toLocalDatetime(form.eta)}
-                    onChange={(e) => handleChange('eta', e.target.value)}
-                  />
-                </Field>
+              {/* Próximo Punto de Control */}
+              <div className="sm:col-span-2">
+                <Label htmlFor="proximoPuntoControl" required>
+                  Próximo Punto de Control
+                </Label>
+                <input
+                  id="proximoPuntoControl"
+                  type="text"
+                  placeholder="Ej: Prefectura Zárate"
+                  disabled={isPending}
+                  className={getInputClass(!!errors.proximoPuntoControl)}
+                  {...register("proximoPuntoControl", {
+                    required: "El próximo punto de control es requerido.",
+                    minLength: { value: 2, message: "Mínimo 2 caracteres." },
+                    maxLength: { value: 200, message: "Máximo 200 caracteres." },
+                  })}
+                />
+                <FieldError message={errors.proximoPuntoControl?.message} />
               </div>
-            </section>
 
-            {/* ── Sección: Información Adicional ── */}
-            <section>
-              <SectionTitle>Información Adicional</SectionTitle>
-              <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <Field label="Declaración Malvinas" required>
-                  <select
-                    className={inputClass}
-                    value={form.declaracionMalvinas}
-                    onChange={(e) => handleChange('declaracionMalvinas', e.target.value as DeclaracionMalvinas)}
-                  >
-                    {DECLARACIONES_MALVINAS.map((d) => (
-                      <option key={d.value} value={d.value}>{d.label}</option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="ZOE">
-                  <input
-                    type="text"
-                    className={inputClass}
-                    placeholder="Código ZOE"
-                    value={form.zoe ?? ''}
-                    onChange={(e) => handleOptionalString('zoe', e.target.value)}
-                  />
-                </Field>
-                <Field label="Motivo del Viaje" error={undefined}>
-                  <input
-                    type="text"
-                    className={`${inputClass} sm:col-span-2`}
-                    placeholder="Descripción breve del motivo"
-                    value={form.motivoViaje ?? ''}
-                    onChange={(e) => handleOptionalString('motivoViaje', e.target.value)}
-                  />
-                </Field>
+              {/* Fecha de Partida */}
+              <div>
+                <Label htmlFor="fechaPartida" required>
+                  Fecha y Hora de Partida
+                </Label>
+                <input
+                  id="fechaPartida"
+                  type="datetime-local"
+                  min={nowMin}
+                  disabled={isPending}
+                  className={getInputClass(!!errors.fechaPartida)}
+                  {...register("fechaPartida", {
+                    required: "La fecha de partida es requerida.",
+                  })}
+                />
+                <FieldError message={errors.fechaPartida?.message} />
               </div>
-            </section>
-          </div>
-        </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-between border-t border-slate-700/60 px-6 py-4">
-          <p className="text-xs text-slate-500">
-            <span className="text-cyan-400">*</span> Campos requeridos
-          </p>
-          <div className="flex gap-3">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={crearViaje.isPending}
-              className="rounded-lg border border-slate-700 bg-slate-800 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-600 hover:text-slate-100 disabled:opacity-40"
-            >
-              Cancelar
-            </button>
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={crearViaje.isPending}
-              className="flex items-center gap-2 rounded-lg bg-cyan-600 px-5 py-2 text-sm font-semibold text-white transition hover:bg-cyan-500 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              {crearViaje.isPending ? (
-                <>
-                  <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48 2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48 2.83-2.83" />
-                  </svg>
-                  Guardando…
-                </>
-              ) : (
-                <>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-4 w-4">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 12l5 5L20 7" />
-                  </svg>
-                  Iniciar Viaje
-                </>
-              )}
-            </button>
-          </div>
+              {/* ETA */}
+              <div>
+                <Label htmlFor="eta" required>
+                  ETA (Arribo Estimado)
+                </Label>
+                <input
+                  id="eta"
+                  type="datetime-local"
+                  min={fechaPartidaValue || nowMin}
+                  disabled={isPending}
+                  className={getInputClass(!!errors.eta)}
+                  {...register("eta", {
+                    required: "La ETA es requerida.",
+                    validate: (value) => {
+                      if (!fechaPartidaValue) return true;
+                      return (
+                        new Date(value) > new Date(fechaPartidaValue) ||
+                        "La ETA debe ser posterior a la fecha de partida."
+                      );
+                    },
+                  })}
+                />
+                <FieldError message={errors.eta?.message} />
+              </div>
+
+            </div>
+          </section>
+
+          {/* ── SECCIÓN 3: Posición y Datos Geográficos ─────────── */}
+          <section>
+            <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-500 mb-3 flex items-center gap-2">
+              <span className="block w-4 h-px bg-cyan-500/50" aria-hidden="true" />
+              Posición y Datos Geográficos
+            </h3>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4">
+
+              {/* Posición */}
+              <div>
+                <Label htmlFor="posicion">Posición Inicial</Label>
+                <input
+                  id="posicion"
+                  type="text"
+                  placeholder="Ej: 34°36'S 058°22'W"
+                  disabled={isPending}
+                  className={getInputClass(!!errors.posicion)}
+                  {...register("posicion", {
+                    maxLength: { value: 200, message: "Máximo 200 caracteres." },
+                  })}
+                />
+                <FieldError message={errors.posicion?.message} />
+              </div>
+
+              {/* Km Par */}
+              <div>
+                <Label htmlFor="rioCanalKmPar">Río/Canal — Km Par</Label>
+                <input
+                  id="rioCanalKmPar"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  max="9999.9"
+                  placeholder="Ej: 274.5"
+                  disabled={isPending}
+                  className={getInputClass(!!errors.rioCanalKmPar)}
+                  {...register("rioCanalKmPar", {
+                    min: { value: 0, message: "Debe ser un valor positivo." },
+                    max: { value: 9999.9, message: "Máximo 9999.9 km." },
+                    valueAsNumber: true,
+                  })}
+                />
+                <FieldError message={errors.rioCanalKmPar?.message} />
+              </div>
+
+              {/* ZOE */}
+              <div>
+                <Label htmlFor="zoe">ZOE (Zona Operación Especial)</Label>
+                <input
+                  id="zoe"
+                  type="text"
+                  placeholder="Ej: ZR-Paraná"
+                  disabled={isPending}
+                  className={getInputClass(!!errors.zoe)}
+                  {...register("zoe", {
+                    maxLength: { value: 100, message: "Máximo 100 caracteres." },
+                  })}
+                />
+                <FieldError message={errors.zoe?.message} />
+              </div>
+
+            </div>
+          </section>
+
+          {/* ── SECCIÓN 4: Declaración Jurada Malvinas ──────────── */}
+          <section>
+            <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-500 mb-3 flex items-center gap-2">
+              <span className="block w-4 h-px bg-cyan-500/50" aria-hidden="true" />
+              Declaración Jurada Malvinas
+            </h3>
+
+            <div>
+              <Label htmlFor="declaracionMalvinas" required>
+                Código de Declaración
+              </Label>
+              <select
+                id="declaracionMalvinas"
+                disabled={isPending}
+                className={getInputClass(!!errors.declaracionMalvinas)}
+                {...register("declaracionMalvinas", {
+                  required: "La declaración de Malvinas es requerida.",
+                })}
+              >
+                {(Object.values(DeclaracionMalvinasEnum) as DeclaracionMalvinasEnum[]).map(
+                  (value) => (
+                    <option key={value} value={value}>
+                      {DECLARACION_MALVINAS_LABELS[value]}
+                    </option>
+                  )
+                )}
+              </select>
+              <FieldError message={errors.declaracionMalvinas?.message} />
+            </div>
+          </section>
+
+        </form>
+
+        {/* ── Footer con acciones ──────────────────────────────────── */}
+        <div className="px-6 py-4 border-t border-slate-700/60 bg-slate-900/80 flex items-center justify-end gap-3">
+
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isPending}
+            className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-slate-200 
+                       border border-slate-600/50 hover:border-slate-500 rounded 
+                       disabled:opacity-40 disabled:cursor-not-allowed
+                       transition-colors duration-150"
+          >
+            Cancelar
+          </button>
+
+          <button
+            type="submit"
+            form={undefined}
+            onClick={handleSubmit(onSubmit)}
+            disabled={isPending}
+            className="px-5 py-2 text-sm font-semibold rounded
+                       bg-cyan-600 hover:bg-cyan-500 text-white
+                       disabled:bg-cyan-900 disabled:text-cyan-600 disabled:cursor-not-allowed
+                       flex items-center gap-2 transition-colors duration-150
+                       focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+          >
+            {isPending ? (
+              <>
+                <svg
+                  className="animate-spin w-4 h-4 text-cyan-400"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                  />
+                </svg>
+                <span>Guardando...</span>
+              </>
+            ) : (
+              <>
+                <span aria-hidden="true">⚓</span>
+                <span>Registrar Viaje</span>
+              </>
+            )}
+          </button>
+
         </div>
       </div>
     </div>
   );
 }
 
-// ─── Helper interno ───────────────────────────────────────────────────────────
-
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return (
-    <h3 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-cyan-500/80">
-      <span className="h-px flex-1 bg-slate-700/60" />
-      {children}
-      <span className="h-px flex-1 bg-slate-700/60" />
-    </h3>
-  );
-}
+export default ModalNuevoViaje;
