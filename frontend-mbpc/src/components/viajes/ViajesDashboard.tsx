@@ -1,8 +1,6 @@
-// src/components/viajes/ViajesDashboard.tsx
 import { useState, useEffect } from 'react';
 import {
   useViajes,
-  useZarparViaje,
   useAmarrarViaje,
   useFondearViaje,
   useReanudarViaje,
@@ -10,6 +8,7 @@ import {
 import type { ViajeDto } from '../../types/viajes.types';
 import ModalActualizarPosicion from './ModalActualizarPosicion';
 import CargasModal from '../cargas/CargasModal';
+import { BotonZarpar } from '../BotonZarpar';
 
 const PAGE_SIZE = 10;
 
@@ -38,7 +37,6 @@ function EstadoBadge({ estado }: { estado: string }) {
 
 interface AccionesProps {
   viaje: ViajeDto;
-  onZarpar: (id: string) => void;
   onAmarrar: (id: string) => void;
   onFondear: (id: string) => void;
   onReanudar: (id: string) => void;
@@ -49,7 +47,6 @@ interface AccionesProps {
 
 function AccionesRow({
   viaje,
-  onZarpar,
   onAmarrar,
   onFondear,
   onReanudar,
@@ -62,14 +59,7 @@ function AccionesRow({
 
   return (
     <div className="flex flex-wrap justify-end gap-1.5">
-      <button
-        className={`${btnBase} bg-green-50 text-green-700 border-green-200 hover:bg-green-100`}
-        disabled={isLoading || viaje.estadoActual === 'EnViaje'}
-        onClick={() => onZarpar(viaje.id)}
-        title="Zarpar"
-      >
-        Zarpar
-      </button>
+      <BotonZarpar viaje={viaje} />
       <button
         className={`${btnBase} bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100`}
         disabled={isLoading || viaje.estadoActual === 'Amarrado'}
@@ -142,13 +132,11 @@ export default function ViajesDashboard() {
 
   const { data: dataPaginada, isLoading, isError, error } = useViajes(page, PAGE_SIZE, debouncedFiltro);
 
-  const mutZarpar  = useZarparViaje();
   const mutAmarrar = useAmarrarViaje();
   const mutFondear = useFondearViaje();
   const mutReanudar = useReanudarViaje();
 
   const anyMutating =
-    mutZarpar.isPending ||
     mutAmarrar.isPending ||
     mutFondear.isPending ||
     mutReanudar.isPending;
@@ -163,7 +151,6 @@ export default function ViajesDashboard() {
     viaje: null,
   });
 
-  const handleZarpar          = (id: string) => mutZarpar.mutate(id);
   const handleAmarrar         = (id: string) => mutAmarrar.mutate(id);
   const handleFondear         = (id: string) => mutFondear.mutate(id);
   const handleReanudar        = (id: string) => mutReanudar.mutate(id);
@@ -266,7 +253,6 @@ export default function ViajesDashboard() {
                     <td className="px-4 py-3 text-right">
                       <AccionesRow
                         viaje={viaje}
-                        onZarpar={handleZarpar}
                         onAmarrar={handleAmarrar}
                         onFondear={handleFondear}
                         onReanudar={handleReanudar}
