@@ -1,21 +1,17 @@
 import { useState, useEffect } from 'react';
-import {
-  useViajes,
-  useAmarrarViaje,
-  useFondearViaje,
-  useReanudarViaje,
-} from '../../hooks/useViajesApi';
+import { useViajes } from '../../hooks/useViajesApi';
 import type { ViajeDto } from '../../types/viajes.types';
 import ModalActualizarPosicion from './ModalActualizarPosicion';
 import CargasModal from '../cargas/CargasModal';
 import { BotonZarpar } from '../BotonZarpar';
+import { BotonAmarrar, BotonFondear, BotonReanudar } from '../BotonesAccionViaje';
 
 const PAGE_SIZE = 10;
 
 // ─── Estado badge ─────────────────────────────────────────────────────────────
 
 const ESTADO_STYLES: Record<string, string> = {
-  EnViaje:    'bg-green-100 text-green-800 border border-green-200',
+  Navegando:  'bg-green-100 text-green-800 border border-green-200',
   Amarrado:   'bg-blue-100 text-blue-800 border border-blue-200',
   Fondeado:   'bg-yellow-100 text-yellow-800 border border-yellow-200',
   Programado: 'bg-gray-100 text-gray-800 border border-gray-200',
@@ -37,22 +33,14 @@ function EstadoBadge({ estado }: { estado: string }) {
 
 interface AccionesProps {
   viaje: ViajeDto;
-  onAmarrar: (id: string) => void;
-  onFondear: (id: string) => void;
-  onReanudar: (id: string) => void;
   onActualizarPosicion: (viaje: ViajeDto) => void;
   onVerCargas: (viaje: ViajeDto) => void;
-  isLoading: boolean;
 }
 
 function AccionesRow({
   viaje,
-  onAmarrar,
-  onFondear,
-  onReanudar,
   onActualizarPosicion,
   onVerCargas,
-  isLoading,
 }: AccionesProps) {
   const btnBase =
     'px-3 py-1.5 rounded text-xs font-semibold tracking-wide transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed border';
@@ -60,33 +48,11 @@ function AccionesRow({
   return (
     <div className="flex flex-wrap justify-end gap-1.5">
       <BotonZarpar viaje={viaje} />
-      <button
-        className={`${btnBase} bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100`}
-        disabled={isLoading || viaje.estadoActual === 'Amarrado'}
-        onClick={() => onAmarrar(viaje.id)}
-        title="Amarrar"
-      >
-        Amarrar
-      </button>
-      <button
-        className={`${btnBase} bg-yellow-50 text-yellow-700 border-yellow-200 hover:bg-yellow-100`}
-        disabled={isLoading || viaje.estadoActual === 'Fondeado'}
-        onClick={() => onFondear(viaje.id)}
-        title="Fondear"
-      >
-        Fondear
-      </button>
-      <button
-        className={`${btnBase} bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100`}
-        disabled={isLoading || viaje.estadoActual !== 'Fondeado'}
-        onClick={() => onReanudar(viaje.id)}
-        title="Reanudar"
-      >
-        Reanudar
-      </button>
+      <BotonAmarrar viaje={viaje} />
+      <BotonFondear viaje={viaje} />
+      <BotonReanudar viaje={viaje} />
       <button
         className={`${btnBase} bg-[#002454] text-white border-[#002454] hover:bg-[#104a8e]`}
-        disabled={isLoading}
         onClick={() => onActualizarPosicion(viaje)}
         title="Actualizar Posición"
       >
@@ -94,7 +60,6 @@ function AccionesRow({
       </button>
       <button
         className={`${btnBase} bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100`}
-        disabled={isLoading}
         onClick={() => onVerCargas(viaje)}
         title="Ver Cargas"
       >
@@ -132,15 +97,6 @@ export default function ViajesDashboard() {
 
   const { data: dataPaginada, isLoading, isError, error } = useViajes(page, PAGE_SIZE, debouncedFiltro);
 
-  const mutAmarrar = useAmarrarViaje();
-  const mutFondear = useFondearViaje();
-  const mutReanudar = useReanudarViaje();
-
-  const anyMutating =
-    mutAmarrar.isPending ||
-    mutFondear.isPending ||
-    mutReanudar.isPending;
-
   const [modalPosicion, setModalPosicion] = useState<ModalViajeState>({
     isOpen: false,
     viaje: null,
@@ -151,11 +107,8 @@ export default function ViajesDashboard() {
     viaje: null,
   });
 
-  const handleAmarrar         = (id: string) => mutAmarrar.mutate(id);
-  const handleFondear         = (id: string) => mutFondear.mutate(id);
-  const handleReanudar        = (id: string) => mutReanudar.mutate(id);
-  const handleAbrirPosicion   = (viaje: ViajeDto) => setModalPosicion({ isOpen: true, viaje });
-  const handleAbrirCargas     = (viaje: ViajeDto) => setModalCargas({ isOpen: true, viaje });
+  const handleAbrirPosicion = (viaje: ViajeDto) => setModalPosicion({ isOpen: true, viaje });
+  const handleAbrirCargas   = (viaje: ViajeDto) => setModalCargas({ isOpen: true, viaje });
 
   // Los datos ya vienen filtrados desde el servidor; no se aplica ningún .filter() local.
   const filas: ViajeDto[] = dataPaginada ?? [];
@@ -182,13 +135,6 @@ export default function ViajesDashboard() {
             onChange={(e) => setFiltro(e.target.value)}
             className="px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#104a8e] focus:border-transparent outline-none transition-all w-52"
           />
-
-          {anyMutating && (
-            <div className="flex items-center gap-2 rounded-full bg-blue-50 border border-blue-200 px-4 py-1.5 text-sm text-blue-700">
-              <span className="inline-block h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
-              Procesando acción…
-            </div>
-          )}
         </div>
       </div>
 
@@ -253,12 +199,8 @@ export default function ViajesDashboard() {
                     <td className="px-4 py-3 text-right">
                       <AccionesRow
                         viaje={viaje}
-                        onAmarrar={handleAmarrar}
-                        onFondear={handleFondear}
-                        onReanudar={handleReanudar}
                         onActualizarPosicion={handleAbrirPosicion}
                         onVerCargas={handleAbrirCargas}
-                        isLoading={anyMutating}
                       />
                     </td>
                   </tr>
