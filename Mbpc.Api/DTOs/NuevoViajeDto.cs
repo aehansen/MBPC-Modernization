@@ -88,6 +88,11 @@ namespace Mbpc.Api.DTOs
     ///              Si el cliente lo envía en el body, el Controller lo sobreescribe con el
     ///              valor del Claim, garantizando que un operador nunca pueda crear un viaje
     ///              en una costera que no le pertenece.
+    ///
+    /// MIGRACIÓN MDM (Cimientos):
+    ///   NombreBuque (string libre) fue reemplazado por BuqueId (long).
+    ///   El padrón de buques vive en BUQUES_NEW; el frontend debe resolver el ID
+    ///   previamente a través de IBuqueService.BuscarBuquesDisponiblesAsync().
     /// </summary>
     public class NuevoViajeDto
     {
@@ -100,9 +105,14 @@ namespace Mbpc.Api.DTOs
 
         // ── CAMPOS CORE (requeridos por el SP PKG_MBPC_VIAJES.SP_CREAR_VIAJE) ──
 
-        [Required(ErrorMessage = "El nombre del buque es requerido.")]
-        [StringLength(100, MinimumLength = 2, ErrorMessage = "El nombre del buque debe tener entre 2 y 100 caracteres.")]
-        public string NombreBuque { get; set; } = null!;
+        /// <summary>
+        /// ID del buque en el padrón BUQUES_NEW del sistema legacy.
+        /// Reemplaza el campo de texto libre NombreBuque.
+        /// El frontend resuelve este valor mediante el autocomplete de IBuqueService.
+        /// </summary>
+        [Required(ErrorMessage = "El ID del buque es requerido.")]
+        [Range(1, long.MaxValue, ErrorMessage = "El BuqueId debe ser un entero positivo válido del padrón BUQUES_NEW.")]
+        public long BuqueId { get; set; }
 
         [Required(ErrorMessage = "El puerto de origen es requerido.")]
         [StringLength(100, MinimumLength = 2, ErrorMessage = "El origen debe tener entre 2 y 100 caracteres.")]
@@ -120,6 +130,7 @@ namespace Mbpc.Api.DTOs
         /// </summary>
         [StringLength(150, ErrorMessage = "El muelle de salida no puede superar los 150 caracteres.")]
         public string? MuelleSalida { get; set; }
+
         /// <summary>
         /// Agencia Marítima responsable del buque.
         /// Opcional.

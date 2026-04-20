@@ -8,7 +8,7 @@ namespace Mbpc.Api.Controllers
     [Route("api/carga")]
     public class CargaController : ControllerBase
     {
-        private readonly ICargaService          _cargaService;
+        private readonly ICargaService            _cargaService;
         private readonly ILogger<CargaController> _logger;
 
         public CargaController(ICargaService cargaService, ILogger<CargaController> logger)
@@ -87,7 +87,7 @@ namespace Mbpc.Api.Controllers
 
         /// <summary>
         /// Agrega una nueva carga (Barcaza o Bodega) al manifiesto del buque.
-        /// CQRS: escribe en Oracle y hace Update.Push en MongoDB.
+        /// CQRS: escribe en Oracle y hace Load-Mutate-Save en MongoDB.
         /// </summary>
         [HttpPost("viaje/{viajeNombreBuque}")]
         public async Task<ActionResult> AgregarCarga(
@@ -98,10 +98,10 @@ namespace Mbpc.Api.Controllers
                 return BadRequest(new { mensaje = "El nombre del buque no puede estar vacío." });
 
             if (nuevaCarga == null
-                || string.IsNullOrWhiteSpace(nuevaCarga.Nombre)
+                || nuevaCarga.BarcazaId <= 0
                 || string.IsNullOrWhiteSpace(nuevaCarga.Tipo))
             {
-                return BadRequest(new { mensaje = "Los campos Nombre y Tipo son requeridos." });
+                return BadRequest(new { mensaje = "Los campos BarcazaId (mayor que cero) y Tipo son requeridos." });
             }
 
             var tiposValidos = new[] { "Barcaza", "Bodega" };
@@ -112,8 +112,8 @@ namespace Mbpc.Api.Controllers
                 return BadRequest(new { mensaje = "El tonelaje no puede ser negativo." });
 
             _logger.LogInformation(
-                "Agregar carga '{Nombre}' ({Tipo}, {Tonelaje}tn) al buque '{Buque}'.",
-                nuevaCarga.Nombre, nuevaCarga.Tipo, nuevaCarga.Tonelaje, viajeNombreBuque);
+                "Agregar carga BarcazaId={BarcazaId} ({Tipo}, {Tonelaje}tn) al buque '{Buque}'.",
+                nuevaCarga.BarcazaId, nuevaCarga.Tipo, nuevaCarga.Tonelaje, viajeNombreBuque);
 
             var exito = await _cargaService.AgregarCargaAsync(viajeNombreBuque, nuevaCarga);
 
@@ -122,7 +122,7 @@ namespace Mbpc.Api.Controllers
 
             return Ok(new
             {
-                mensaje = $"Carga '{nuevaCarga.Nombre}' ({nuevaCarga.Tipo}) agregada correctamente al buque '{viajeNombreBuque}'."
+                mensaje = $"Carga BarcazaId={nuevaCarga.BarcazaId} ({nuevaCarga.Tipo}) agregada correctamente al buque '{viajeNombreBuque}'."
             });
         }
     }

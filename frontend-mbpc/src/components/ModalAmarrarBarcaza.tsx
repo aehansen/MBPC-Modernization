@@ -159,23 +159,11 @@ export default function ModalAmarrarBarcaza({
           {/* ── Header ─────────────────────────────────────────────────── */}
           <div className="flex items-center justify-between px-6 py-4 bg-slate-800 rounded-b-none">
             <div className="flex items-center gap-3">
-              {/* Ícono ancla */}
-              <span className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-700/40 border border-blue-600/60">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  className="w-4 h-4 text-sky-300"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <circle cx="12" cy="5" r="2" />
-                  <line x1="12" y1="7" x2="12" y2="19" />
-                  <path d="M5 12H2a10 10 0 0 0 20 0h-3" />
-                </svg>
-              </span>
+              <img
+                src="https://www.argentina.gob.ar/sites/default/files/styles/isotipo/public/imagenEncabezado/prefectura-escudo.png?itok=EywBfOaV"
+                alt="Escudo PNA"
+                className="h-9 w-auto flex-shrink-0"
+              />
               <div>
                 <h2
                   id="modal-amarrar-titulo"

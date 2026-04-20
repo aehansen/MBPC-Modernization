@@ -29,6 +29,18 @@ namespace Mbpc.Api.Services
         Task<ViajePosicionMongo?> GetViajeByMmsiAsync(string mmsi);
 
         /// <summary>
+        /// Retorna el documento de detalle operativo de un viaje por su ObjectId de MongoDB,
+        /// junto con el TravelId relacional obtenido desde la colección de posiciones.
+        ///
+        /// La tupla garantiza que el TravelId siempre esté disponible para el fallback a Oracle,
+        /// incluso cuando el documento de detalle no existe o tiene el campo IdViaje vacío.
+        ///   Detalle == null, TravelId == 0  →  no se encontró la posición base.
+        ///   Detalle == null, TravelId  > 0  →  posición encontrada pero sin detalle en Mongo (sync pendiente).
+        ///   Detalle != null, TravelId  > 0  →  caso nominal; usar Detalle.Barcazas si Count > 0.
+        /// </summary>
+        Task<(ViajeDetalleMongo? Detalle, long TravelId)> GetViajeDetalleByIdAsync(string id, CancellationToken ct = default);
+
+        /// <summary>
         /// Retorna barcos en puerto (Amarrado/Fondeado) dentro de la jurisdicción
         /// de la costera del usuario autenticado.
         /// </summary>

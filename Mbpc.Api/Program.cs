@@ -98,6 +98,8 @@ builder.Services.AddAuthorization();
 // ── Servicios de negocio ─────────────────────────────────────────────────────
 builder.Services.AddScoped<IViajeService, ViajeManagerService>();
 builder.Services.AddScoped<ICargaService, CargaManagerService>();
+builder.Services.AddScoped<IConvoyManagerService, ConvoyManagerService>();
+builder.Services.AddScoped<IBuqueService, BuqueManagerService>();
 
 // ── IHttpContextAccessor ─────────────────────────────────────────────────────
 builder.Services.AddHttpContextAccessor();

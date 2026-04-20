@@ -235,8 +235,8 @@ namespace Mbpc.Api.Controllers
             nuevoViaje.CosteraId = costeraIdClaim;
 
             _logger.LogInformation(
-                "IniciarViaje — Buque: '{Buque}' | Origen: '{Origen}' | Destino: '{Destino}' | CosteraId: {CosteraId}",
-                nuevoViaje.NombreBuque, nuevoViaje.Origen, nuevoViaje.Destino, costeraIdClaim);
+                "IniciarViaje — BuqueId: '{BuqueId}' | Origen: '{Origen}' | Destino: '{Destino}' | CosteraId: {CosteraId}",
+                nuevoViaje.BuqueId, nuevoViaje.Origen, nuevoViaje.Destino, costeraIdClaim);
 
             // ── 4. Delegación total al Service ────────────────────────────────
             var exito = await _viajeService.IniciarViajeAsync(nuevoViaje);
@@ -244,8 +244,8 @@ namespace Mbpc.Api.Controllers
             if (!exito)
             {
                 _logger.LogError(
-                    "IniciarViajeAsync retornó false para Buque: '{Buque}' CosteraId: {CosteraId}.",
-                    nuevoViaje.NombreBuque, costeraIdClaim);
+                    "IniciarViajeAsync retornó false para BuqueId: '{BuqueId}' CosteraId: {CosteraId}.",
+                    nuevoViaje.BuqueId, costeraIdClaim);
 
                 return StatusCode(StatusCodes.Status500InternalServerError, new
                 {
@@ -255,10 +255,10 @@ namespace Mbpc.Api.Controllers
 
             return Ok(new
             {
-                mensaje   = $"Viaje para '{nuevoViaje.NombreBuque}' iniciado correctamente con estado 'Amarrado'.",
-                buque     = nuevoViaje.NombreBuque,
-                origen    = nuevoViaje.Origen,
-                destino   = nuevoViaje.Destino,
+                mensaje       = $"Viaje para el buque con Id '{nuevoViaje.BuqueId}' iniciado correctamente con estado 'Amarrado'.",
+                buqueId       = nuevoViaje.BuqueId,
+                origen        = nuevoViaje.Origen,
+                destino       = nuevoViaje.Destino,
                 estadoInicial = "Amarrado"
             });
         }

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   useCargas,
   useCrearCarga,
@@ -8,6 +8,15 @@ import {
   useDescargarToneladas,
 } from '../../hooks/useCargasApi';
 import type { TipoCarga } from '../../types/cargas.types';
+
+// ─── Tipos Locales ────────────────────────────────────────────────────────────
+interface AutocompleteBarcaza {
+  idBuque: number;
+  nombre: string;
+  matricula: string;
+  omi: string;
+  tipo: string;
+}
 
 interface CargasModalProps {
   viajeId: string;
@@ -24,20 +33,86 @@ export default function CargasModal({ viajeId, viajeNombreBuque, onClose }: Carg
   const { mutate: descargarTon } = useDescargarToneladas(viajeId);
 
   const [showForm, setShowForm] = useState(false);
-  const [nombre, setNombre] = useState('');
   const [tipo, setTipo] = useState<TipoCarga>('Barcaza');
   const [tonelaje, setTonelaje] = useState<number>(0);
 
+  // ─── Estados para el Autocompletado de Barcaza ──────────────────────────────
+  const [barcazaSearch, setBarcazaSearch] = useState('');
+  const [barcazaId, setBarcazaId] = useState<number | null>(null);
+  const [suggestions, setSuggestions] = useState<AutocompleteBarcaza[]>([]);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [loadingBusqueda, setLoadingBusqueda] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // ─── FIX: Race Condition en handleClickOutside ────────────────────────────
+  // El listener de mousedown SOLO se registra cuando el dropdown está abierto.
+  // Esto evita que el evento se dispare antes de que React renderice la lista
+  // y evalúe contains() como false, cerrando el dropdown antes de que se abra.
+  useEffect(() => {
+    if (!showDropdown) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showDropdown]);
+
+  // Efecto Debounce para buscar barcazas con token JWT
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(async () => {
+      if (barcazaSearch.trim().length >= 2) {
+        setLoadingBusqueda(true);
+        try {
+          // 👉 EL CAMBIO CLAVE: Usamos la llave exacta que descubriste
+          const token = localStorage.getItem("mbpc_token");
+
+          const res = await fetch(
+            `/api/buques/barcazas/autocomplete?etapaId=${viajeId}&query=${encodeURIComponent(barcazaSearch)}`,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+            }
+          );
+          if (res.ok) {
+            const data: AutocompleteBarcaza[] = await res.json();
+            setSuggestions(data);
+            setShowDropdown(true);
+          }
+        } catch (error) {
+          console.error('Error buscando barcazas:', error);
+        } finally {
+          setLoadingBusqueda(false);
+        }
+      } else {
+        setSuggestions([]);
+        setShowDropdown(false);
+      }
+    }, 400);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [barcazaSearch, viajeId]);
+
   const handleCrear = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!barcazaId) {
+      alert('Por favor, busque y seleccione una barcaza/buque de la lista.');
+      return;
+    }
+
     crearCarga(
-      { nombreBuque: viajeNombreBuque, body: { nombre, tipo, tonelaje } },
+      { nombreBuque: viajeNombreBuque, body: { barcazaId, tipo, tonelaje } },
       {
         onSuccess: () => {
-          setNombre('');
+          setBarcazaId(null);
+          setBarcazaSearch('');
           setTonelaje(0);
+          setShowDropdown(false);
           setShowForm(false);
-        }
+        },
       }
     );
   };
@@ -64,9 +139,16 @@ export default function CargasModal({ viajeId, viajeNombreBuque, onClose }: Carg
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+      {/*
+        FIX: Se eliminó `overflow-hidden` del div principal del panel.
+        Ese overflow creaba un contexto de apilamiento que recortaba
+        físicamente el dropdown absoluto, haciéndolo invisible.
+        El scroll se controla en el div interno con overflow-y-auto,
+        y el alto máximo del panel se mantiene con max-h-[90vh].
+      */}
       <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
         {/* Header */}
-        <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center bg-[#002454] text-white rounded-t-lg">
+        <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center bg-[#002454] text-white rounded-t-lg shrink-0">
           <h2 className="text-lg font-bold">Cargas del viaje: {viajeNombreBuque}</h2>
           <button onClick={onClose} className="text-white hover:text-gray-300 font-bold text-2xl leading-none">&times;</button>
         </div>
@@ -82,22 +164,71 @@ export default function CargasModal({ viajeId, viajeNombreBuque, onClose }: Carg
 
           {showForm && (
             <form onSubmit={handleCrear} className="mb-6 bg-gray-50 p-4 rounded border border-gray-200 flex gap-4 items-end">
-              <div className="flex-1">
-                <label className="block text-sm font-medium text-gray-700">Nombre / Identificador</label>
-                <input type="text" required value={nombre} onChange={e => setNombre(e.target.value)} className="mt-1 block w-full rounded border-gray-300 shadow-sm p-2 border" />
+
+              {/* Autocomplete Barcaza */}
+              <div className="flex-1 relative" ref={dropdownRef}>
+                <label className="block text-sm font-medium text-gray-700">Barcaza / Buque</label>
+                <input
+                  type="text"
+                  required
+                  autoComplete="off"
+                  placeholder="Buscar por nombre, matrícula..."
+                  value={barcazaSearch}
+                  onChange={(e) => {
+                    setBarcazaSearch(e.target.value);
+                    setBarcazaId(null);
+                  }}
+                  onFocus={() => {
+                    if (suggestions.length > 0) setShowDropdown(true);
+                  }}
+                  className={`mt-1 block w-full rounded shadow-sm p-2 border focus:outline-none focus:ring-1 focus:ring-[#104a8e] focus:border-[#104a8e] ${
+                    !barcazaId && barcazaSearch.length > 0 ? 'border-red-400' : 'border-gray-300'
+                  }`}
+                />
+
+                {/* Dropdown de Resultados — absolute z-50 para que flote sobre el resto */}
+                {showDropdown && (
+                  <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-md shadow-lg max-h-60 overflow-y-auto">
+                    {loadingBusqueda ? (
+                      <div className="px-4 py-3 text-sm text-gray-500">Buscando...</div>
+                    ) : suggestions.length > 0 ? (
+                      <ul className="py-1">
+                        {suggestions.map((b) => (
+                          <li
+                            key={b.idBuque}
+                            className="px-4 py-2 hover:bg-[#104a8e] hover:text-white cursor-pointer transition-colors"
+                            onClick={() => {
+                              setBarcazaId(b.idBuque);
+                              setBarcazaSearch(b.nombre);
+                              setShowDropdown(false);
+                            }}
+                          >
+                            <div className="text-sm font-semibold">{b.nombre}</div>
+                            <div className="text-xs opacity-80 mt-0.5">
+                              OMI: {b.omi || '-'} | Mat: {b.matricula || '-'} | {b.tipo}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : barcazaSearch.trim().length >= 2 ? (
+                      <div className="px-4 py-3 text-sm text-gray-500">Sin resultados.</div>
+                    ) : null}
+                  </div>
+                )}
               </div>
+
               <div className="flex-1">
                 <label className="block text-sm font-medium text-gray-700">Tipo</label>
-                <select value={tipo} onChange={e => setTipo(e.target.value as TipoCarga)} className="mt-1 block w-full rounded border-gray-300 shadow-sm p-2 border bg-white">
+                <select value={tipo} onChange={e => setTipo(e.target.value as TipoCarga)} className="mt-1 block w-full rounded border-gray-300 shadow-sm p-2 border bg-white focus:outline-none focus:ring-1 focus:ring-[#104a8e] focus:border-[#104a8e]">
                   <option value="Barcaza">Barcaza</option>
                   <option value="Bodega">Bodega</option>
                 </select>
               </div>
               <div className="flex-1">
                 <label className="block text-sm font-medium text-gray-700">Tonelaje Total</label>
-                <input type="number" step="0.01" min="0" required value={tonelaje} onChange={e => setTonelaje(parseFloat(e.target.value))} className="mt-1 block w-full rounded border-gray-300 shadow-sm p-2 border" />
+                <input type="number" step="0.01" min="0" required value={tonelaje} onChange={e => setTonelaje(parseFloat(e.target.value))} className="mt-1 block w-full rounded border-gray-300 shadow-sm p-2 border focus:outline-none focus:ring-1 focus:ring-[#104a8e] focus:border-[#104a8e]" />
               </div>
-              <button type="submit" disabled={isCreando} className="bg-[#104a8e] text-white px-4 py-2 rounded font-medium hover:bg-[#002454] transition-colors">
+              <button type="submit" disabled={isCreando} className="bg-[#104a8e] text-white px-4 py-2 rounded font-medium hover:bg-[#002454] transition-colors disabled:opacity-50">
                 {isCreando ? 'Guardando...' : 'Guardar'}
               </button>
             </form>
@@ -126,7 +257,7 @@ export default function CargasModal({ viajeId, viajeNombreBuque, onClose }: Carg
                       <td className="px-4 py-3 text-sm text-gray-900 font-medium">{carga.descripcionLista}</td>
                       <td className="px-4 py-3 text-sm text-gray-900">
                         <span className={`px-2 py-1 text-xs rounded-full font-medium ${carga.nivelRiesgo === 'Alto' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}`}>
-                            {carga.nivelRiesgo}
+                          {carga.nivelRiesgo}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-900">{carga.muelleActual || '-'}</td>
@@ -146,9 +277,9 @@ export default function CargasModal({ viajeId, viajeNombreBuque, onClose }: Carg
             </div>
           )}
         </div>
-        
+
         {/* Footer */}
-        <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end rounded-b-lg">
+        <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end rounded-b-lg shrink-0">
           <button onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-800 rounded hover:bg-gray-300 font-medium transition-colors">Cerrar</button>
         </div>
       </div>

@@ -7,7 +7,19 @@ namespace Mbpc.Api.Models.Mongo
     /// <summary>
     /// Documento de detalle operativo de un viaje almacenado en MongoDB.
     /// Complementa a ViajePosicionMongo con datos de negocio provenientes de Oracle
-    /// (barcazas, remolcador, etc.) que se sincronizan vía CQRS.
+    /// (remolcador, barcazas, etc.) que se sincronizan vía CQRS.
+    ///
+    /// MIGRACIÓN ESTRUCTURAL (Cimientos NoSQL):
+    ///   Los campos <c>Remolcador</c> y <c>Barcazas</c> que antes vivían en la raíz
+    ///   del documento han sido movidos al interior de cada <see cref="EtapaMongo"/>.
+    ///   Esto refleja la estructura real del sistema legacy donde cada viaje tiene
+    ///   una o más etapas, y cada etapa posee su propio remolcador y conjunto de barcazas.
+    ///
+    ///   COMPATIBILIDAD DE LECTURA:
+    ///   El atributo [BsonIgnoreExtraElements] garantiza que documentos legacy que aún
+    ///   tengan <c>remolcador</c> y <c>barcazas</c> en la raíz sean deserializados
+    ///   sin error. La migración de datos en MongoDB (actualización de documentos viejos)
+    ///   debe ejecutarse como script separado fuera de este servicio.
     /// </summary>
     [BsonIgnoreExtraElements]
     public class ViajeDetalleMongo
@@ -28,11 +40,13 @@ namespace Mbpc.Api.Models.Mongo
         [BsonElement("Destination")]
         public string? Destination { get; set; }
 
-        [BsonElement("Remolcador")]
-        public RemolcadorMongo? Remolcador { get; set; }
-
-        [BsonElement("Barcazas")]
-        public List<BarcazaMongo>? Barcazas { get; set; }
+        /// <summary>
+        /// Array de etapas del viaje. Cada etapa contiene su propio remolcador
+        /// y lista de barcazas, replicando la estructura del sistema legacy Oracle.
+        /// Se inicializa como lista vacía para evitar nulos en documentos nuevos.
+        /// </summary>
+        [BsonElement("etapas")]
+        public List<EtapaMongo> Etapas { get; set; } = new();
 
         // ── MULTITENANT GEOGRÁFICO ──
         // El campo CosteraId en BSON es numérico (Int32).
@@ -40,6 +54,43 @@ namespace Mbpc.Api.Models.Mongo
         // CosteraId  > 0  →  registro restringido a esa jurisdicción costera.
         [BsonElement("CosteraId")]
         public int? CosteraId { get; set; }
+    }
+
+    /// <summary>
+    /// Representa una etapa dentro de un viaje.
+    /// Una etapa es la unidad operativa del sistema legacy (TBL_ETAPA) que agrupa
+    /// el remolcador y las barcazas asignadas para un tramo específico del viaje.
+    /// </summary>
+    [BsonIgnoreExtraElements]
+    public class EtapaMongo
+    {
+        /// <summary>
+        /// ID de la etapa en el sistema legacy Oracle (TBL_ETAPA.ETAPA_ID).
+        /// Es el pivot que vincula este documento Mongo con el registro relacional.
+        /// </summary>
+        [BsonElement("EtapaId")]
+        public long EtapaId { get; set; }
+
+        /// <summary>
+        /// Fecha y hora de inicio de la etapa.
+        /// Opcional: puede ser nula si la etapa fue creada pero aún no iniciada.
+        /// </summary>
+        [BsonElement("FechaInicio")]
+        public DateTime? FechaInicio { get; set; }
+
+        /// <summary>
+        /// Remolcador asignado a esta etapa del viaje.
+        /// Opcional: puede ser nulo si la etapa no requiere remolque.
+        /// </summary>
+        [BsonElement("remolcador")]
+        public RemolcadorMongo? Remolcador { get; set; }
+
+        /// <summary>
+        /// Lista de barcazas (con su carga) asignadas a esta etapa.
+        /// Puede ser nula o vacía si no hay barcazas en la etapa.
+        /// </summary>
+        [BsonElement("barcazas")]
+        public List<BarcazaMongo>? Barcazas { get; set; }
     }
 
     [BsonIgnoreExtraElements]

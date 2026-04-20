@@ -5,7 +5,7 @@
 // Tailwind CSS para estilos, y el hook useNuevoViaje para la mutación.
 // ──────────────────────────────────────────────────────────────────────────────
 
-import { useEffect } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useForm, type SubmitHandler } from "react-hook-form";
 import { useNuevoViaje } from "@/hooks/useNuevoViaje";
 import {
@@ -13,9 +13,19 @@ import {
   DECLARACION_MALVINAS_LABELS,
   type NuevoViajeFormValues,
   type NuevoViajeRequest,
-  type NuevoViajeResponse, // ← import agregado para tipar onSuccess
+  type NuevoViajeResponse,
   type NuevoViajeError,
 } from "@/types/viajes.types";
+
+// ─── Tipos Locales ────────────────────────────────────────────────────────────
+
+interface BuqueAutocomplete {
+  idBuque: number;
+  nombre: string;
+  matricula: string;
+  omi: string;
+  tipo: string;
+}
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -29,7 +39,7 @@ interface ModalNuevoViajeProps {
    * Recibe el objeto completo NuevoViajeResponse para que el padre
    * pueda mostrar el mensaje descriptivo que viene del servidor.
    */
-  onSuccess?: (response: NuevoViajeResponse) => void; // ← era (viajeId: number)
+  onSuccess?: (response: NuevoViajeResponse) => void;
   /**
    * Callback opcional para notificar error al componente padre.
    */
@@ -128,10 +138,11 @@ export function ModalNuevoViaje({
     handleSubmit,
     reset,
     watch,
+    setValue,
     formState: { errors },
   } = useForm<NuevoViajeFormValues>({
     defaultValues: {
-      nombreBuque: "",
+      buqueId: undefined as unknown as number,
       origen: "",
       destino: "",
       proximoPuntoControl: "",
@@ -149,10 +160,20 @@ export function ModalNuevoViaje({
 
   const { mutate, isPending } = useNuevoViaje();
 
+  // Estados locales para el autocompletado del buque
+  const [buqueSearchTerm, setBuqueSearchTerm] = useState("");
+  const [buqueSuggestions, setBuqueSuggestions] = useState<BuqueAutocomplete[]>([]);
+  const [showBuqueDropdown, setShowBuqueDropdown] = useState(false);
+  const [isLoadingBuques, setIsLoadingBuques] = useState(false);
+  const buqueDropdownRef = useRef<HTMLDivElement>(null);
+
   // Resetear el formulario cuando el modal se cierra
   useEffect(() => {
     if (!isOpen) {
       reset();
+      setBuqueSearchTerm("");
+      setBuqueSuggestions([]);
+      setShowBuqueDropdown(false);
     }
   }, [isOpen, reset]);
 
@@ -166,12 +187,67 @@ export function ModalNuevoViaje({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, isPending, onClose]);
 
+  // ─── FIX: Race Condition en handleClickOutside ────────────────────────────
+  // El listener de mousedown SOLO se registra cuando el dropdown está abierto.
+  // Esto evita que el evento se dispare antes de que React renderice la lista
+  // y evalúe contains() como false, cerrando el dropdown antes de que se abra.
+  useEffect(() => {
+    if (!showBuqueDropdown) return;
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        buqueDropdownRef.current &&
+        !buqueDropdownRef.current.contains(event.target as Node)
+      ) {
+        setShowBuqueDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showBuqueDropdown]);
+
+  // Efecto Debounce para buscar buques con token JWT
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(async () => {
+      if (buqueSearchTerm.trim().length >= 2) {
+        setIsLoadingBuques(true);
+        try {
+          // 👉 EL CAMBIO CLAVE: Usamos la llave exacta que descubriste
+          const token = localStorage.getItem("mbpc_token");
+
+          const res = await fetch(
+            `/api/buques/autocomplete?query=${encodeURIComponent(buqueSearchTerm)}`,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+            }
+          );
+          if (res.ok) {
+            const data: BuqueAutocomplete[] = await res.json();
+            setBuqueSuggestions(data);
+            setShowBuqueDropdown(true);
+          }
+        } catch (error) {
+          console.error("Error buscando buques:", error);
+        } finally {
+          setIsLoadingBuques(false);
+        }
+      } else {
+        setBuqueSuggestions([]);
+        setShowBuqueDropdown(false);
+      }
+    }, 400);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [buqueSearchTerm]);
+
   // Leer FechaPartida para validar que ETA sea posterior
   const fechaPartidaValue = watch("fechaPartida");
 
   const onSubmit: SubmitHandler<NuevoViajeFormValues> = (formValues) => {
     const payload: NuevoViajeRequest = {
-      nombreBuque: formValues.nombreBuque,
+      buqueId: Number(formValues.buqueId),
       origen: formValues.origen,
       destino: formValues.destino,
       proximoPuntoControl: formValues.proximoPuntoControl,
@@ -192,7 +268,7 @@ export function ModalNuevoViaje({
 
     mutate(payload, {
       onSuccess: (response) => {
-        onSuccess?.(response); // ← era onSuccess?.(response.viajeId)
+        onSuccess?.(response);
         onClose();
       },
       onError: (error) => {
@@ -218,15 +294,23 @@ export function ModalNuevoViaje({
       />
 
       {/* ── Panel del modal ─────────────────────────────────────────── */}
-      <div className="relative z-10 w-full max-w-3xl max-h-[92vh] flex flex-col bg-slate-900 border border-slate-700/60 rounded-lg shadow-2xl shadow-black/60 overflow-hidden">
-
+      {/*
+        FIX: Se eliminó `overflow-hidden` del div principal del panel.
+        Ese overflow creaba un contexto de apilamiento que recortaba
+        físicamente el dropdown absoluto, haciéndolo invisible.
+        El scroll se controla en el <form> interno con overflow-y-auto,
+        y el alto máximo del panel se mantiene con max-h-[92vh].
+      */}
+      <div className="relative z-10 w-full max-w-3xl max-h-[92vh] flex flex-col bg-slate-900 border border-slate-700/60 rounded-lg shadow-2xl shadow-black/60">
         {/* Franja de color superior */}
-        <div className="h-1 w-full bg-gradient-to-r from-cyan-500 via-sky-400 to-cyan-600" />
+        <div className="h-1 w-full bg-gradient-to-r from-cyan-500 via-sky-400 to-cyan-600 shrink-0 rounded-t-lg" />
 
         {/* ── Header ──────────────────────────────────────────────────── */}
         <div className="px-6 py-4 border-b border-slate-700/60 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
-            <span className="text-2xl" aria-hidden="true">⚓</span>
+            <span className="text-2xl" aria-hidden="true">
+              ⚓
+            </span>
             <div>
               <h2
                 id="modal-nuevo-viaje-title"
@@ -248,8 +332,19 @@ export function ModalNuevoViaje({
                        disabled:cursor-not-allowed transition-colors duration-150 
                        rounded p-1 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </button>
         </div>
@@ -261,7 +356,6 @@ export function ModalNuevoViaje({
           noValidate
           className="overflow-y-auto flex-1 px-6 py-5 space-y-6 scrollbar-thin scrollbar-track-slate-800 scrollbar-thumb-slate-600"
         >
-
           {/* ── SECCIÓN 1: Identificación del Buque ─────────────────── */}
           <section>
             <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-500 mb-3 flex items-center gap-2">
@@ -271,24 +365,73 @@ export function ModalNuevoViaje({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4">
 
-              {/* Nombre del Buque */}
-              <div className="sm:col-span-2">
-                <Label htmlFor="nombreBuque" required>
-                  Nombre del Buque
+              {/* Autocomplete de Buque */}
+              <div className="sm:col-span-2 relative" ref={buqueDropdownRef}>
+                <Label htmlFor="buqueSearchTerm" required>
+                  Buque
                 </Label>
                 <input
-                  id="nombreBuque"
+                  id="buqueSearchTerm"
                   type="text"
-                  placeholder="Ej: ARA San Martín"
+                  placeholder="Buscar por nombre, matrícula u OMI..."
                   disabled={isPending}
-                  className={getInputClass(!!errors.nombreBuque)}
-                  {...register("nombreBuque", {
-                    required: "El nombre del buque es requerido.",
-                    minLength: { value: 2, message: "Mínimo 2 caracteres." },
-                    maxLength: { value: 200, message: "Máximo 200 caracteres." },
+                  autoComplete="off"
+                  className={getInputClass(!!errors.buqueId)}
+                  value={buqueSearchTerm}
+                  onChange={(e) => {
+                    setBuqueSearchTerm(e.target.value);
+                    setValue("buqueId", undefined as unknown as number);
+                  }}
+                  onFocus={() => {
+                    if (buqueSuggestions.length > 0) setShowBuqueDropdown(true);
+                  }}
+                />
+                <input
+                  type="hidden"
+                  {...register("buqueId", {
+                    required: "Debe seleccionar un buque de la lista.",
                   })}
                 />
-                <FieldError message={errors.nombreBuque?.message} />
+                <FieldError message={errors.buqueId?.message} />
+
+                {/* Dropdown flotante */}
+                {showBuqueDropdown && (
+                  <div className="absolute z-50 w-full mt-1 bg-slate-800 border border-slate-600 rounded-md shadow-lg max-h-60 overflow-y-auto scrollbar-thin scrollbar-track-slate-800 scrollbar-thumb-slate-600">
+                    {isLoadingBuques ? (
+                      <div className="px-4 py-3 text-sm text-slate-400">
+                        Buscando buques...
+                      </div>
+                    ) : buqueSuggestions.length > 0 ? (
+                      <ul className="py-1">
+                        {buqueSuggestions.map((buque) => (
+                          <li
+                            key={buque.idBuque}
+                            className="px-4 py-2 hover:bg-cyan-600 cursor-pointer transition-colors"
+                            onClick={() => {
+                              setValue("buqueId", buque.idBuque, {
+                                shouldValidate: true,
+                              });
+                              setBuqueSearchTerm(buque.nombre);
+                              setShowBuqueDropdown(false);
+                            }}
+                          >
+                            <div className="text-sm font-semibold text-slate-100">
+                              {buque.nombre}
+                            </div>
+                            <div className="text-xs text-slate-400 mt-0.5">
+                              OMI: {buque.omi || "N/A"} | Matrícula:{" "}
+                              {buque.matricula || "N/A"} | Tipo: {buque.tipo}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : buqueSearchTerm.trim().length >= 2 ? (
+                      <div className="px-4 py-3 text-sm text-slate-400">
+                        No se encontraron resultados.
+                      </div>
+                    ) : null}
+                  </div>
+                )}
               </div>
 
               {/* Agencia Marítima */}
@@ -301,7 +444,10 @@ export function ModalNuevoViaje({
                   disabled={isPending}
                   className={getInputClass(!!errors.agenciaMaritima)}
                   {...register("agenciaMaritima", {
-                    maxLength: { value: 200, message: "Máximo 200 caracteres." },
+                    maxLength: {
+                      value: 200,
+                      message: "Máximo 200 caracteres.",
+                    },
                   })}
                 />
                 <FieldError message={errors.agenciaMaritima?.message} />
@@ -317,7 +463,10 @@ export function ModalNuevoViaje({
                   disabled={isPending}
                   className={getInputClass(!!errors.muelleSalida)}
                   {...register("muelleSalida", {
-                    maxLength: { value: 200, message: "Máximo 200 caracteres." },
+                    maxLength: {
+                      value: 200,
+                      message: "Máximo 200 caracteres.",
+                    },
                   })}
                 />
                 <FieldError message={errors.muelleSalida?.message} />
@@ -333,12 +482,14 @@ export function ModalNuevoViaje({
                   disabled={isPending}
                   className={getInputClass(!!errors.motivoViaje)}
                   {...register("motivoViaje", {
-                    maxLength: { value: 500, message: "Máximo 500 caracteres." },
+                    maxLength: {
+                      value: 500,
+                      message: "Máximo 500 caracteres.",
+                    },
                   })}
                 />
                 <FieldError message={errors.motivoViaje?.message} />
               </div>
-
             </div>
           </section>
 
@@ -350,10 +501,11 @@ export function ModalNuevoViaje({
             </h3>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4">
-
               {/* Origen */}
               <div>
-                <Label htmlFor="origen" required>Origen</Label>
+                <Label htmlFor="origen" required>
+                  Origen
+                </Label>
                 <input
                   id="origen"
                   type="text"
@@ -363,7 +515,10 @@ export function ModalNuevoViaje({
                   {...register("origen", {
                     required: "El origen es requerido.",
                     minLength: { value: 2, message: "Mínimo 2 caracteres." },
-                    maxLength: { value: 200, message: "Máximo 200 caracteres." },
+                    maxLength: {
+                      value: 200,
+                      message: "Máximo 200 caracteres.",
+                    },
                   })}
                 />
                 <FieldError message={errors.origen?.message} />
@@ -371,7 +526,9 @@ export function ModalNuevoViaje({
 
               {/* Destino */}
               <div>
-                <Label htmlFor="destino" required>Destino</Label>
+                <Label htmlFor="destino" required>
+                  Destino
+                </Label>
                 <input
                   id="destino"
                   type="text"
@@ -381,7 +538,10 @@ export function ModalNuevoViaje({
                   {...register("destino", {
                     required: "El destino es requerido.",
                     minLength: { value: 2, message: "Mínimo 2 caracteres." },
-                    maxLength: { value: 200, message: "Máximo 200 caracteres." },
+                    maxLength: {
+                      value: 200,
+                      message: "Máximo 200 caracteres.",
+                    },
                   })}
                 />
                 <FieldError message={errors.destino?.message} />
@@ -401,7 +561,10 @@ export function ModalNuevoViaje({
                   {...register("proximoPuntoControl", {
                     required: "El próximo punto de control es requerido.",
                     minLength: { value: 2, message: "Mínimo 2 caracteres." },
-                    maxLength: { value: 200, message: "Máximo 200 caracteres." },
+                    maxLength: {
+                      value: 200,
+                      message: "Máximo 200 caracteres.",
+                    },
                   })}
                 />
                 <FieldError message={errors.proximoPuntoControl?.message} />
@@ -449,7 +612,6 @@ export function ModalNuevoViaje({
                 />
                 <FieldError message={errors.eta?.message} />
               </div>
-
             </div>
           </section>
 
@@ -461,7 +623,6 @@ export function ModalNuevoViaje({
             </h3>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4">
-
               {/* Posición */}
               <div>
                 <Label htmlFor="posicion">Posición Inicial</Label>
@@ -472,7 +633,10 @@ export function ModalNuevoViaje({
                   disabled={isPending}
                   className={getInputClass(!!errors.posicion)}
                   {...register("posicion", {
-                    maxLength: { value: 200, message: "Máximo 200 caracteres." },
+                    maxLength: {
+                      value: 200,
+                      message: "Máximo 200 caracteres.",
+                    },
                   })}
                 />
                 <FieldError message={errors.posicion?.message} />
@@ -509,12 +673,14 @@ export function ModalNuevoViaje({
                   disabled={isPending}
                   className={getInputClass(!!errors.zoe)}
                   {...register("zoe", {
-                    maxLength: { value: 100, message: "Máximo 100 caracteres." },
+                    maxLength: {
+                      value: 100,
+                      message: "Máximo 100 caracteres.",
+                    },
                   })}
                 />
                 <FieldError message={errors.zoe?.message} />
               </div>
-
             </div>
           </section>
 
@@ -537,23 +703,23 @@ export function ModalNuevoViaje({
                   required: "La declaración de Malvinas es requerida.",
                 })}
               >
-                {(Object.values(DeclaracionMalvinasEnum) as DeclaracionMalvinasEnum[]).map(
-                  (value) => (
-                    <option key={value} value={value}>
-                      {DECLARACION_MALVINAS_LABELS[value]}
-                    </option>
-                  )
-                )}
+                {(
+                  Object.values(
+                    DeclaracionMalvinasEnum
+                  ) as DeclaracionMalvinasEnum[]
+                ).map((value) => (
+                  <option key={value} value={value}>
+                    {DECLARACION_MALVINAS_LABELS[value]}
+                  </option>
+                ))}
               </select>
               <FieldError message={errors.declaracionMalvinas?.message} />
             </div>
           </section>
-
         </form>
 
         {/* ── Footer con acciones ──────────────────────────────────── */}
-        <div className="px-6 py-4 border-t border-slate-700/60 bg-slate-900/80 flex items-center justify-end gap-3">
-
+        <div className="px-6 py-4 border-t border-slate-700/60 bg-slate-900/80 flex items-center justify-end gap-3 shrink-0">
           <button
             type="button"
             onClick={onClose}
@@ -568,8 +734,7 @@ export function ModalNuevoViaje({
 
           <button
             type="submit"
-            form={undefined}
-            onClick={handleSubmit(onSubmit)}
+            form="form-nuevo-viaje"
             disabled={isPending}
             className="px-5 py-2 text-sm font-semibold rounded
                        bg-cyan-600 hover:bg-cyan-500 text-white
@@ -609,7 +774,6 @@ export function ModalNuevoViaje({
               </>
             )}
           </button>
-
         </div>
       </div>
     </div>

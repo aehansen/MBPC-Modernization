@@ -5,6 +5,7 @@ import ModalActualizarPosicion from './ModalActualizarPosicion';
 import CargasModal from '../cargas/CargasModal';
 import { BotonZarpar } from '../BotonZarpar';
 import { BotonAmarrar, BotonFondear, BotonReanudar } from '../BotonesAccionViaje';
+import PanelGestionConvoy from '../convoy/PanelGestionConvoy';
 
 const PAGE_SIZE = 10;
 
@@ -251,6 +252,18 @@ export default function ViajesDashboard() {
           onClose={() => setModalCargas({ isOpen: false, viaje: null })}
         />
       )}
+      {/* 🧪 ÁREA DE PRUEBAS - GESTIÓN DE CONVOYES */}
+      <div className="mt-10 border-t-4 border-dashed border-gray-200 pt-8">
+        <div className="mb-4 px-2 flex items-center gap-2">
+          <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-1 rounded">REAL-TIME</span>
+          <h3 className="text-lg font-bold text-gray-700">Gestión de Convoy (Data Orquestada)</h3>
+        </div>
+        
+        {/* Le pasamos el ID directamente. 
+            Ya no importa si el CAROLINA está en esta página de la grilla o no, 
+            el componente lo va a buscar al Backend por su cuenta. */}
+        <PanelGestionConvoy viajeId="68a7cab6e8ed737b66c63d95" />
+      </div>
     </div>
   );
 }
