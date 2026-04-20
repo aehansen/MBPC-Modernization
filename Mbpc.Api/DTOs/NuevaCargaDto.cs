@@ -18,7 +18,7 @@ namespace Mbpc.Api.DTOs
         /// El frontend resuelve este valor mediante el autocomplete de IBuqueService.
         /// </summary>
         [Required(ErrorMessage = "El ID de la barcaza es requerido.")]
-        [Range(1, long.MaxValue, ErrorMessage = "El BarcazaId debe ser un entero positivo válido del padrón de barcazas.")]
+        [Range(0, long.MaxValue, ErrorMessage = "El BarcazaId debe ser un entero positivo válido del padrón de barcazas.")]
         public long BarcazaId { get; set; }
 
         /// <summary>

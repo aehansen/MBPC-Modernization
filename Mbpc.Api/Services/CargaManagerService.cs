@@ -8,6 +8,7 @@ using Mbpc.Api.Models.Config;
 using Mbpc.Api.Models.Mongo;
 using Mbpc.Api.DTOs;
 using System.Data;
+using MongoDB.Bson;
 
 namespace Mbpc.Api.Services
 {
@@ -367,14 +368,13 @@ namespace Mbpc.Api.Services
                     else
                     {
                         // ── Mutate ───────────────────────────────────────────
-                        // Al fondear, se limpia el muelle para que el cliente muestre "En Tránsito"
                         var barcazaTarget = doc.Etapas
                             .SelectMany(e => e.Barcazas ?? new List<BarcazaMongo>())
                             .FirstOrDefault(b => b.Nombre == id);
 
                         if (barcazaTarget is not null)
                         {
-                            barcazaTarget.MuelleActual = null;
+                            barcazaTarget.MuelleActual = zonaFondeo;
 
                             // ── Save ─────────────────────────────────────────
                             var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
@@ -391,7 +391,7 @@ namespace Mbpc.Api.Services
                 }
                 catch (Exception mongoEx)
                 {
-                    _logger.LogError(mongoEx, "Fallo al sincronizar MongoDB (fondeo) para la barcaza {Id}.", id);
+                    _logger.LogError(mongoEx, "Fallo al sincronizar MongoDB (fondeo) para la barcaza {Id}. Se sincronizará en el próximo batch.", id);
                 }
             }
 
@@ -400,7 +400,7 @@ namespace Mbpc.Api.Services
 
         public bool CargarBarcaza(string id, double toneladas)
         {
-            _logger.LogInformation("Registrando tonelaje final de {Toneladas}tn en embarcación {Id}", toneladas, id);
+            _logger.LogInformation("Registrando carga a {Toneladas}tn de embarcación {Id}", toneladas, id);
             bool exitoOracle = false;
 
             try
@@ -427,7 +427,7 @@ namespace Mbpc.Api.Services
                 }
 
                 _logger.LogWarning(
-                    "Oracle no disponible en desarrollo. Simulando carga final a {Toneladas}tn en {Id}. Error: {Message}",
+                    "Oracle no disponible en desarrollo. Simulando carga a {Toneladas}tn de {Id}. Error: {Message}",
                     toneladas, id, ex.Message);
 
                 exitoOracle = true; // Bypass de desarrollo
@@ -658,13 +658,15 @@ namespace Mbpc.Api.Services
                         // ── Save ─────────────────────────────────────────────
                         var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
                         var result   = await _detailsCollection.ReplaceOneAsync(filtroId, doc);
+                        
+                        // ── Invalidación de Caché inyectada ──────────────────
+                        InvalidarCacheViajePorBuque(doc.VesselName);
 
                         if (result.ModifiedCount > 0)
                         {
                             _logger.LogInformation(
                                 "¡CQRS Exitoso! Carga BarcazaId={BarcazaId} inyectada en MongoDB para buque '{Buque}'.",
                                 nuevaCarga.BarcazaId, nombreBuque);
-                            _cache.Remove($"{CacheKeyPrefixCargas}{nombreBuque}");
                         }
                         else
                         {
@@ -691,6 +693,230 @@ namespace Mbpc.Api.Services
             return exitoOracle;
         }
 
+        // ── NUEVOS MÉTODOS: Modificar y Eliminar ─────────────────────────────
+
+        /// <summary>
+        /// Modifica los datos de una barcaza existente.
+        /// Oracle: SP_MODIFICAR_CARGA. MongoDB: Load-Mutate-Save sobre el array anidado Etapas → Barcazas.
+        /// </summary>
+        public async Task<bool> ModificarCargaAsync(string id, ModificarCargaDto dto)
+        {
+            _logger.LogInformation(
+                "Modificando carga '{Id}' → NuevoId={NuevoId}, Tipo={Tipo}, Tonelaje={Tonelaje}tn.",
+                id, dto.BarcazaId, dto.Tipo, dto.Tonelaje);
+
+            bool exitoOracle = false;
+
+            // ── Oracle ───────────────────────────────────────────────────────
+            try
+            {
+                using var connection = new OracleConnection(_oracleConnectionString);
+                var parameters = new DynamicParameters();
+                parameters.Add("p_ID_BARCAZA_ACTUAL", id);
+                parameters.Add("p_NUEVO_ID_BARCAZA",  dto.BarcazaId, dbType: DbType.Int64);
+                parameters.Add("p_TIPO",              dto.Tipo);
+                parameters.Add("p_TONELAJE",          dto.Tonelaje);
+                parameters.Add("p_RESULTADO",         dbType: DbType.Int32, direction: ParameterDirection.Output);
+
+                await connection.ExecuteAsync(
+                    "PKG_MBPC_CARGAS.SP_MODIFICAR_CARGA",
+                    parameters,
+                    commandType: CommandType.StoredProcedure);
+
+                exitoOracle = parameters.Get<int>("p_RESULTADO") == 1;
+            }
+            catch (OracleException ex)
+            {
+                if (!_env.IsDevelopment())
+                {
+                    _logger.LogError(ex, "Error de Oracle en producción al modificar la carga '{Id}'.", id);
+                    throw;
+                }
+
+                _logger.LogWarning(
+                    "Oracle no disponible en desarrollo. Bypass DEV activado para modificar '{Id}'. Error: {Message}",
+                    id, ex.Message);
+
+                exitoOracle = true; // Bypass de desarrollo
+            }
+
+            // ── MongoDB Load-Mutate-Save ──────────────────────────────────────
+            if (exitoOracle)
+            {
+                try
+                {
+                    _logger.LogInformation(
+                        "Sincronizando modificación de carga '{Id}' en MongoDB.", id);
+
+                    // ── Load ─────────────────────────────────────────────────
+                    var filtro = Builders<ViajeDetalleMongo>.Filter.ElemMatch(
+                        d => d.Etapas,
+                        etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.Nombre == id));
+
+                    var doc = await _detailsCollection.Find(filtro).FirstOrDefaultAsync();
+                    if (doc is null)
+                    {
+                        _logger.LogWarning("Mongo no encontró un documento con la barcaza '{Id}' para modificar.", id);
+                    }
+                    else
+                    {
+                        // ── Mutate ───────────────────────────────────────────
+                        var barcazaTarget = doc.Etapas
+                            .SelectMany(e => e.Barcazas ?? new List<BarcazaMongo>())
+                            .FirstOrDefault(b => b.Nombre == id);
+
+                        if (barcazaTarget is not null)
+                        {
+                            barcazaTarget.Nombre   = dto.BarcazaId.ToString();
+                            barcazaTarget.Carga    = dto.Tipo;
+                            barcazaTarget.Cantidad = dto.Tonelaje;
+
+                            // ── Save ─────────────────────────────────────────
+                            var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
+                            var result   = await _detailsCollection.ReplaceOneAsync(filtroId, doc);
+
+                            if (result.ModifiedCount > 0)
+                            {
+                                _logger.LogInformation(
+                                    "¡CQRS Exitoso! Carga '{Id}' modificada en MongoDB (nuevo nombre: '{NuevoNombre}').",
+                                    id, barcazaTarget.Nombre);
+                                InvalidarCacheViajePorBuque(doc.VesselName);
+                            }
+                            else
+                            {
+                                _logger.LogWarning(
+                                    "ReplaceOne no modificó ningún documento al intentar modificar la barcaza '{Id}'.", id);
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogWarning(
+                                "La barcaza '{Id}' fue encontrada en el filtro ElemMatch pero no en la iteración LINQ.", id);
+                        }
+                    }
+                }
+                catch (Exception mongoEx)
+                {
+                    _logger.LogError(mongoEx,
+                        "Fallo al sincronizar MongoDB (ModificarCarga) para la barcaza '{Id}'. " +
+                        "Se sincronizará en el próximo batch.", id);
+                }
+            }
+
+            return exitoOracle;
+        }
+
+        /// <summary>
+        /// Elimina una barcaza del manifiesto del viaje.
+        /// Oracle: SP_ELIMINAR_CARGA. MongoDB: Load-Mutate (Remove)-Save sobre el array anidado.
+        /// </summary>
+        public async Task<bool> EliminarCargaAsync(string id)
+        {
+            _logger.LogInformation("Eliminando carga '{Id}'.", id);
+
+            bool exitoOracle = false;
+
+            // ── Oracle ───────────────────────────────────────────────────────
+            try
+            {
+                using var connection = new OracleConnection(_oracleConnectionString);
+                var parameters = new DynamicParameters();
+                parameters.Add("p_ID_BARCAZA", id);
+                parameters.Add("p_RESULTADO",  dbType: DbType.Int32, direction: ParameterDirection.Output);
+
+                await connection.ExecuteAsync(
+                    "PKG_MBPC_CARGAS.SP_ELIMINAR_CARGA",
+                    parameters,
+                    commandType: CommandType.StoredProcedure);
+
+                exitoOracle = parameters.Get<int>("p_RESULTADO") == 1;
+            }
+            catch (OracleException ex)
+            {
+                if (!_env.IsDevelopment())
+                {
+                    _logger.LogError(ex, "Error de Oracle en producción al eliminar la carga '{Id}'.", id);
+                    throw;
+                }
+
+                _logger.LogWarning(
+                    "Oracle no disponible en desarrollo. Bypass DEV activado para eliminar '{Id}'. Error: {Message}",
+                    id, ex.Message);
+
+                exitoOracle = true; // Bypass de desarrollo
+            }
+
+            // ── MongoDB Load-Mutate-Save ──────────────────────────────────────
+            if (exitoOracle)
+            {
+                try
+                {
+                    _logger.LogInformation(
+                        "Sincronizando eliminación de carga '{Id}' en MongoDB.", id);
+
+                    // ── Load ─────────────────────────────────────────────────
+                    var filtro = Builders<ViajeDetalleMongo>.Filter.ElemMatch(
+                        d => d.Etapas,
+                        etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.Nombre == id));
+
+                    var doc = await _detailsCollection.Find(filtro).FirstOrDefaultAsync();
+                    if (doc is null)
+                    {
+                        _logger.LogWarning("Mongo no encontró un documento con la barcaza '{Id}' para eliminar.", id);
+                    }
+                    else
+                    {
+                        // ── Mutate: remover la barcaza de su etapa ────────────
+                        bool removido = false;
+                        foreach (var etapa in doc.Etapas)
+                        {
+                            if (etapa.Barcazas is null) continue;
+
+                            var barcazaARemover = etapa.Barcazas.FirstOrDefault(b => b.Nombre == id);
+                            if (barcazaARemover is not null)
+                            {
+                                etapa.Barcazas.Remove(barcazaARemover);
+                                removido = true;
+                                break; // Un ID es único por documento
+                            }
+                        }
+
+                        if (removido)
+                        {
+                            // ── Save ─────────────────────────────────────────
+                            var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
+                            var result   = await _detailsCollection.ReplaceOneAsync(filtroId, doc);
+
+                            if (result.ModifiedCount > 0)
+                            {
+                                _logger.LogInformation(
+                                    "¡CQRS Exitoso! Barcaza '{Id}' eliminada del array en MongoDB.", id);
+                                InvalidarCacheViajePorBuque(doc.VesselName);
+                            }
+                            else
+                            {
+                                _logger.LogWarning(
+                                    "ReplaceOne no modificó ningún documento al intentar eliminar la barcaza '{Id}'.", id);
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogWarning(
+                                "La barcaza '{Id}' fue encontrada en el filtro ElemMatch pero no pudo ser removida del array.", id);
+                        }
+                    }
+                }
+                catch (Exception mongoEx)
+                {
+                    _logger.LogError(mongoEx,
+                        "Fallo al sincronizar MongoDB (EliminarCarga) para la barcaza '{Id}'. " +
+                        "Se sincronizará en el próximo batch.", id);
+                }
+            }
+
+            return exitoOracle;
+        }
+
         // ── Helpers Privados ─────────────────────────────────────────────────
 
         /// <summary>
@@ -699,12 +925,33 @@ namespace Mbpc.Api.Services
         /// </summary>
         private void InvalidarCacheViajePorBuque(string? vesselName)
         {
-            if (string.IsNullOrWhiteSpace(vesselName))
-                return;
+            if (string.IsNullOrWhiteSpace(vesselName)) return;
 
-            var cacheKey = $"{CacheKeyPrefixCargas}{vesselName}";
-            _cache.Remove(cacheKey);
-            _logger.LogInformation("Caché invalidada exitosamente para el viaje: {Viaje}", vesselName);
+            // 1. Invalidar la llave por nombre del buque
+            _cache.Remove($"{CacheKeyPrefixCargas}{vesselName}");
+
+            // 2. Buscar el Viaje ID asociado a ese buque e invalidar también esa llave (la que usa el frontend)
+            try
+            {
+                var filtro = Builders<ViajePosicionMongo>.Filter.Eq("VesselName", vesselName);
+                var viajePos = _viajesCollection.Find(filtro).FirstOrDefault();
+                
+                if (viajePos != null)
+                {
+                    // Usamos ToBsonDocument para asegurar que capturamos el _id sin importar cómo se llame la propiedad
+                    var bson = viajePos.ToBsonDocument();
+                    if (bson.Contains("_id"))
+                    {
+                        var objectId = bson["_id"].ToString();
+                        _cache.Remove($"{CacheKeyPrefixCargas}{objectId}");
+                        _logger.LogInformation("Caché invalidada doble: Buque '{Buque}' y ObjectId '{Id}'.", vesselName, objectId);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Error al invalidar caché cruzada por ID: {Msg}", ex.Message);
+            }
         }
 
         /// <summary>

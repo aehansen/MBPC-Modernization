@@ -10,5 +10,7 @@ namespace Mbpc.Api.Services
         bool CargarBarcaza(string id, double toneladas);
         bool DescargarBarcaza(string id, double toneladas);
         Task<bool> AgregarCargaAsync(string viajeNombreBuque, NuevaCargaDto nuevaCarga);
+        Task<bool> ModificarCargaAsync(string id, ModificarCargaDto dto);
+        Task<bool> EliminarCargaAsync(string id);
     }
 }

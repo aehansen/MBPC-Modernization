@@ -83,6 +83,72 @@ namespace Mbpc.Api.Controllers
             return Ok(new { mensaje = "Descarga registrada correctamente." });
         }
 
+        // ── PUT: modificar carga ──────────────────────────────────────────────
+
+        /// <summary>
+        /// Modifica los datos de una barcaza existente (BarcazaId, Tipo, Tonelaje).
+        /// CQRS: actualiza Oracle mediante SP y hace Load-Mutate-Save en MongoDB.
+        /// </summary>
+        [HttpPut("{id}")]
+        public async Task<ActionResult> ModificarCarga(string id, [FromBody] ModificarCargaDto dto)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                return BadRequest(new { mensaje = "El ID de la carga es requerido." });
+
+            if (dto == null)
+                return BadRequest(new { mensaje = "El cuerpo de la solicitud no puede estar vacío." });
+
+            // ACÁ EL CAMBIO CLAVE: Cambiamos <= 0 por < 0
+            if (dto.BarcazaId < 0)
+                return BadRequest(new { mensaje = "El BarcazaId no puede ser negativo (0 es válido para Bodegas)." });
+
+            if (string.IsNullOrWhiteSpace(dto.Tipo))
+                return BadRequest(new { mensaje = "El campo Tipo es requerido." });
+
+            var tiposValidos = new[] { "Barcaza", "Bodega" };
+            if (!tiposValidos.Contains(dto.Tipo, StringComparer.OrdinalIgnoreCase))
+                return BadRequest(new { mensaje = "El tipo debe ser 'Barcaza' o 'Bodega'." });
+
+            if (dto.Tonelaje < 0)
+                return BadRequest(new { mensaje = "El tonelaje no puede ser negativo." });
+
+            _logger.LogInformation(
+                "Modificar carga ID='{Id}' → BarcazaId={BarcazaId}, Tipo={Tipo}, Tonelaje={Tonelaje}tn.",
+                id, dto.BarcazaId, dto.Tipo, dto.Tonelaje);
+
+            var exito = await _cargaService.ModificarCargaAsync(id, dto);
+
+            if (!exito)
+                return StatusCode(500, new { mensaje = $"Error interno al modificar la carga con ID '{id}'." });
+
+            return Ok(new
+            {
+                mensaje = $"Carga '{id}' actualizada correctamente (nuevo BarcazaId={dto.BarcazaId})."
+            });
+        }
+
+        // ── DELETE: eliminar carga ────────────────────────────────────────────
+
+        /// <summary>
+        /// Elimina una barcaza del manifiesto del viaje.
+        /// CQRS: elimina en Oracle mediante SP y remueve el nodo en MongoDB.
+        /// </summary>
+        [HttpDelete("{id}")]
+        public async Task<ActionResult> EliminarCarga(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                return BadRequest(new { mensaje = "El ID de la carga es requerido." });
+
+            _logger.LogInformation("Eliminar carga ID='{Id}'.", id);
+
+            var exito = await _cargaService.EliminarCargaAsync(id);
+
+            if (!exito)
+                return StatusCode(500, new { mensaje = $"Error interno al eliminar la carga con ID '{id}'." });
+
+            return Ok(new { mensaje = $"Carga '{id}' eliminada correctamente del manifiesto." });
+        }
+
         // ── POST: agregar carga al viaje ──────────────────────────────────────
 
         /// <summary>
@@ -97,11 +163,12 @@ namespace Mbpc.Api.Controllers
             if (string.IsNullOrWhiteSpace(viajeNombreBuque))
                 return BadRequest(new { mensaje = "El nombre del buque no puede estar vacío." });
 
+            // ACÁ EL OTRO CAMBIO CLAVE: Cambiamos <= 0 por < 0
             if (nuevaCarga == null
-                || nuevaCarga.BarcazaId <= 0
+                || nuevaCarga.BarcazaId < 0
                 || string.IsNullOrWhiteSpace(nuevaCarga.Tipo))
             {
-                return BadRequest(new { mensaje = "Los campos BarcazaId (mayor que cero) y Tipo son requeridos." });
+                return BadRequest(new { mensaje = "Los campos BarcazaId (positivo o cero) y Tipo son requeridos." });
             }
 
             var tiposValidos = new[] { "Barcaza", "Bodega" };
