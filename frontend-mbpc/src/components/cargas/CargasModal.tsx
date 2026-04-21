@@ -13,6 +13,9 @@ import type { TipoCarga } from '../../types/cargas.types';
 import CargaEditModal from './CargaEditModal';
 import CargaDeleteModal from './CargaDeleteModal';
 
+// Importamos el nuevo autocomplete de tipo de carga/mercadería
+import TipoCargaAutocomplete from './TipoCargaAutocomplete';
+
 // ─── Tipos Locales ────────────────────────────────────────────────────────────
 interface AutocompleteBarcaza {
   idBuque: number;
@@ -40,6 +43,12 @@ export default function CargasModal({ viajeId, viajeNombreBuque, onClose }: Carg
   const [showForm, setShowForm] = useState(false);
   const [tipo, setTipo] = useState<TipoCarga>('Barcaza');
   const [tonelaje, setTonelaje] = useState<number>(0);
+
+  // ─── Estado para la Mercadería seleccionada ──────────────────────────────────
+  const [mercaderiaSeleccionada, setMercaderiaSeleccionada] = useState<{
+    oracleId: number | null;
+    nombre: string;
+  } | null>(null);
 
   // ─── Estados para el Autocompletado de Barcaza ──────────────────────────────
   const [barcazaSearch, setBarcazaSearch] = useState('');
@@ -128,6 +137,12 @@ export default function CargasModal({ viajeId, viajeNombreBuque, onClose }: Carg
       return;
     }
 
+    // Validación: mercadería obligatoria
+    if (!mercaderiaSeleccionada?.oracleId) {
+      alert('Por favor, seleccione la naturaleza de la mercadería.');
+      return;
+    }
+
     // Si es Bodega, mandamos 0 (nuestra convención). Si es Barcaza, el ID que eligió.
     const payloadBarcazaId = tipo === 'Bodega' ? 0 : barcazaId;
 
@@ -137,7 +152,8 @@ export default function CargasModal({ viajeId, viajeNombreBuque, onClose }: Carg
         body: {
           barcazaId: payloadBarcazaId, // Enviamos el ID procesado
           tipo,
-          tonelaje
+          tonelaje,
+          mercaderiaId: mercaderiaSeleccionada.oracleId,
         }
       },
       {
@@ -147,6 +163,7 @@ export default function CargasModal({ viajeId, viajeNombreBuque, onClose }: Carg
           setTonelaje(0);
           setShowDropdown(false);
           setShowForm(false);
+          setMercaderiaSeleccionada(null);
 
           // Recargamos la grilla para ver la bodega/barcaza nueva
           if (refetch) refetch();
@@ -194,8 +211,8 @@ export default function CargasModal({ viajeId, viajeNombreBuque, onClose }: Carg
           </button>
 
           {showForm && (
-            <form onSubmit={handleCrear} className="mb-6 bg-gray-50 p-4 rounded border border-gray-200 flex gap-4 items-end">
-              <div className="flex-1">
+            <form onSubmit={handleCrear} className="mb-6 bg-gray-50 p-4 rounded border border-gray-200 flex flex-wrap gap-4 items-end">
+              <div className="flex-1 min-w-[180px]">
                 <label className="block text-sm font-medium text-gray-700">Tipo</label>
                 <select
                   value={tipo}
@@ -214,7 +231,7 @@ export default function CargasModal({ viajeId, viajeNombreBuque, onClose }: Carg
 
               {/* Autocomplete Barcaza - SOLO SE MUESTRA SI ES BARCAZA */}
               {tipo === 'Barcaza' && (
-                <div className="flex-1 relative" ref={dropdownRef}>
+                <div className="flex-1 min-w-[220px] relative" ref={dropdownRef}>
                   <label className="block text-sm font-medium text-gray-700">Buscar Barcaza</label>
                   <input
                     type="text"
@@ -265,7 +282,16 @@ export default function CargasModal({ viajeId, viajeNombreBuque, onClose }: Carg
                 </div>
               )}
 
-              <div className="flex-1">
+              {/* ─── Nuevo: Autocomplete de Mercadería / Naturaleza ─────────────────── */}
+              <div className="flex-1 min-w-[250px] z-50">
+                <TipoCargaAutocomplete
+                  label="Mercadería / Naturaleza"
+                  value={mercaderiaSeleccionada?.oracleId || null}
+                  onChange={(val) => setMercaderiaSeleccionada(val)}
+                />
+              </div>
+
+              <div className="flex-1 min-w-[150px]">
                 <label className="block text-sm font-medium text-gray-700">Tonelaje Total</label>
                 <input
                   type="number"

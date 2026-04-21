@@ -578,8 +578,8 @@ namespace Mbpc.Api.Services
         public async Task<bool> AgregarCargaAsync(string nombreBuque, NuevaCargaDto nuevaCarga)
         {
             _logger.LogInformation(
-                "Agregando carga BarcazaId={BarcazaId} (tipo: {Tipo}, {Tonelaje}tn) al buque '{Buque}'.",
-                nuevaCarga.BarcazaId, nuevaCarga.Tipo, nuevaCarga.Tonelaje, nombreBuque);
+                "Agregando carga BarcazaId={BarcazaId} (tipo: {Tipo}, {Tonelaje}tn, MercaderiaId={MercaderiaId}) al buque '{Buque}'.",
+                nuevaCarga.BarcazaId, nuevaCarga.Tipo, nuevaCarga.Tonelaje, nuevaCarga.MercaderiaId, nombreBuque);
 
             bool exitoOracle = false;
 
@@ -587,12 +587,13 @@ namespace Mbpc.Api.Services
             {
                 using var connection = new OracleConnection(_oracleConnectionString);
                 var parameters = new DynamicParameters();
-                parameters.Add("p_BUQUE",     nombreBuque);
-                // REFACTOR: BarcazaId es long (clave relacional del MDM de buques).
-                parameters.Add("p_NOMBRE",    nuevaCarga.BarcazaId, dbType: DbType.Int64);
-                parameters.Add("p_TIPO",      nuevaCarga.Tipo);
-                parameters.Add("p_TONELAJE",  nuevaCarga.Tonelaje);
-                parameters.Add("p_RESULTADO", dbType: DbType.Int32, direction: ParameterDirection.Output);
+                parameters.Add("p_BUQUE",         nombreBuque);
+                parameters.Add("p_NOMBRE",        nuevaCarga.BarcazaId, dbType: DbType.Int64);
+                parameters.Add("p_TIPO",          nuevaCarga.Tipo);
+                parameters.Add("p_TONELAJE",      nuevaCarga.Tonelaje);
+                // ESTA ES LA INYECCIÓN PARA EL NUEVO MAESTRO DE CARGAS
+                parameters.Add("p_TIPO_CARGA_ID", nuevaCarga.MercaderiaId, dbType: DbType.Int32);
+                parameters.Add("p_RESULTADO",     dbType: DbType.Int32, direction: ParameterDirection.Output);
 
                 await connection.ExecuteAsync(
                     "PKG_MBPC_CARGAS.SP_AGREGAR_CARGA",

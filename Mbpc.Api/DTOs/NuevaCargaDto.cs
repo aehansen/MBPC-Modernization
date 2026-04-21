@@ -33,5 +33,9 @@ namespace Mbpc.Api.DTOs
         [Required(ErrorMessage = "El tonelaje es requerido.")]
         [Range(0.01, double.MaxValue, ErrorMessage = "El tonelaje debe ser un valor positivo.")]
         public double Tonelaje { get; set; }
+
+        [Required(ErrorMessage = "La mercadería/naturaleza es requerida.")]
+        [Range(1, int.MaxValue, ErrorMessage = "Debe seleccionar una mercadería válida.")]
+        public int MercaderiaId { get; set; }
     }
 }

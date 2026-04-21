@@ -23,6 +23,7 @@ builder.Services.AddControllers()
 
 builder.Services.AddDistributedMemoryCache();
 builder.Services.AddMemoryCache();
+builder.Services.AddScoped<ITipoCargaService, TipoCargaManagerService>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
