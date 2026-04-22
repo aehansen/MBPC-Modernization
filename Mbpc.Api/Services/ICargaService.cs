@@ -4,7 +4,7 @@ namespace Mbpc.Api.Services
 {
     public interface ICargaService
     {
-        IEnumerable<CargaDto> ObtenerCargasPorViaje(string viajeId);
+        Task<IEnumerable<CargaDto>> ObtenerCargasPorViaje(string viajeId);
         bool AmarrarBarcaza(string id, string nuevoMuelle);
         bool FondearBarcaza(string id, string zonaFondeo);
         bool CargarBarcaza(string id, double toneladas);

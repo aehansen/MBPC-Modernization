@@ -19,6 +19,9 @@ namespace Mbpc.Api.Services
         private readonly IMongoCollection<ViajePosicionMongo> _viajesCollection;
         private readonly string _oracleConnectionString;
 
+        // ── Servicios de Dominio ─────────────────────────────────────────────
+        private readonly ITipoCargaService _tipoCargaService;
+
         // ── Utilidades ───────────────────────────────────────────────────────
         private readonly ILogger<CargaManagerService> _logger;
         private readonly IWebHostEnvironment          _env;
@@ -33,20 +36,22 @@ namespace Mbpc.Api.Services
             IOptions<OracleDbSettings>      oracleSettings,
             ILogger<CargaManagerService>    logger,
             IWebHostEnvironment             env,
-            IMemoryCache                    cache)
+            IMemoryCache                    cache,
+            ITipoCargaService               tipoCargaService)
         {
             var database        = mongoClient.GetDatabase(mongoSettings.Value.DatabaseName);
             _detailsCollection  = database.GetCollection<ViajeDetalleMongo>(mongoSettings.Value.DetailsMbpcCollectionName);
             _viajesCollection   = database.GetCollection<ViajePosicionMongo>(mongoSettings.Value.LastMbpcCollectionName);
             _oracleConnectionString = oracleSettings.Value.ConnectionString;
-            _logger = logger;
-            _env    = env;
-            _cache  = cache;
+            _logger           = logger;
+            _env              = env;
+            _cache            = cache;
+            _tipoCargaService = tipoCargaService;
         }
 
         // ── LECTURA (Oracle Fallback + MongoDB + Caché) ──────────────────────
 
-        public IEnumerable<CargaDto> ObtenerCargasPorViaje(string parametroBusqueda)
+        public async Task<IEnumerable<CargaDto>> ObtenerCargasPorViaje(string parametroBusqueda)
         {
             // ── 1. Cache check — siempre primero, independiente de la ruta ───
             var cacheKey = $"{CacheKeyPrefixCargas}{parametroBusqueda}";
@@ -71,7 +76,7 @@ namespace Mbpc.Api.Services
                 "CACHE MISS — Parámetro '{Parametro}' resuelve a MongoDB.",
                 parametroBusqueda);
 
-            return ObtenerCargasDesdeMongoDb(parametroBusqueda, cacheKey);
+            return await ObtenerCargasDesdeMongoDb(parametroBusqueda, cacheKey);
         }
 
         // ── Ruta Oracle: TravelId → EtapaId → SP traer_cargas ───────────────
@@ -151,7 +156,7 @@ namespace Mbpc.Api.Services
 
         // ── Ruta MongoDB: nombre de buque u ObjectId ─────────────────────────
 
-        private IEnumerable<CargaDto> ObtenerCargasDesdeMongoDb(string parametroBusqueda, string cacheKey)
+        private async Task<IEnumerable<CargaDto>> ObtenerCargasDesdeMongoDb(string parametroBusqueda, string cacheKey)
         {
             string nombreBuque = parametroBusqueda;
 
@@ -162,7 +167,7 @@ namespace Mbpc.Api.Services
                 _logger.LogDebug("Parámetro es ObjectId. Resolviendo VesselName desde last_mbpc...");
 
                 var filtroViaje = Builders<ViajePosicionMongo>.Filter.Eq("_id", objectId);
-                var viaje       = _viajesCollection.Find(filtroViaje).FirstOrDefault();
+                var viaje       = await _viajesCollection.Find(filtroViaje).FirstOrDefaultAsync();
 
                 if (viaje != null && !string.IsNullOrWhiteSpace(viaje.VesselName))
                     nombreBuque = viaje.VesselName;
@@ -171,7 +176,7 @@ namespace Mbpc.Api.Services
             _logger.LogDebug("Buscando en details_mbpc por VesselName: {NombreBuque}", nombreBuque);
 
             var filtroDetalles = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.VesselName, nombreBuque);
-            var detalles       = _detailsCollection.Find(filtroDetalles).ToList();
+            var detalles       = await _detailsCollection.Find(filtroDetalles).ToListAsync();
 
             // REFACTOR: las barcazas viven dentro de cada Etapa — usamos SelectMany para aplanarlas.
             var detalleConCargas = detalles.FirstOrDefault(d =>
@@ -193,15 +198,53 @@ namespace Mbpc.Api.Services
                 "{Count} barcazas encontradas (vía Etapas) para: {NombreBuque}",
                 todasLasBarcazas.Count, nombreBuque);
 
-            var resultado = todasLasBarcazas.Select(b => new CargaDto
-            {
-                Id               = b.Nombre ?? Guid.NewGuid().ToString(),
-                ViajeId          = nombreBuque,
-                DescripcionLista = $"{b.Nombre} - {b.Carga} ({b.Cantidad} {b.Unidad})",
-                NivelRiesgo      = "Bajo",
-                MuelleActual     = b.MuelleActual,
-                Tonelaje         = b.Cantidad
-            }).ToList();
+            // ── Hidratación: resolvemos TipoCarga para cada barcaza en paralelo ──
+            var tareasTipoCarga = todasLasBarcazas
+                .Select(b => b.MercaderiaId.HasValue && b.MercaderiaId.Value > 0
+                    ? _tipoCargaService.ObtenerPorIdAsync(b.MercaderiaId.Value)
+                    : Task.FromResult<TipoCargaDto?>(null))
+                .ToList();
+
+            var tiposCarga = await Task.WhenAll(tareasTipoCarga);
+
+            var resultado = todasLasBarcazas
+                .Select((b, index) =>
+                {
+                    var tipoCarga = tiposCarga[index];
+
+                    string descripcion;
+                    string nivelRiesgo;
+
+                    if (tipoCarga is not null)
+                    {
+                        descripcion = $"{b.Nombre} - {tipoCarga.Nombre} ({b.Cantidad} {b.Unidad})";
+                        nivelRiesgo = tipoCarga.EsPeligrosa ? "Alto" : "Bajo";
+                    }
+                    else
+                    {
+                        // Fallback seguro: sin tipo de carga resuelto usamos los datos crudos de Mongo
+                        descripcion = $"{b.Nombre} - {b.Carga} ({b.Cantidad} {b.Unidad})";
+                        nivelRiesgo = "Bajo";
+
+                        if (b.MercaderiaId.HasValue && b.MercaderiaId.Value > 0)
+                        {
+                            _logger.LogWarning(
+                                "TipoCarga no encontrado para MercaderiaId={MercaderiaId} (barcaza '{Nombre}'). Usando valores por defecto.",
+                                b.MercaderiaId.Value, b.Nombre);
+                        }
+                    }
+
+                    return new CargaDto
+                    {
+                        Id               = b.Nombre ?? Guid.NewGuid().ToString(),
+                        ViajeId          = nombreBuque,
+                        DescripcionLista = descripcion,
+                        NivelRiesgo      = nivelRiesgo,
+                        MuelleActual     = b.MuelleActual,
+                        Tonelaje         = b.Cantidad
+                    };
+                })
+                .ToList();
 
             var cacheOptions = new MemoryCacheEntryOptions
             {
@@ -591,7 +634,6 @@ namespace Mbpc.Api.Services
                 parameters.Add("p_NOMBRE",        nuevaCarga.BarcazaId, dbType: DbType.Int64);
                 parameters.Add("p_TIPO",          nuevaCarga.Tipo);
                 parameters.Add("p_TONELAJE",      nuevaCarga.Tonelaje);
-                // ESTA ES LA INYECCIÓN PARA EL NUEVO MAESTRO DE CARGAS
                 parameters.Add("p_TIPO_CARGA_ID", nuevaCarga.MercaderiaId, dbType: DbType.Int32);
                 parameters.Add("p_RESULTADO",     dbType: DbType.Int32, direction: ParameterDirection.Output);
 
@@ -625,15 +667,14 @@ namespace Mbpc.Api.Services
                         "Sincronizando nueva carga BarcazaId={BarcazaId} en MongoDB (details_mbpc) para buque '{Buque}'.",
                         nuevaCarga.BarcazaId, nombreBuque);
 
-                    // Usamos BarcazaId.ToString() como identificador string temporal
-                    // (compatibilidad con la propiedad Nombre de BarcazaMongo).
                     var nuevaBarcazaDoc = new BarcazaMongo
                     {
                         Nombre       = nuevaCarga.BarcazaId.ToString(),
                         Carga        = nuevaCarga.Tipo,
                         Cantidad     = nuevaCarga.Tonelaje,
                         Unidad       = "Tn",
-                        MuelleActual = null
+                        MuelleActual = null,
+                        MercaderiaId = nuevaCarga.MercaderiaId
                     };
 
                     // ── Load ─────────────────────────────────────────────────
@@ -659,8 +700,7 @@ namespace Mbpc.Api.Services
                         // ── Save ─────────────────────────────────────────────
                         var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
                         var result   = await _detailsCollection.ReplaceOneAsync(filtroId, doc);
-                        
-                        // ── Invalidación de Caché inyectada ──────────────────
+
                         InvalidarCacheViajePorBuque(doc.VesselName);
 
                         if (result.ModifiedCount > 0)
@@ -703,8 +743,8 @@ namespace Mbpc.Api.Services
         public async Task<bool> ModificarCargaAsync(string id, ModificarCargaDto dto)
         {
             _logger.LogInformation(
-                "Modificando carga '{Id}' → NuevoId={NuevoId}, Tipo={Tipo}, Tonelaje={Tonelaje}tn.",
-                id, dto.BarcazaId, dto.Tipo, dto.Tonelaje);
+                "Modificando carga '{Id}' en ViajeId='{ViajeId}' → NuevoId={NuevoId}, Tipo={Tipo}, Tonelaje={Tonelaje}tn, MercaderiaId={MercaderiaId}.",
+                id, dto.ViajeId, dto.BarcazaId, dto.Tipo, dto.Tonelaje, dto.MercaderiaId);
 
             bool exitoOracle = false;
 
@@ -714,9 +754,10 @@ namespace Mbpc.Api.Services
                 using var connection = new OracleConnection(_oracleConnectionString);
                 var parameters = new DynamicParameters();
                 parameters.Add("p_ID_BARCAZA_ACTUAL", id);
-                parameters.Add("p_NUEVO_ID_BARCAZA",  dto.BarcazaId, dbType: DbType.Int64);
+                parameters.Add("p_NUEVO_ID_BARCAZA",  dto.BarcazaId,    dbType: DbType.Int64);
                 parameters.Add("p_TIPO",              dto.Tipo);
                 parameters.Add("p_TONELAJE",          dto.Tonelaje);
+                parameters.Add("p_TIPO_CARGA_ID",     dto.MercaderiaId, dbType: DbType.Int32);
                 parameters.Add("p_RESULTADO",         dbType: DbType.Int32, direction: ParameterDirection.Output);
 
                 await connection.ExecuteAsync(
@@ -750,14 +791,23 @@ namespace Mbpc.Api.Services
                         "Sincronizando modificación de carga '{Id}' en MongoDB.", id);
 
                     // ── Load ─────────────────────────────────────────────────
-                    var filtro = Builders<ViajeDetalleMongo>.Filter.ElemMatch(
+                    // FIX DE SCOPING: Filter.And ancla la búsqueda estrictamente
+                    // al documento del viaje indicado por dto.ViajeId, evitando
+                    // que una barcaza con igual nombre en otro viaje sea modificada
+                    // por error (corrupción de datos cruzados).
+                    var filtroViajeId   = Builders<ViajeDetalleMongo>.Filter.Eq(x => x.VesselName, dto.ViajeId);
+                    var filtroElemMatch = Builders<ViajeDetalleMongo>.Filter.ElemMatch(
                         d => d.Etapas,
                         etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.Nombre == id));
+                    var filtro = Builders<ViajeDetalleMongo>.Filter.And(filtroViajeId, filtroElemMatch);
 
                     var doc = await _detailsCollection.Find(filtro).FirstOrDefaultAsync();
                     if (doc is null)
                     {
-                        _logger.LogWarning("Mongo no encontró un documento con la barcaza '{Id}' para modificar.", id);
+                        _logger.LogWarning(
+                            "Mongo no encontró la barcaza '{Id}' dentro del viaje '{ViajeId}' para modificar. " +
+                            "Verificar que el ViajeId sea correcto y que la barcaza pertenezca a ese viaje.",
+                            id, dto.ViajeId);
                     }
                     else
                     {
@@ -768,9 +818,10 @@ namespace Mbpc.Api.Services
 
                         if (barcazaTarget is not null)
                         {
-                            barcazaTarget.Nombre   = dto.BarcazaId.ToString();
-                            barcazaTarget.Carga    = dto.Tipo;
-                            barcazaTarget.Cantidad = dto.Tonelaje;
+                            barcazaTarget.Nombre       = dto.BarcazaId.ToString();
+                            barcazaTarget.Carga        = dto.Tipo;
+                            barcazaTarget.Cantidad     = dto.Tonelaje;
+                            barcazaTarget.MercaderiaId = dto.MercaderiaId;
 
                             // ── Save ─────────────────────────────────────────
                             var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
@@ -934,12 +985,11 @@ namespace Mbpc.Api.Services
             // 2. Buscar el Viaje ID asociado a ese buque e invalidar también esa llave (la que usa el frontend)
             try
             {
-                var filtro = Builders<ViajePosicionMongo>.Filter.Eq("VesselName", vesselName);
+                var filtro   = Builders<ViajePosicionMongo>.Filter.Eq("VesselName", vesselName);
                 var viajePos = _viajesCollection.Find(filtro).FirstOrDefault();
-                
+
                 if (viajePos != null)
                 {
-                    // Usamos ToBsonDocument para asegurar que capturamos el _id sin importar cómo se llame la propiedad
                     var bson = viajePos.ToBsonDocument();
                     if (bson.Contains("_id"))
                     {
@@ -964,7 +1014,6 @@ namespace Mbpc.Api.Services
         {
             try
             {
-                // Load-Mutate-Save: el filtro ya no usa strings mágicos de arrays embebidos.
                 var filtro = Builders<ViajeDetalleMongo>.Filter.ElemMatch(
                     d => d.Etapas,
                     etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.Nombre == idBarcaza));

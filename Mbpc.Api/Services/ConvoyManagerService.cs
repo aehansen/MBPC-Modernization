@@ -78,7 +78,7 @@ public sealed class ConvoyManagerService : IConvoyManagerService
             return null;
         }
 
-        var barcazas = ResolverBarcazas(viajeId, travelId, detalle);
+        var barcazas = await ResolverBarcazasAsync(viajeId, travelId, detalle);
         var remolcador = MapearRemolcador(detalle);
 
         return new ConvoyDto
@@ -363,7 +363,7 @@ public sealed class ConvoyManagerService : IConvoyManagerService
             ex);
     }
 
-    private List<BarcazaConvoyDto> ResolverBarcazas(
+    private async Task<List<BarcazaConvoyDto>> ResolverBarcazasAsync(
         string             viajeId,
         long               travelId,
         ViajeDetalleMongo? detalle)
@@ -392,7 +392,7 @@ public sealed class ConvoyManagerService : IConvoyManagerService
                 "Activando fallback Oracle con TravelId={TravelId}.",
                 viajeId, travelId);
 
-            var cargasLegacy = _cargaService.ObtenerCargasPorViaje(travelId.ToString());
+            var cargasLegacy = await _cargaService.ObtenerCargasPorViaje(travelId.ToString());
 
             if (cargasLegacy is null || !cargasLegacy.Any())
             {

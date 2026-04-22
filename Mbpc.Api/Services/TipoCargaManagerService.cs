@@ -43,11 +43,31 @@ namespace Mbpc.Api.Services
 
             return results.Select(x => new TipoCargaDto
             {
-                OracleId = x.OracleId,
-                Nombre = x.Nombre,
-                Codigo = x.Codigo,
+                OracleId    = x.OracleId,
+                Nombre      = x.Nombre,
+                Codigo      = x.Codigo,
                 EsPeligrosa = x.EsPeligrosa
             });
+        }
+
+        public async Task<TipoCargaDto?> ObtenerPorIdAsync(int oracleId)
+        {
+            var filter = Builders<TipoCargaMongo>.Filter.Eq(x => x.OracleId, oracleId);
+            var result = await _collection.Find(filter).FirstOrDefaultAsync();
+
+            if (result is null)
+            {
+                _logger.LogDebug("TipoCarga no encontrado en MongoDB para OracleId={OracleId}.", oracleId);
+                return null;
+            }
+
+            return new TipoCargaDto
+            {
+                OracleId    = result.OracleId,
+                Nombre      = result.Nombre,
+                Codigo      = result.Codigo,
+                EsPeligrosa = result.EsPeligrosa
+            };
         }
 
         public async Task<int> SincronizarDesdeOracleAsync()
@@ -72,9 +92,9 @@ namespace Mbpc.Api.Services
 
                     registros = rows.Select(row => new TipoCargaMongo
                     {
-                        OracleId = (int)row.ID,
-                        Nombre = (string)(row.NOMBRE ?? string.Empty),
-                        Codigo = (string)(row.CODIGO ?? string.Empty),
+                        OracleId    = (int)row.ID,
+                        Nombre      = (string)(row.NOMBRE ?? string.Empty),
+                        Codigo      = (string)(row.CODIGO ?? string.Empty),
                         EsPeligrosa = row.TIPO_CARGA_PELIGROSA_ID is not null
                     }).ToList();
                 }
@@ -83,15 +103,15 @@ namespace Mbpc.Api.Services
             {
                 // PLAN B: MOCK DE DATOS SI ORACLE FALLA
                 _logger.LogWarning("Oracle offline o inaccesible. Generando MOCK de Tipos de Carga. Error: {Msg}", ex.Message);
-                
+
                 registros = new List<TipoCargaMongo>
                 {
-                    new TipoCargaMongo { OracleId = 1, Nombre = "SOJA EN GRANO", Codigo = "SOJ", EsPeligrosa = false },
-                    new TipoCargaMongo { OracleId = 2, Nombre = "TRIGO", Codigo = "TRI", EsPeligrosa = false },
-                    new TipoCargaMongo { OracleId = 3, Nombre = "PETROLEO CRUDO", Codigo = "PET", EsPeligrosa = true },
-                    new TipoCargaMongo { OracleId = 4, Nombre = "GASOIL", Codigo = "GAS", EsPeligrosa = true },
-                    new TipoCargaMongo { OracleId = 5, Nombre = "MINERAL DE HIERRO", Codigo = "MIN", EsPeligrosa = false },
-                    new TipoCargaMongo { OracleId = 412, Nombre = "EN LASTRE", Codigo = "LAS", EsPeligrosa = false }
+                    new TipoCargaMongo { OracleId = 1,   Nombre = "SOJA EN GRANO",    Codigo = "SOJ", EsPeligrosa = false },
+                    new TipoCargaMongo { OracleId = 2,   Nombre = "TRIGO",             Codigo = "TRI", EsPeligrosa = false },
+                    new TipoCargaMongo { OracleId = 3,   Nombre = "PETROLEO CRUDO",    Codigo = "PET", EsPeligrosa = true  },
+                    new TipoCargaMongo { OracleId = 4,   Nombre = "GASOIL",            Codigo = "GAS", EsPeligrosa = true  },
+                    new TipoCargaMongo { OracleId = 5,   Nombre = "MINERAL DE HIERRO", Codigo = "MIN", EsPeligrosa = false },
+                    new TipoCargaMongo { OracleId = 412, Nombre = "EN LASTRE",         Codigo = "LAS", EsPeligrosa = false }
                 };
             }
 

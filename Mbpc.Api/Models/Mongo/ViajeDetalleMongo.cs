@@ -130,5 +130,14 @@ namespace Mbpc.Api.Models.Mongo
         [BsonElement("MUELLE_ACTUAL")]
         [BsonIgnoreIfNull]
         public string? MuelleActual { get; set; }
+
+        /// <summary>
+        /// ID del maestro de mercaderías/naturaleza de carga (origen Oracle).
+        /// Anulable con [BsonIgnoreIfNull] para mantener compatibilidad hacia atrás
+        /// con documentos BSON existentes que no poseen este campo.
+        /// </summary>
+        [BsonElement("MERCADERIA_ID")]
+        [BsonIgnoreIfNull]
+        public int? MercaderiaId { get; set; }
     }
 }

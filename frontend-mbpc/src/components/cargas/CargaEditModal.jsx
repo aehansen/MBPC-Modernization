@@ -55,6 +55,7 @@ export default function CargaEditModal({ carga, onClose, onSuccess }) {
         `/api/carga/${encodeURIComponent(carga.id)}`,
         {
           // Si es bodega forzamos 0, si es barcaza mandamos el número ingresado
+          viajeId: carga.viajeId,
           barcazaId: esBodega ? 0 : Number(data.barcazaId),
           tipo: data.tipo,
           tonelaje: parseFloat(data.tonelaje),

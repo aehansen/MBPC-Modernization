@@ -20,13 +20,13 @@ namespace Mbpc.Api.Controllers
         // ── GET ───────────────────────────────────────────────────────────────
 
         [HttpGet("viaje/{viajeId}")]
-        public ActionResult<IEnumerable<CargaDto>> GetCargasPorViaje(string viajeId)
+        public async Task<ActionResult<IEnumerable<CargaDto>>> GetCargasPorViaje(string viajeId)
         {
             if (string.IsNullOrWhiteSpace(viajeId))
                 return BadRequest(new { mensaje = "El identificador de viaje no puede estar vacío." });
 
             _logger.LogInformation("Buscando cargas para viajeId: {ViajeId}", viajeId);
-            var cargas = _cargaService.ObtenerCargasPorViaje(viajeId);
+            var cargas = await _cargaService.ObtenerCargasPorViaje(viajeId);
             return Ok(cargas);
         }
 
@@ -88,6 +88,7 @@ namespace Mbpc.Api.Controllers
         /// <summary>
         /// Modifica los datos de una barcaza existente (BarcazaId, Tipo, Tonelaje).
         /// CQRS: actualiza Oracle mediante SP y hace Load-Mutate-Save en MongoDB.
+        /// El campo ViajeId en el DTO ancla la operación al documento correcto (fix de scoping).
         /// </summary>
         [HttpPut("{id}")]
         public async Task<ActionResult> ModificarCarga(string id, [FromBody] ModificarCargaDto dto)
@@ -97,6 +98,9 @@ namespace Mbpc.Api.Controllers
 
             if (dto == null)
                 return BadRequest(new { mensaje = "El cuerpo de la solicitud no puede estar vacío." });
+
+            if (string.IsNullOrWhiteSpace(dto.ViajeId))
+                return BadRequest(new { mensaje = "El ViajeId es requerido para el scoping. No se puede modificar una carga sin especificar el viaje al que pertenece." });
 
             // ACÁ EL CAMBIO CLAVE: Cambiamos <= 0 por < 0
             if (dto.BarcazaId < 0)
@@ -113,8 +117,8 @@ namespace Mbpc.Api.Controllers
                 return BadRequest(new { mensaje = "El tonelaje no puede ser negativo." });
 
             _logger.LogInformation(
-                "Modificar carga ID='{Id}' → BarcazaId={BarcazaId}, Tipo={Tipo}, Tonelaje={Tonelaje}tn.",
-                id, dto.BarcazaId, dto.Tipo, dto.Tonelaje);
+                "Modificar carga ID='{Id}' en ViajeId='{ViajeId}' → BarcazaId={BarcazaId}, Tipo={Tipo}, Tonelaje={Tonelaje}tn.",
+                id, dto.ViajeId, dto.BarcazaId, dto.Tipo, dto.Tonelaje);
 
             var exito = await _cargaService.ModificarCargaAsync(id, dto);
 
