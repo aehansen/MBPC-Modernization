@@ -122,7 +122,10 @@ namespace Mbpc.Api.Services
                     DescripcionLista = r.DescripcionLista ?? $"Carga #{r.Id}",
                     NivelRiesgo      = "Bajo",
                     MuelleActual     = r.MuelleActual,
-                    Tonelaje         = r.Tonelaje
+                    Tonelaje         = r.Tonelaje,
+                    // Hito 5.7: "0" es la convención para Bodega en el schema Oracle.
+                    // El campo Id NO se modifica para preservar la integridad de las mutaciones PUT/DELETE.
+                    TipoUnidad       = r.Id?.ToString() == "0" ? "Bodega" : "Barcaza"
                 }).ToList();
 
                 _logger.LogInformation(
@@ -154,24 +157,58 @@ namespace Mbpc.Api.Services
             }
         }
 
-        // ── Ruta MongoDB: nombre de buque u ObjectId ─────────────────────────
+        // ── Resolución de Identidad compartida ───────────────────────────────
 
-        private async Task<IEnumerable<CargaDto>> ObtenerCargasDesdeMongoDb(string parametroBusqueda, string cacheKey)
+        /// <summary>
+        /// Traduce cualquier identificador de viaje (ObjectId de last_mbpc o nombre de buque)
+        /// al VesselName real que usan los documentos de details_mbpc.
+        ///
+        /// Contrato:
+        ///   - Si <paramref name="parametro"/> es un ObjectId válido (24 hex), busca el documento
+        ///     en _viajesCollection (last_mbpc) y retorna su VesselName.
+        ///   - Si el ObjectId no existe o el VesselName está vacío, retorna el propio parámetro
+        ///     como fallback (puede ser ya un nombre de buque literal).
+        ///   - Si <paramref name="parametro"/> NO es un ObjectId, lo retorna sin modificar.
+        ///
+        /// Este helper es la ÚNICA fuente de resolución ObjectId → VesselName del servicio.
+        /// Tanto ObtenerCargasDesdeMongoDb como EliminarCargaAsync lo deben usar para
+        /// garantizar que ambos métodos "vean" el mismo documento en details_mbpc.
+        /// </summary>
+        private async Task<string> ResolverVesselNameAsync(string parametro)
         {
-            string nombreBuque = parametroBusqueda;
-
-            // Si el parámetro es un ObjectId válido, resolvemos el nombre del buque
-            if (parametroBusqueda.Length == 24
-                && MongoDB.Bson.ObjectId.TryParse(parametroBusqueda, out var objectId))
+            if (parametro.Length == 24 && ObjectId.TryParse(parametro, out var objectId))
             {
-                _logger.LogDebug("Parámetro es ObjectId. Resolviendo VesselName desde last_mbpc...");
+                _logger.LogDebug(
+                    "ResolverVesselNameAsync: '{Parametro}' es ObjectId. Buscando VesselName en last_mbpc...",
+                    parametro);
 
                 var filtroViaje = Builders<ViajePosicionMongo>.Filter.Eq("_id", objectId);
                 var viaje       = await _viajesCollection.Find(filtroViaje).FirstOrDefaultAsync();
 
                 if (viaje != null && !string.IsNullOrWhiteSpace(viaje.VesselName))
-                    nombreBuque = viaje.VesselName;
+                {
+                    _logger.LogDebug(
+                        "ResolverVesselNameAsync: ObjectId '{ObjectId}' → VesselName '{VesselName}'.",
+                        parametro, viaje.VesselName);
+                    return viaje.VesselName;
+                }
+
+                _logger.LogWarning(
+                    "ResolverVesselNameAsync: ObjectId '{ObjectId}' encontrado en last_mbpc pero VesselName vacío o nulo. " +
+                    "Se retorna el parámetro original como fallback.",
+                    parametro);
             }
+
+            // No es ObjectId o no se encontró: retornar tal cual (ya es un nombre de buque)
+            return parametro;
+        }
+
+        // ── Ruta MongoDB: nombre de buque u ObjectId ─────────────────────────
+
+        private async Task<IEnumerable<CargaDto>> ObtenerCargasDesdeMongoDb(string parametroBusqueda, string cacheKey)
+        {
+            // ── Resolución de Identidad: ObjectId → VesselName (helper compartido) ──
+            string nombreBuque = await ResolverVesselNameAsync(parametroBusqueda);
 
             _logger.LogDebug("Buscando en details_mbpc por VesselName: {NombreBuque}", nombreBuque);
 
@@ -215,15 +252,25 @@ namespace Mbpc.Api.Services
                     string descripcion;
                     string nivelRiesgo;
 
+                    // Hito 5.8: Descripción diferenciada por tipo de unidad.
+                    // "0" es la convención de Bodega; cualquier otro Nombre es una Barcaza.
+                    bool esBodega = b.Nombre == "0";
+
                     if (tipoCarga is not null)
                     {
-                        descripcion = $"{b.Nombre} - {tipoCarga.Nombre} ({b.Cantidad} {b.Unidad})";
+                        descripcion = esBodega
+                            ? $"{tipoCarga.Nombre} ({b.Cantidad} {b.Unidad})"
+                            : $"{b.Nombre} (Mat. {b.Matricula ?? "S/N"}) - {tipoCarga.Nombre} ({b.Cantidad} {b.Unidad})";
+
                         nivelRiesgo = tipoCarga.EsPeligrosa ? "Alto" : "Bajo";
                     }
                     else
                     {
                         // Fallback seguro: sin tipo de carga resuelto usamos los datos crudos de Mongo
-                        descripcion = $"{b.Nombre} - {b.Carga} ({b.Cantidad} {b.Unidad})";
+                        descripcion = esBodega
+                            ? $"{b.Carga} ({b.Cantidad} {b.Unidad})"
+                            : $"{b.Nombre} (Mat. {b.Matricula ?? "S/N"}) - {b.Carga} ({b.Cantidad} {b.Unidad})";
+
                         nivelRiesgo = "Bajo";
 
                         if (b.MercaderiaId.HasValue && b.MercaderiaId.Value > 0)
@@ -237,11 +284,16 @@ namespace Mbpc.Api.Services
                     return new CargaDto
                     {
                         Id               = b.Nombre ?? Guid.NewGuid().ToString(),
-                        ViajeId          = nombreBuque,
+                        // Hito 5.8: ViajeId se llena con el parametroBusqueda (ObjectId real del viaje),
+                        // NO con nombreBuque, para que el frontend pueda construir la ruta DELETE correcta.
+                        ViajeId          = parametroBusqueda,
                         DescripcionLista = descripcion,
                         NivelRiesgo      = nivelRiesgo,
                         MuelleActual     = b.MuelleActual,
-                        Tonelaje         = b.Cantidad
+                        Tonelaje         = b.Cantidad,
+                        // Hito 5.7: "0" es la convención para Bodega; cualquier otro Nombre es Barcaza.
+                        // El campo Id NO se modifica para preservar la integridad de las mutaciones PUT/DELETE.
+                        TipoUnidad       = esBodega ? "Bodega" : "Barcaza"
                     };
                 })
                 .ToList();
@@ -528,7 +580,7 @@ namespace Mbpc.Api.Services
 
         public bool DescargarBarcaza(string id, double toneladas)
         {
-            _logger.LogInformation("Registrando descarga a {Toneladas}tn finales de embarcación {Id}", toneladas, id);
+            _logger.LogInformation("Registrando descarga a {Toneladas}tn de embarcación {Id}", toneladas, id);
             bool exitoOracle = false;
 
             try
@@ -555,7 +607,7 @@ namespace Mbpc.Api.Services
                 }
 
                 _logger.LogWarning(
-                    "Oracle no disponible en desarrollo. Simulando descarga final a {Toneladas}tn de {Id}. Error: {Message}",
+                    "Oracle no disponible en desarrollo. Simulando descarga a {Toneladas}tn de {Id}. Error: {Message}",
                     toneladas, id, ex.Message);
 
                 exitoOracle = true; // Bypass de desarrollo
@@ -860,109 +912,113 @@ namespace Mbpc.Api.Services
 
         /// <summary>
         /// Elimina una barcaza del manifiesto del viaje.
-        /// Oracle: SP_ELIMINAR_CARGA. MongoDB: Load-Mutate (Remove)-Save sobre el array anidado.
+        /// Oracle: SP_ELIMINAR_CARGA. MongoDB: $pull atómico sobre el array anidado Etapas.$[].Barcazas.
+        ///
+        /// RESOLUCIÓN DE IDENTIDAD (Hito 5.8):
+        ///   El frontend envía el _id de last_mbpc como viajeId. details_mbpc NO comparte ese _id;
+        ///   se indexa por VesselName. Este método usa ResolverVesselNameAsync para traducir el
+        ///   ObjectId al nombre real antes de filtrar details_mbpc, de forma idéntica a
+        ///   ObtenerCargasDesdeMongoDb para que ambos métodos "vean" el mismo documento.
+        ///
+        /// SCOPING (Hito 5.8):
+        ///   El filtro ancla la operación $pull estrictamente al documento del buque correcto,
+        ///   previniendo que bodegas con Nombre="0" sean eliminadas del documento incorrecto.
         /// </summary>
-        public async Task<bool> EliminarCargaAsync(string id)
+        public async Task<bool> EliminarCargaAsync(string viajeId, string cargaId)
         {
-            _logger.LogInformation("Eliminando carga '{Id}'.", id);
+            _logger.LogInformation("Eliminando carga '{CargaId}' del viaje '{ViajeId}'.", cargaId, viajeId);
+
+            if (string.IsNullOrWhiteSpace(viajeId) || string.IsNullOrWhiteSpace(cargaId))
+                return false;
 
             bool exitoOracle = false;
 
-            // ── Oracle ───────────────────────────────────────────────────────
+            // ── 1. Escritura en Oracle (Bypass en Desarrollo) ────────────────
             try
             {
                 using var connection = new OracleConnection(_oracleConnectionString);
                 var parameters = new DynamicParameters();
-                parameters.Add("p_ID_BARCAZA", id);
+                parameters.Add("p_ID_BARCAZA", cargaId);
                 parameters.Add("p_RESULTADO",  dbType: DbType.Int32, direction: ParameterDirection.Output);
 
-                await connection.ExecuteAsync(
-                    "PKG_MBPC_CARGAS.SP_ELIMINAR_CARGA",
-                    parameters,
-                    commandType: CommandType.StoredProcedure);
-
+                await connection.ExecuteAsync("PKG_MBPC_CARGAS.SP_ELIMINAR_CARGA", parameters, commandType: CommandType.StoredProcedure);
                 exitoOracle = parameters.Get<int>("p_RESULTADO") == 1;
             }
-            catch (OracleException ex)
+            catch (OracleException)
             {
-                if (!_env.IsDevelopment())
-                {
-                    _logger.LogError(ex, "Error de Oracle en producción al eliminar la carga '{Id}'.", id);
-                    throw;
-                }
-
-                _logger.LogWarning(
-                    "Oracle no disponible en desarrollo. Bypass DEV activado para eliminar '{Id}'. Error: {Message}",
-                    id, ex.Message);
-
-                exitoOracle = true; // Bypass de desarrollo
+                if (!_env.IsDevelopment()) throw;
+                _logger.LogWarning("Oracle Offline. Bypass DEV activado para eliminar '{CargaId}'.", cargaId);
+                exitoOracle = true; 
             }
 
-            // ── MongoDB Load-Mutate-Save ──────────────────────────────────────
+            // ── 2. Sincronización MongoDB ────────────────────────────────────
             if (exitoOracle)
             {
                 try
                 {
-                    _logger.LogInformation(
-                        "Sincronizando eliminación de carga '{Id}' en MongoDB.", id);
+                    // PASO A: Traducir el viajeId (de last_mbpc) al VesselName que entiende details_mbpc
+                    string nombreBuqueParaFiltrar = viajeId;
 
-                    // ── Load ─────────────────────────────────────────────────
-                    var filtro = Builders<ViajeDetalleMongo>.Filter.ElemMatch(
-                        d => d.Etapas,
-                        etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.Nombre == id));
-
-                    var doc = await _detailsCollection.Find(filtro).FirstOrDefaultAsync();
-                    if (doc is null)
+                    if (viajeId.Length == 24 && MongoDB.Bson.ObjectId.TryParse(viajeId, out var objectIdPosicion))
                     {
-                        _logger.LogWarning("Mongo no encontró un documento con la barcaza '{Id}' para eliminar.", id);
+                        var viajePos = await _viajesCollection
+                            .Find(Builders<ViajePosicionMongo>.Filter.Eq("_id", objectIdPosicion))
+                            .FirstOrDefaultAsync();
+
+                        if (viajePos != null && !string.IsNullOrWhiteSpace(viajePos.VesselName))
+                        {
+                            nombreBuqueParaFiltrar = viajePos.VesselName;
+                        }
                     }
-                    else
+
+                    _logger.LogInformation("Sincronizando eliminación en details_mbpc para buque: '{Buque}' | Carga: '{CargaId}'", nombreBuqueParaFiltrar, cargaId);
+
+                    // PASO B: Filtro por VesselName (que es la clave de unión)
+                    var filtroDoc = Builders<ViajeDetalleMongo>.Filter.Eq(x => x.VesselName, nombreBuqueParaFiltrar);
+
+                    // PASO C: Load-Mutate-Save (Evitamos el bug del $pull de MongoDB en arrays anidados)
+                    var doc = await _detailsCollection.Find(filtroDoc).FirstOrDefaultAsync();
+
+                    if (doc != null)
                     {
-                        // ── Mutate: remover la barcaza de su etapa ────────────
-                        bool removido = false;
+                        bool modificado = false;
+                        
+                        // Recorremos todas las etapas y borramos la carga que coincida
                         foreach (var etapa in doc.Etapas)
                         {
-                            if (etapa.Barcazas is null) continue;
-
-                            var barcazaARemover = etapa.Barcazas.FirstOrDefault(b => b.Nombre == id);
-                            if (barcazaARemover is not null)
+                            if (etapa.Barcazas != null)
                             {
-                                etapa.Barcazas.Remove(barcazaARemover);
-                                removido = true;
-                                break; // Un ID es único por documento
+                                int removidos = etapa.Barcazas.RemoveAll(b => b.Nombre == cargaId);
+                                if (removidos > 0) modificado = true;
                             }
                         }
 
-                        if (removido)
+                        if (modificado)
                         {
-                            // ── Save ─────────────────────────────────────────
-                            var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
-                            var result   = await _detailsCollection.ReplaceOneAsync(filtroId, doc);
-
-                            if (result.ModifiedCount > 0)
-                            {
-                                _logger.LogInformation(
-                                    "¡CQRS Exitoso! Barcaza '{Id}' eliminada del array en MongoDB.", id);
-                                InvalidarCacheViajePorBuque(doc.VesselName);
-                            }
-                            else
-                            {
-                                _logger.LogWarning(
-                                    "ReplaceOne no modificó ningún documento al intentar eliminar la barcaza '{Id}'.", id);
-                            }
+                            // Reemplazamos el documento entero
+                            await _detailsCollection.ReplaceOneAsync(filtroDoc, doc);
+                            _logger.LogInformation("¡CQRS Exitoso! Carga '{CargaId}' eliminada de MongoDB (buque '{Buque}').", cargaId, nombreBuqueParaFiltrar);
+                            
+                            // Invalidamos caché por ambas llaves para que el frontend se entere al toque
+                            _cache.Remove($"{CacheKeyPrefixCargas}{viajeId}");
+                            _cache.Remove($"{CacheKeyPrefixCargas}{nombreBuqueParaFiltrar}");
+                            return true;
                         }
                         else
                         {
-                            _logger.LogWarning(
-                                "La barcaza '{Id}' fue encontrada en el filtro ElemMatch pero no pudo ser removida del array.", id);
+                            _logger.LogWarning("No se encontró la carga '{CargaId}' en las etapas del buque '{Buque}'.", cargaId, nombreBuqueParaFiltrar);
                         }
                     }
+                    else
+                    {
+                        _logger.LogWarning("No se encontró el documento con VesselName='{Buque}' en details_mbpc.", nombreBuqueParaFiltrar);
+                    }
+                    return false;
                 }
                 catch (Exception mongoEx)
                 {
-                    _logger.LogError(mongoEx,
-                        "Fallo al sincronizar MongoDB (EliminarCarga) para la barcaza '{Id}'. " +
-                        "Se sincronizará en el próximo batch.", id);
+                    _logger.LogError(mongoEx, "Error al sincronizar eliminación en MongoDB para carga {CargaId}", cargaId);
+                    return false;
                 }
             }
 

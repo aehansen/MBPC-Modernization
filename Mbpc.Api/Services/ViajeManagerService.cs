@@ -544,7 +544,8 @@ namespace Mbpc.Api.Services
         ///       - TravelId obtenido de Oracle (o ficticio en DEV).
         ///       - CosteraId proveniente del DTO (ya inyectado por el Controller desde el JWT).
         ///       - Lat/Lon/Speed en 0 hasta que el feed AIS actualice la posición real.
-        ///       - VesselName = BuqueId.ToString() (temporal hasta etapa de hidratación MDM).
+        ///       - VesselName = NombreBuque del DTO si está presente (HITO 5.9); de lo contrario
+        ///         BuqueId.ToString() como valor temporal con Warning en log.
         ///
         ///   FASE 3 — MongoDB, colección details_mbpc (ViajeDetalleMongo):
         ///     Inserta el documento de detalle operativo con:
@@ -648,13 +649,31 @@ namespace Mbpc.Api.Services
                 travelIdGenerado = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             }
 
+            // ── HITO 5.9 — Resolución del nombre real del buque ──────────────
+            // Se resuelve UNA SOLA VEZ antes de las fases de MongoDB para que tanto
+            // last_mbpc (Fase 2) como details_mbpc (Fase 3) usen exactamente el mismo
+            // valor en VesselName, garantizando que el cruce por nombre funcione en
+            // ObtenerCargasDesdeMongoDb y EliminarCargaAsync.
+            string vesselNameParaMongo = !string.IsNullOrWhiteSpace(nuevoViaje.NombreBuque)
+                ? nuevoViaje.NombreBuque.Trim().ToUpperInvariant()
+                : nuevoViaje.BuqueId.ToString();
+
+            if (string.IsNullOrWhiteSpace(nuevoViaje.NombreBuque))
+            {
+                _logger.LogWarning(
+                    "HITO 5.9: IniciarViajeAsync recibió NombreBuque vacío para BuqueId='{BuqueId}'. " +
+                    "Se usará el ID numérico como VesselName temporal. " +
+                    "El frontend debe enviar el nombre real para correcta visualización en el dashboard.",
+                    nuevoViaje.BuqueId);
+            }
+
             // ── FASE 2: Inserción en MongoDB — last_mbpc (ViajePosicionMongo) ─
             try
             {
                 var nuevoDocumentoPosicion = new ViajePosicionMongo
                 {
                     TravelId             = travelIdGenerado,
-                    VesselName           = nuevoViaje.BuqueId.ToString(),
+                    VesselName           = vesselNameParaMongo,
                     NavegationStatusDesc = EstadoEtapa.Amarrado.ToString(),
                     MsgTime              = DateTime.UtcNow,
                     Latitude             = 0,
@@ -683,20 +702,23 @@ namespace Mbpc.Api.Services
             // ── FASE 3: Inserción en MongoDB — details_mbpc (ViajeDetalleMongo) ─
             try
             {
+                // HITO 5.9: vesselNameParaMongo ya fue resuelto antes de Fase 2 (scope del método).
+                // ViajeDetalleMongo DEBE usar el mismo valor que ViajePosicionMongo para que el
+                // cruce por VesselName entre las dos colecciones funcione correctamente.
                 var nuevoDocumentoDetalle = new ViajeDetalleMongo
                 {
                     IdViaje     = travelIdGenerado,
-                    VesselName  = nuevoViaje.BuqueId.ToString(),
+                    VesselName  = vesselNameParaMongo,
                     Origin      = nuevoViaje.Origen,
                     Destination = nuevoViaje.Destino,
                     Etapas      = new List<EtapaMongo>
                     {
                         new EtapaMongo
                         {
-                            EtapaId    = 1,
+                            EtapaId     = 1,
                             FechaInicio = DateTime.UtcNow,
-                            Remolcador = null,
-                            Barcazas   = new List<BarcazaMongo>()
+                            Remolcador  = null,
+                            Barcazas    = new List<BarcazaMongo>()
                         }
                     },
                     CosteraId   = costeraIdInt

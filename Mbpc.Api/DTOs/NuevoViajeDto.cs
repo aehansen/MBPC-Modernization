@@ -93,6 +93,11 @@ namespace Mbpc.Api.DTOs
     ///   NombreBuque (string libre) fue reemplazado por BuqueId (long).
     ///   El padrón de buques vive en BUQUES_NEW; el frontend debe resolver el ID
     ///   previamente a través de IBuqueService.BuscarBuquesDisponiblesAsync().
+    ///
+    /// HITO 5.9:
+    ///   Se reincorpora NombreBuque como campo complementario (opcional).
+    ///   El backend lo persiste en MongoDB junto al detalle del viaje.
+    ///   El valor lo resuelve el frontend desde el estado del Autocomplete (buqueSearchTerm).
     /// </summary>
     public class NuevoViajeDto
     {
@@ -113,6 +118,14 @@ namespace Mbpc.Api.DTOs
         [Required(ErrorMessage = "El ID del buque es requerido.")]
         [Range(1, long.MaxValue, ErrorMessage = "El BuqueId debe ser un entero positivo válido del padrón BUQUES_NEW.")]
         public long BuqueId { get; set; }
+
+        /// <summary>
+        /// Nombre real del buque tal como fue seleccionado en el Autocomplete del frontend.
+        /// Opcional: se persiste en MongoDB (ViajeDetalleMongo) para facilitar la lectura
+        /// humana del documento sin necesidad de resolver el BuqueId contra BUQUES_NEW.
+        /// El SP de Oracle no utiliza este campo; es exclusivo de la capa Mongo.
+        /// </summary>
+        public string? NombreBuque { get; set; }
 
         [Required(ErrorMessage = "El puerto de origen es requerido.")]
         [StringLength(100, MinimumLength = 2, ErrorMessage = "El origen debe tener entre 2 y 100 caracteres.")]

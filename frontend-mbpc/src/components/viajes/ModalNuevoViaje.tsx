@@ -248,6 +248,7 @@ export function ModalNuevoViaje({
   const onSubmit: SubmitHandler<NuevoViajeFormValues> = (formValues) => {
     const payload: NuevoViajeRequest = {
       buqueId: Number(formValues.buqueId),
+      nombreBuque: buqueSearchTerm || undefined,
       origen: formValues.origen,
       destino: formValues.destino,
       proximoPuntoControl: formValues.proximoPuntoControl,

@@ -73,6 +73,26 @@ export default function CargasTable({ viajeId }) {
     fetchCargas();
   };
 
+  // ── Helper: Badge de TipoUnidad ─────────────────────────────────────────
+  /**
+   * Devuelve el badge de Tailwind correspondiente al tipo de unidad.
+   * Hito 5.7: diferenciación visual explícita de Bodega vs Barcaza.
+   */
+  const TipoUnidadBadge = ({ tipoUnidad }) => {
+    if (tipoUnidad === "Bodega") {
+      return (
+        <span className="bg-blue-100 text-blue-800 text-xs font-semibold px-2 py-1 rounded mr-2">
+          Bodega
+        </span>
+      );
+    }
+    return (
+      <span className="bg-amber-100 text-amber-800 text-xs font-semibold px-2 py-1 rounded mr-2">
+        Barcaza
+      </span>
+    );
+  };
+
   // ── Render ───────────────────────────────────────────────────────────────
   if (isLoading) {
     return (
@@ -155,14 +175,23 @@ export default function CargasTable({ viajeId }) {
                   key={carga.id}
                   className="hover:bg-slate-50 transition-colors"
                 >
-                  {/* ID */}
+                  {/* ID — Hito 5.7: se enmascara visualmente para Bodegas.
+                      El valor real (carga.id) se preserva intacto en el objeto
+                      para que los modales de edición y eliminación sigan funcionando. */}
                   <td className="px-4 py-3 font-mono text-slate-700">
-                    {carga.id}
+                    {carga.tipoUnidad === "Bodega" ? (
+                      <span className="italic text-slate-300">—</span>
+                    ) : (
+                      carga.id
+                    )}
                   </td>
 
-                  {/* Descripción */}
+                  {/* Descripción — Hito 5.7: badge de TipoUnidad a la izquierda */}
                   <td className="px-4 py-3 text-slate-700">
-                    {carga.descripcionLista}
+                    <span className="flex items-center flex-wrap gap-y-1">
+                      <TipoUnidadBadge tipoUnidad={carga.tipoUnidad} />
+                      {carga.descripcionLista}
+                    </span>
                   </td>
 
                   {/* Muelle */}

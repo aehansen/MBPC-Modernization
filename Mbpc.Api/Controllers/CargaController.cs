@@ -102,7 +102,6 @@ namespace Mbpc.Api.Controllers
             if (string.IsNullOrWhiteSpace(dto.ViajeId))
                 return BadRequest(new { mensaje = "El ViajeId es requerido para el scoping. No se puede modificar una carga sin especificar el viaje al que pertenece." });
 
-            // ACÁ EL CAMBIO CLAVE: Cambiamos <= 0 por < 0
             if (dto.BarcazaId < 0)
                 return BadRequest(new { mensaje = "El BarcazaId no puede ser negativo (0 es válido para Bodegas)." });
 
@@ -136,21 +135,27 @@ namespace Mbpc.Api.Controllers
         /// <summary>
         /// Elimina una barcaza del manifiesto del viaje.
         /// CQRS: elimina en Oracle mediante SP y remueve el nodo en MongoDB.
+        /// Fix de scoping (Hito 5.8): el viajeId es obligatorio en la ruta para que MongoDB
+        /// filtre estrictamente por documento de viaje antes de remover la barcaza,
+        /// evitando que bodegas con ID "0" sean eliminadas del viaje incorrecto.
         /// </summary>
-        [HttpDelete("{id}")]
-        public async Task<ActionResult> EliminarCarga(string id)
+        [HttpDelete("viaje/{viajeId}/carga/{id}")]
+        public async Task<ActionResult> EliminarCarga(string viajeId, string id)
         {
+            if (string.IsNullOrWhiteSpace(viajeId))
+                return BadRequest(new { mensaje = "El ViajeId es requerido para el scoping. No se puede eliminar una carga sin especificar el viaje al que pertenece." });
+
             if (string.IsNullOrWhiteSpace(id))
                 return BadRequest(new { mensaje = "El ID de la carga es requerido." });
 
-            _logger.LogInformation("Eliminar carga ID='{Id}'.", id);
+            _logger.LogInformation("Eliminar carga ID='{Id}' del viaje '{ViajeId}'.", id, viajeId);
 
-            var exito = await _cargaService.EliminarCargaAsync(id);
+            var exito = await _cargaService.EliminarCargaAsync(viajeId, id);
 
             if (!exito)
-                return StatusCode(500, new { mensaje = $"Error interno al eliminar la carga con ID '{id}'." });
+                return StatusCode(500, new { mensaje = $"Error interno al eliminar la carga con ID '{id}' del viaje '{viajeId}'." });
 
-            return Ok(new { mensaje = $"Carga '{id}' eliminada correctamente del manifiesto." });
+            return Ok(new { mensaje = $"Carga '{id}' eliminada correctamente del manifiesto del viaje '{viajeId}'." });
         }
 
         // ── POST: agregar carga al viaje ──────────────────────────────────────
@@ -167,7 +172,6 @@ namespace Mbpc.Api.Controllers
             if (string.IsNullOrWhiteSpace(viajeNombreBuque))
                 return BadRequest(new { mensaje = "El nombre del buque no puede estar vacío." });
 
-            // ACÁ EL OTRO CAMBIO CLAVE: Cambiamos <= 0 por < 0
             if (nuevaCarga == null
                 || nuevaCarga.BarcazaId < 0
                 || string.IsNullOrWhiteSpace(nuevaCarga.Tipo))

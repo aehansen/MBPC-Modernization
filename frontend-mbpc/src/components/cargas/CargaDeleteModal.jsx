@@ -7,7 +7,7 @@ import axios from "axios";
  * Modal de confirmación para eliminar una carga del manifiesto.
  *
  * Props:
- *   carga     {CargaDto}  – Carga a eliminar (id, descripcionLista, etc.)
+ *   carga     {CargaDto}  – Carga a eliminar (id, viajeId, descripcionLista, etc.)
  *   onClose   {Function}  – Callback para cerrar el modal sin cambios.
  *   onSuccess {Function}  – Callback ejecutado tras una eliminación exitosa.
  */
@@ -22,11 +22,16 @@ export default function CargaDeleteModal({ carga, onClose, onSuccess }) {
     const token = localStorage.getItem("mbpc_token");
 
     try {
-      await axios.delete(`/api/carga/${encodeURIComponent(carga.id)}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
+      // Hito 5.8: La ruta ahora incluye el viajeId para el doble filtro en MongoDB.
+      // Esto previene que bodegas con id="0" sean eliminadas del viaje incorrecto.
+      await axios.delete(
+        `/api/carga/viaje/${encodeURIComponent(carga.viajeId)}/carga/${encodeURIComponent(carga.id)}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
 
       onSuccess?.();
       onClose?.();
