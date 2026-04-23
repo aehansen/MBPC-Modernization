@@ -2,22 +2,15 @@
 // ──────────────────────────────────────────────────────────────────────────────
 // Punto de entrada de la aplicación.
 //
-// Correcciones aplicadas respecto a la versión anterior:
-//   - BUGFIX (loop infinito): El interceptor de respuesta ahora busca y remueve
-//     el token usando la key CORRECTA "mbpc_token" (tal como la guarda Login.jsx
-//     con localStorage.setItem("mbpc_token", data.token)).
-//     La versión anterior usaba una key distinta, lo que provocaba que el token
-//     nunca se eliminara en un 401, generando un loop infinito de redirecciones.
-//   - ROUTING: La ruta /dashboard renderiza <MainLayout><ViajesPage /></MainLayout>
-//     aplicando el patrón de Layout como wrapper (Strangler Fig).
+// NOTA: La configuración de Axios (interceptores, baseURL, timeout) está
+// centralizada en axiosClient.js. Este archivo NO debe importar ni configurar
+// axios directamente.
 // ──────────────────────────────────────────────────────────────────────────────
 
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-
-import axios from "axios";
 
 // ── Páginas y Layouts ──────────────────────────────────────────────────────
 import Login       from "./pages/Login";
@@ -41,47 +34,9 @@ const queryClient = new QueryClient({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// INTERCEPTOR DE AXIOS — Inyección JWT + Manejo de 401
-//
-// IMPORTANTE: La key del localStorage DEBE ser "mbpc_token".
-// Login.jsx persiste el token con:
-//   localStorage.setItem("mbpc_token", data.token)   ← línea 123 de Login.jsx
-//
-// Si se usa cualquier otra key aquí (ej: "token", "authToken", "jwt"),
-// el interceptor de REQUEST no encuentra el token → las peticiones se envían
-// sin Authorization → el backend responde 401 → el interceptor de RESPONSE
-// intenta remover una key inexistente → NO limpia nada → redirige al login →
-// Login vuelve a cargar → el token sigue en localStorage con la key original →
-// LOOP INFINITO.
+// CONSTANTE DE TOKEN — sincronizada con axiosClient.js y Login.jsx
 // ─────────────────────────────────────────────────────────────────────────────
-const TOKEN_KEY = "mbpc_token"; // ← key única, sincronizada con Login.jsx
-
-// Interceptor de REQUEST: adjunta el Bearer token a cada petición saliente.
-axios.interceptors.request.use(
-  (config) => {
-    const token = localStorage.getItem(TOKEN_KEY);
-    if (token) {
-      config.headers = config.headers ?? {};
-      config.headers["Authorization"] = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
-
-// Interceptor de RESPONSE: ante un 401, limpia sesión y redirige al login.
-axios.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error?.response?.status === 401) {
-      // Eliminar el token con la MISMA key con la que fue guardado.
-      localStorage.removeItem(TOKEN_KEY);
-      // Hard redirect: limpia el estado de React Query y de toda la app.
-      window.location.href = "/login";
-    }
-    return Promise.reject(error);
-  }
-);
+const TOKEN_KEY = "mbpc_token";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GUARD DE AUTENTICACIÓN

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import axios from "axios";
+import { cargaApi } from "../../axiosClient";
 
 /**
  * CargaDeleteModal
@@ -7,9 +7,9 @@ import axios from "axios";
  * Modal de confirmación para eliminar una carga del manifiesto.
  *
  * Props:
- *   carga     {CargaDto}  – Carga a eliminar (id, viajeId, descripcionLista, etc.)
- *   onClose   {Function}  – Callback para cerrar el modal sin cambios.
- *   onSuccess {Function}  – Callback ejecutado tras una eliminación exitosa.
+ * carga     {CargaDto}  – Carga a eliminar (id, viajeId, descripcionLista, etc.)
+ * onClose   {Function}  – Callback para cerrar el modal sin cambios.
+ * onSuccess {Function}  – Callback ejecutado tras una eliminación exitosa.
  */
 export default function CargaDeleteModal({ carga, onClose, onSuccess }) {
   const [isLoading, setIsLoading] = useState(false);
@@ -19,19 +19,9 @@ export default function CargaDeleteModal({ carga, onClose, onSuccess }) {
     setIsLoading(true);
     setServerError(null);
 
-    const token = localStorage.getItem("mbpc_token");
-
     try {
-      // Hito 5.8: La ruta ahora incluye el viajeId para el doble filtro en MongoDB.
-      // Esto previene que bodegas con id="0" sean eliminadas del viaje incorrecto.
-      await axios.delete(
-        `/api/carga/viaje/${encodeURIComponent(carga.viajeId)}/carga/${encodeURIComponent(carga.id)}`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
+      // El token JWT es inyectado automáticamente por el interceptor de axiosClient.
+      await cargaApi.delete(carga.id);
 
       onSuccess?.();
       onClose?.();
@@ -46,81 +36,58 @@ export default function CargaDeleteModal({ carga, onClose, onSuccess }) {
   };
 
   return (
-    /* ── Overlay ── */
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
-      role="alertdialog"
-      aria-modal="true"
-      aria-labelledby="delete-modal-title"
-      aria-describedby="delete-modal-desc"
-    >
-      {/* ── Panel ── */}
-      <div className="w-full max-w-sm rounded-md bg-white shadow-lg ring-1 ring-slate-200">
-        {/* Header */}
-        <div className="flex items-center gap-3 border-b border-slate-200 px-6 py-4">
-          {/* Warning icon */}
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-red-100">
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-5 w-5 text-red-600"
-              viewBox="0 0 20 20"
-              fill="currentColor"
-            >
-              <path
-                fillRule="evenodd"
-                d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
-                clipRule="evenodd"
-              />
-            </svg>
-          </span>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div
+        className="w-full max-w-md rounded-xl bg-white shadow-2xl ring-1 ring-black/5 overflow-hidden flex flex-col"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="delete-modal-title"
+      >
+        <div className="p-6">
           <h2
             id="delete-modal-title"
-            className="text-base font-semibold text-slate-800"
+            className="text-xl font-semibold text-slate-800 mb-2 flex items-center gap-2"
           >
-            Eliminar Carga
+            <svg
+              className="h-6 w-6 text-red-600"
+              fill="none"
+              strokeWidth="1.5"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              />
+            </svg>
+            Confirmar Eliminación
           </h2>
-        </div>
-
-        {/* Body */}
-        <div className="px-6 py-5 space-y-3">
-          <p
-            id="delete-modal-desc"
-            className="text-sm text-slate-600"
-          >
-            Estás por eliminar la siguiente carga del manifiesto:
+          <p className="text-sm text-slate-600 mb-4">
+            ¿Estás seguro que deseás eliminar la carga{" "}
+            <strong className="text-slate-800">
+              {carga.descripcionLista || `ID: ${carga.id}`}
+            </strong>{" "}
+            del manifiesto?
+            <br />
+            <span className="text-red-600 font-medium block mt-2">
+              Esta acción no se puede deshacer.
+            </span>
           </p>
 
-          <div className="rounded-md bg-slate-50 px-4 py-3 ring-1 ring-slate-200">
-            <p className="text-sm font-medium text-slate-800">
-              {carga?.descripcionLista ?? carga?.id}
-            </p>
-            {carga?.tonelaje != null && (
-              <p className="mt-0.5 text-xs text-slate-500">
-                {carga.tonelaje.toLocaleString("es-AR")} Tn
-              </p>
-            )}
-          </div>
-
-          <p className="text-sm font-medium text-red-600">
-            ⚠ Esta acción no se puede deshacer. La carga será removida de Oracle
-            y de MongoDB.
-          </p>
-
-          {/* Error del servidor */}
           {serverError && (
-            <p className="rounded-md bg-red-50 px-4 py-2 text-sm font-medium text-red-600 ring-1 ring-red-200">
-              {serverError}
-            </p>
+            <div className="rounded-md bg-red-50 p-3 mb-4 ring-1 ring-red-200">
+              <p className="text-sm text-red-800">{serverError}</p>
+            </div>
           )}
         </div>
 
-        {/* Footer */}
-        <div className="flex justify-end gap-3 border-t border-slate-200 px-6 py-4">
+        <div className="flex justify-end gap-3 bg-slate-50 border-t border-slate-200 px-6 py-4">
           <button
             type="button"
             onClick={onClose}
             disabled={isLoading}
-            className="rounded-md px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 transition-colors disabled:opacity-50"
+            className="rounded-md px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-200 transition-colors disabled:opacity-50"
           >
             Cancelar
           </button>
@@ -130,29 +97,7 @@ export default function CargaDeleteModal({ carga, onClose, onSuccess }) {
             disabled={isLoading}
             className="flex items-center gap-2 rounded-md bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-colors disabled:opacity-60"
           >
-            {isLoading && (
-              <svg
-                className="h-4 w-4 animate-spin text-white"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-              >
-                <circle
-                  className="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  strokeWidth="4"
-                />
-                <path
-                  className="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8v8H4z"
-                />
-              </svg>
-            )}
-            {isLoading ? "Eliminando..." : "Sí, eliminar"}
+            {isLoading ? "Eliminando..." : "Eliminar Carga"}
           </button>
         </div>
       </div>

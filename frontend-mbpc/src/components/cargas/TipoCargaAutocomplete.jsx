@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import axios from "axios";
+import { tipoCargaApi } from "../../axiosClient";
 
 /**
  * TipoCargaAutocomplete
@@ -20,16 +20,16 @@ export default function TipoCargaAutocomplete({
   label = "Tipo de Carga",
   disabled = false,
 }) {
-  const [inputValue, setInputValue]   = useState("");
-  const [opciones, setOpciones]       = useState([]);
-  const [cargando, setCargando]       = useState(false);
-  const [abierto, setAbierto]         = useState(false);
-  const [itemActivo, setItemActivo]   = useState(-1);
+  const [inputValue, setInputValue] = useState("");
+  const [opciones, setOpciones] = useState([]);
+  const [cargando, setCargando] = useState(false);
+  const [abierto, setAbierto] = useState(false);
+  const [itemActivo, setItemActivo] = useState(-1);
 
   const debounceTimer = useRef(null);
-  const wrapperRef    = useRef(null);
-  const inputRef      = useRef(null);
-  const listRef       = useRef(null);
+  const wrapperRef = useRef(null);
+  const inputRef = useRef(null);
+  const listRef = useRef(null);
 
   // ── Cierra dropdown al hacer clic fuera ──────────────────────────────────
   useEffect(() => {
@@ -57,11 +57,7 @@ export default function TipoCargaAutocomplete({
 
     setCargando(true);
     try {
-      const token = localStorage.getItem("mbpc_token");
-      const { data } = await axios.get("/api/tipocarga/autocomplete", {
-        params: { query: query.trim() },
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const { data } = await tipoCargaApi.autocomplete(query.trim());
       setOpciones(Array.isArray(data) ? data : []);
       setAbierto(true);
       setItemActivo(-1);

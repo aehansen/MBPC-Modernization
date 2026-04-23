@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
-import axios from "axios";
+import { cargaApi } from "../../axiosClient";
 import TipoCargaAutocomplete from "./TipoCargaAutocomplete";
 
 /**
@@ -48,26 +48,16 @@ export default function CargaEditModal({ carga, onClose, onSuccess }) {
       return;
     }
 
-    const token = localStorage.getItem("mbpc_token");
-
     try {
-      await axios.put(
-        `/api/carga/${encodeURIComponent(carga.id)}`,
-        {
-          // Si es bodega forzamos 0, si es barcaza mandamos el número ingresado
-          viajeId: carga.viajeId,
-          barcazaId: esBodega ? 0 : Number(data.barcazaId),
-          tipo: data.tipo,
-          tonelaje: parseFloat(data.tonelaje),
-          mercaderiaId: mercaderiaSeleccionada.oracleId,
-        },
-        {
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
+      // El token JWT es inyectado automáticamente por el interceptor de axiosClient.
+      await cargaApi.update(carga.id, {
+        // Si es bodega forzamos 0, si es barcaza mandamos el número ingresado
+        viajeId: carga.viajeId,
+        barcazaId: esBodega ? 0 : Number(data.barcazaId),
+        tipo: data.tipo,
+        tonelaje: parseFloat(data.tonelaje),
+        mercaderiaId: mercaderiaSeleccionada.oracleId,
+      });
 
       onSuccess?.();
       onClose?.();

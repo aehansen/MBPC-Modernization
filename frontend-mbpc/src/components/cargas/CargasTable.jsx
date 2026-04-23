@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import axios from "axios";
+import { cargaApi } from "../../axiosClient";
 import CargaEditModal from "./CargaEditModal";
 import CargaDeleteModal from "./CargaDeleteModal";
 
@@ -29,13 +29,9 @@ export default function CargasTable({ viajeId }) {
     setIsLoading(true);
     setFetchError(null);
 
-    const token = localStorage.getItem("mbpc_token");
-
     try {
-      const { data } = await axios.get(
-        `/api/carga/viaje/${encodeURIComponent(viajeId)}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      // El token JWT es inyectado automáticamente por el interceptor de axiosClient.
+      const { data } = await cargaApi.getByViaje(viajeId);
       setCargas(data);
     } catch (err) {
       setFetchError(
@@ -213,13 +209,12 @@ export default function CargasTable({ viajeId }) {
                   {/* Nivel de Riesgo */}
                   <td className="px-4 py-3">
                     <span
-                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                        carga.nivelRiesgo === "Alto"
+                      className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${carga.nivelRiesgo === "Alto"
                           ? "bg-red-100 text-red-700"
                           : carga.nivelRiesgo === "Medio"
-                          ? "bg-amber-100 text-amber-700"
-                          : "bg-green-100 text-green-700"
-                      }`}
+                            ? "bg-amber-100 text-amber-700"
+                            : "bg-green-100 text-green-700"
+                        }`}
                     >
                       {carga.nivelRiesgo}
                     </span>

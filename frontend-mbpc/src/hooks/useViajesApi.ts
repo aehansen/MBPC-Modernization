@@ -1,9 +1,7 @@
 // src/hooks/useViajesApi.ts
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import axios from 'axios';
+import apiClient, { viajesApi } from '../axiosClient';
 import type { ViajeDto, ViajeHistoricoDto } from '../types/viajes.types';
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '';
 
 // ─── DTO de filtros para búsqueda histórica ───────────────────────────────────
 
@@ -30,7 +28,7 @@ export const viajesKeys = {
 // ─── GET paginado ─────────────────────────────────────────────────────────────
 
 async function fetchViajes(page: number, size: number, nombre: string): Promise<ViajeDto[]> {
-  const { data } = await axios.get<ViajeDto[]>(`${API_BASE}/api/viajes`, {
+  const { data } = await apiClient.get<ViajeDto[]>('/viajes', {
     params: { nombre: nombre || undefined, pagina: page, tamanio: size },
   });
   return data;
@@ -53,10 +51,7 @@ async function fetchViajesHistoricos(
     Object.entries(filtros).filter(([, v]) => v !== undefined && v !== '')
   );
 
-  const { data } = await axios.get<ViajeHistoricoDto[]>(
-    `${API_BASE}/api/viajes/historico`,
-    { params }
-  );
+  const { data } = await apiClient.get<ViajeHistoricoDto[]>('/viajes/historico', { params });
   return data;
 }
 
@@ -71,19 +66,19 @@ export function useViajesHistoricos(filtros: FiltroHistoricoDto) {
 // ─── Mutaciones de estado ─────────────────────────────────────────────────────
 
 async function zarparViaje(id: string): Promise<void> {
-  await axios.put(`${API_BASE}/api/viajes/${id}/zarpar`);
+  await viajesApi.zarpar(id);
 }
 
 async function amarrarViaje(id: string): Promise<void> {
-  await axios.put(`${API_BASE}/api/viajes/${id}/amarrar`);
+  await viajesApi.amarrar(id);
 }
 
 async function fondearViaje(id: string): Promise<void> {
-  await axios.put(`${API_BASE}/api/viajes/${id}/fondear`);
+  await viajesApi.fondear(id);
 }
 
 async function reanudarViaje(id: string): Promise<void> {
-  await axios.put(`${API_BASE}/api/viajes/${id}/reanudar`);
+  await viajesApi.reanudar(id);
 }
 
 function useInvalidateViajes() {

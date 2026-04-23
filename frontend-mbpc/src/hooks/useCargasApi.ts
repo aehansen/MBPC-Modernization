@@ -1,5 +1,6 @@
+// src/hooks/useCargasApi.ts
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import axios from 'axios';
+import apiClient, { cargaApi } from '../axiosClient';
 import type {
   CargaDto,
   NuevaCargaRequest,
@@ -8,8 +9,6 @@ import type {
   CargarCargaParams,
   DescargarCargaParams,
 } from '../types/cargas.types';
-
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? '';
 
 // ─── Keys ─────────────────────────────────────────────────────────────────────
 
@@ -21,9 +20,7 @@ export const cargasKeys = {
 // ─── GET cargas de un viaje ───────────────────────────────────────────────────
 
 async function fetchCargas(viajeId: string): Promise<CargaDto[]> {
-  const { data } = await axios.get<CargaDto[]>(
-    `${API_BASE}/api/carga/viaje/${viajeId}`
-  );
+  const { data } = await cargaApi.getByViaje(viajeId);
   return data;
 }
 
@@ -43,8 +40,8 @@ interface NuevaCargaArgs {
 }
 
 async function crearCarga({ nombreBuque, body }: NuevaCargaArgs): Promise<CargaDto> {
-  const { data } = await axios.post<CargaDto>(
-    `${API_BASE}/api/carga/viaje/${nombreBuque}`,
+  const { data } = await apiClient.post<CargaDto>(
+    `/carga/viaje/${nombreBuque}`,
     body
   );
   return data;
@@ -61,8 +58,8 @@ export function useCrearCarga(viajeId: string) {
 // ─── PUT amarrar carga ────────────────────────────────────────────────────────
 
 async function amarrarCarga({ id, nuevoMuelle }: AmarrarCargaParams): Promise<CargaDto> {
-  const { data } = await axios.put<CargaDto>(
-    `${API_BASE}/api/carga/${id}/amarrar`,
+  const { data } = await apiClient.put<CargaDto>(
+    `/carga/${id}/amarrar`,
     null,
     { params: { nuevoMuelle } }
   );
@@ -80,8 +77,8 @@ export function useAmarrarCarga(viajeId: string) {
 // ─── PUT fondear carga ────────────────────────────────────────────────────────
 
 async function fondearCarga({ id, zonaFondeo }: FondearCargaParams): Promise<CargaDto> {
-  const { data } = await axios.put<CargaDto>(
-    `${API_BASE}/api/carga/${id}/fondear`,
+  const { data } = await apiClient.put<CargaDto>(
+    `/carga/${id}/fondear`,
     null,
     { params: { zonaFondeo } }
   );
@@ -99,8 +96,8 @@ export function useFondearCarga(viajeId: string) {
 // ─── PUT cargar toneladas ─────────────────────────────────────────────────────
 
 async function cargarToneladas({ id, toneladas }: CargarCargaParams): Promise<CargaDto> {
-  const { data } = await axios.put<CargaDto>(
-    `${API_BASE}/api/carga/${id}/cargar`,
+  const { data } = await apiClient.put<CargaDto>(
+    `/carga/${id}/cargar`,
     null,
     { params: { toneladas } }
   );
@@ -118,8 +115,8 @@ export function useCargarToneladas(viajeId: string) {
 // ─── PUT descargar toneladas ──────────────────────────────────────────────────
 
 async function descargarToneladas({ id, toneladas }: DescargarCargaParams): Promise<CargaDto> {
-  const { data } = await axios.put<CargaDto>(
-    `${API_BASE}/api/carga/${id}/descargar`,
+  const { data } = await apiClient.put<CargaDto>(
+    `/carga/${id}/descargar`,
     null,
     { params: { toneladas } }
   );
