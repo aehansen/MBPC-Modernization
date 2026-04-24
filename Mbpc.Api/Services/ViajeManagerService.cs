@@ -1,3 +1,4 @@
+// Archivo: ViajeManagerService.cs
 using Dapper;
 using Oracle.ManagedDataAccess.Client;
 using Microsoft.Extensions.Options;
@@ -8,6 +9,7 @@ using Mbpc.Api.Models.Config;
 using Mbpc.Api.Models.Mongo;
 using Mbpc.Api.Models;
 using Mbpc.Api.DTOs;
+using Mbpc.Api.Services.Auth; // <-- Usamos la nueva abstracción
 using Polly;
 using Polly.Retry;
 using System.Data;
@@ -25,7 +27,7 @@ namespace Mbpc.Api.Services
         private readonly ILogger<ViajeManagerService>          _logger;
         private readonly IWebHostEnvironment                   _env;
         private readonly IDistributedCache                     _cache;
-        private readonly IHttpContextAccessor                  _httpContextAccessor;
+        private readonly ICosteraUserContext                   _costeraUserContext; // <-- Abstracción Inyectada
 
         // ── POLÍTICAS POLLY ──────────────────────────────────────────────────
         // Retry para Oracle: 3 intentos con espera exponencial (2s, 4s, 8s)
@@ -59,7 +61,7 @@ namespace Mbpc.Api.Services
         //  ───────────────┼───────────────┼────────────────┼────────────────┼────────────────
         //  Amarrado       │      ✔        │       ✘        │       ✘        │       ✘
         //  Navegando      │      ✘        │       ✔        │       ✔        │       ✘
-        //  Fondeado       │      ✘ *      │       ✘        │       ✘        │       ✔
+        //  Fondeado       │      ✘ * │       ✘        │       ✘        │       ✔
         //  Reanudado      │      ✔        │       ✔        │       ✔        │       ✘
         //
         //  * Fondeado NO puede Zarpar directamente: primero debe Reanudar.
@@ -86,7 +88,7 @@ namespace Mbpc.Api.Services
             ILogger<ViajeManagerService>  logger,
             IWebHostEnvironment           env,
             IDistributedCache             cache,
-            IHttpContextAccessor          httpContextAccessor)
+            ICosteraUserContext           costeraUserContext) // <-- Modificado el constructor
         {
             var database = mongoClient.GetDatabase(mongoSettings.Value.DatabaseName);
 
@@ -100,49 +102,13 @@ namespace Mbpc.Api.Services
                 mongoSettings.Value.TracklogCollectionName);
 
             _oracleConnectionString = oracleSettings.Value.ConnectionString;
-            _logger              = logger;
-            _env                 = env;
-            _cache               = cache;
-            _httpContextAccessor = httpContextAccessor;
+            _logger                 = logger;
+            _env                    = env;
+            _cache                  = cache;
+            _costeraUserContext     = costeraUserContext; // <-- Asignación de la abstracción
         }
 
         // ── HELPER DE IDENTIDAD ──────────────────────────────────────────────
-
-        /// <summary>
-        /// Lee el Claim "CosteraId" del JWT del usuario autenticado y lo retorna
-        /// como entero.
-        ///   0  →  Super Admin: acceso a todas las costeras (sin filtro).
-        ///  > 0  →  Operador: acceso restringido a su propia costera.
-        ///  -1   →  Error de lectura / Claim ausente (el controller habrá devuelto Forbid
-        ///          antes de llegar aquí, pero se retorna -1 como guardia defensiva).
-        /// </summary>
-        private int GetCurrentCosteraId()
-        {
-            var user = _httpContextAccessor.HttpContext?.User;
-
-            if (user is null)
-            {
-                _logger.LogWarning("GetCurrentCosteraId: HttpContext o User es null.");
-                return -1;
-            }
-
-            var claimValue = user.FindFirstValue("CosteraId");
-
-            if (string.IsNullOrWhiteSpace(claimValue))
-            {
-                _logger.LogWarning("GetCurrentCosteraId: Claim 'CosteraId' ausente en el token.");
-                return -1;
-            }
-
-            if (!int.TryParse(claimValue, out var costeraId))
-            {
-                _logger.LogWarning(
-                    "GetCurrentCosteraId: Claim 'CosteraId' con valor no numérico: '{Valor}'.", claimValue);
-                return -1;
-            }
-
-            return costeraId;
-        }
 
         /// <summary>
         /// Construye el FilterDefinition de CosteraId según la identidad del usuario:
@@ -171,7 +137,7 @@ namespace Mbpc.Api.Services
         // ── LECTURA (MongoDB) ────────────────────────────────────────────────
 
         /// <summary>
-        /// EJE 3: El CosteraId se obtiene del contexto HTTP via GetCurrentCosteraId().
+        /// EJE 3: El CosteraId se obtiene del contexto a través de la abstracción ICosteraUserContext.
         /// Si es 0 (Admin), se usa Filter.Empty. Si es mayor a 0, se filtra estrictamente.
         ///
         /// EJE FILTRADO POR NOMBRE: Si se proporciona <paramref name="nombre"/>, se combina
@@ -181,7 +147,7 @@ namespace Mbpc.Api.Services
         /// </summary>
         public async Task<List<ViajePosicionMongo>> GetViajesAsync(string? nombre = null, int pagina = 1, int tamanio = 50)
         {
-            var costeraId = GetCurrentCosteraId();
+            var costeraId = _costeraUserContext.GetCurrentCosteraId(); // <-- Llamada directa a la abstracción
             var skip      = (pagina - 1) * tamanio;
             var filtro    = BuildFiltroCostera(costeraId);
 
@@ -208,7 +174,7 @@ namespace Mbpc.Api.Services
         /// </summary>
         public async Task<ViajePosicionMongo?> GetViajeByMmsiAsync(string mmsi)
         {
-            var costeraId     = GetCurrentCosteraId();
+            var costeraId     = _costeraUserContext.GetCurrentCosteraId(); // <-- Llamada directa a la abstracción
             var filtroMmsi    = Builders<ViajePosicionMongo>.Filter.Eq(v => v.Mmsi, mmsi);
             var filtroCostera = BuildFiltroCostera(costeraId);
             var filtroFinal   = Builders<ViajePosicionMongo>.Filter.And(filtroMmsi, filtroCostera);
@@ -252,7 +218,7 @@ namespace Mbpc.Api.Services
                 : Builders<ViajeDetalleMongo>.Filter.Eq(v => v.VesselName, viajePosicion.VesselName);
 
             // 3. Aplicar aislamiento Multitenant (EJE 3).
-            int costeraId     = GetCurrentCosteraId();
+            int costeraId     = _costeraUserContext.GetCurrentCosteraId(); // <-- Llamada directa a la abstracción
             var filtroCostera = BuildFiltroCosteraDetalle(costeraId);
             var filtroFinal   = Builders<ViajeDetalleMongo>.Filter.And(filtroDetalleBase, filtroCostera);
 
@@ -277,7 +243,7 @@ namespace Mbpc.Api.Services
         /// </summary>
         public async Task<List<BarcoPuertoDto>> GetBarcosEnPuertoAsync()
         {
-            var costeraId = GetCurrentCosteraId();
+            var costeraId = _costeraUserContext.GetCurrentCosteraId(); // <-- Llamada directa a la abstracción
 
             _logger.LogInformation(
                 "Consultando barcos en puerto — CosteraId: {CosteraId} ({Rol}).",
@@ -383,7 +349,7 @@ namespace Mbpc.Api.Services
         /// </summary>
         public async Task<List<MapaViajeDto>> GetMapaViajesAsync(string? mmsi = null, string? nombreBuque = null)
         {
-            var costeraId = GetCurrentCosteraId();
+            var costeraId = _costeraUserContext.GetCurrentCosteraId(); // <-- Llamada directa a la abstracción
             List<MapaViajeDto> listaCompleta;
 
             var cacheKey = CacheKeyMapaViajes(costeraId);
@@ -487,12 +453,12 @@ namespace Mbpc.Api.Services
         }
 
         /// <summary>
-        /// EJE 3: El costeraId se obtiene del contexto HTTP y se pasa al stored
+        /// EJE 3: El costeraId se obtiene del contexto a través de la abstracción y se pasa al stored
         /// procedure de Oracle como p_COSTERA_ID.
         /// </summary>
         public async Task<List<ViajeHistoricoDto>> GetHistoricoAsync(FiltroHistoricoDto filtro)
         {
-            var costeraId = GetCurrentCosteraId();
+            var costeraId = _costeraUserContext.GetCurrentCosteraId(); // <-- Llamada directa a la abstracción
 
             try
             {

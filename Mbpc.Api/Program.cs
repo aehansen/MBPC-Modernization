@@ -1,9 +1,11 @@
+// Archivo: Program.cs
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using MongoDB.Driver;
 using Mbpc.Api.Models.Config;
 using Mbpc.Api.Services;
+using Mbpc.Api.Services.Auth; // <-- Nuevo using
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization; // <-- ¡Este era el using que faltaba!
@@ -102,8 +104,9 @@ builder.Services.AddScoped<ICargaService, CargaManagerService>();
 builder.Services.AddScoped<IConvoyManagerService, ConvoyManagerService>();
 builder.Services.AddScoped<IBuqueService, BuqueManagerService>();
 
-// ── IHttpContextAccessor ─────────────────────────────────────────────────────
+// ── IHttpContextAccessor y Dependencias transversales ────────────────────────
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<ICosteraUserContext, HttpCosteraUserContext>(); // <-- Implementación inyectada aquí
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
 builder.Services.AddCors(options =>
