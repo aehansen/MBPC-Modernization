@@ -10,6 +10,7 @@ using Mbpc.Api.Models.Mongo;
 using Mbpc.Api.Models;
 using Mbpc.Api.DTOs;
 using Mbpc.Api.Services.Auth; // <-- Usamos la nueva abstracción
+using Microsoft.Extensions.Hosting;
 using Polly;
 using Polly.Retry;
 using System.Data;
@@ -25,9 +26,9 @@ namespace Mbpc.Api.Services
         private readonly IMongoCollection<ViajeTracklogMongo>  _tracklogCollection;
         private readonly string                                _oracleConnectionString;
         private readonly ILogger<ViajeManagerService>          _logger;
-        private readonly IWebHostEnvironment                   _env;
+        private readonly IHostEnvironment                      _env; // <-- CAMBIADO A IHostEnvironment
         private readonly IDistributedCache                     _cache;
-        private readonly ICosteraUserContext                   _costeraUserContext; // <-- Abstracción Inyectada
+        private readonly ICosteraUserContext                   _costeraUserContext;
 
         // ── POLÍTICAS POLLY ──────────────────────────────────────────────────
         // Retry para Oracle: 3 intentos con espera exponencial (2s, 4s, 8s)
@@ -86,9 +87,9 @@ namespace Mbpc.Api.Services
             IOptions<MongoDbSettings>     mongoSettings,
             IOptions<OracleDbSettings>    oracleSettings,
             ILogger<ViajeManagerService>  logger,
-            IWebHostEnvironment           env,
+            IHostEnvironment              env, // <-- CAMBIADO A IHostEnvironment
             IDistributedCache             cache,
-            ICosteraUserContext           costeraUserContext) // <-- Modificado el constructor
+            ICosteraUserContext           costeraUserContext) 
         {
             var database = mongoClient.GetDatabase(mongoSettings.Value.DatabaseName);
 
@@ -105,7 +106,7 @@ namespace Mbpc.Api.Services
             _logger                 = logger;
             _env                    = env;
             _cache                  = cache;
-            _costeraUserContext     = costeraUserContext; // <-- Asignación de la abstracción
+            _costeraUserContext     = costeraUserContext; 
         }
 
         // ── HELPER DE IDENTIDAD ──────────────────────────────────────────────

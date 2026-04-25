@@ -11,6 +11,9 @@ using Mbpc.McpServer.Services;
 
 var builder = Host.CreateApplicationBuilder(args);
 
+builder.Configuration.SetBasePath(AppContext.BaseDirectory);
+builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true);
+
 // 1. Configuraciones desde appsettings.json
 builder.Services.Configure<MongoDbSettings>(builder.Configuration.GetSection("MongoDbSettings"));
 builder.Services.Configure<OracleDbSettings>(builder.Configuration.GetSection("OracleDbSettings"));

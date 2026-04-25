@@ -3,46 +3,39 @@ using System.ComponentModel;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
-using ModelContextProtocol.Server; // ¡Este es el namespace oficial de Microsoft!
+using Microsoft.Extensions.DependencyInjection; // <-- ¡Faltaba este using!
+using ModelContextProtocol.Server;
 using Mbpc.Api.Services;
 
 namespace Mbpc.McpServer.Tools;
 
 // Le avisa al SDK de Microsoft que esta clase contiene herramientas MCP
-[McpServerToolType] 
+[McpServerToolType]
 public class ViajeTools
 {
-    private readonly IViajeService _viajeService;
-    private readonly ILogger<ViajeTools> _logger;
+    private readonly IServiceProvider _sp;
 
-    // El SDK de MCP se encarga de crear el Scope e inyectarnos el IViajeService automáticamente
-    public ViajeTools(IViajeService viajeService, ILogger<ViajeTools> logger)
+    // Inyectamos solo el proveedor maestro, esto nunca falla.
+    public ViajeTools(IServiceProvider sp)
     {
-        _viajeService = viajeService;
-        _logger = logger;
+        _sp = sp;
     }
 
-    // Le avisa al SDK que este método es una Tool que debe exponerse al LLM
-    [McpServerTool] 
+    [McpServerTool]
     [Description("Obtiene la lista de todos los buques que están actualmente en viaje o amarrados en jurisdicción de Prefectura.")]
     public async Task<string> ObtenerViajesActivos()
     {
-        _logger.LogInformation("La IA solicitó ejecutar: 'obtener_viajes_activos'");
-
         try
         {
-            var viajes = await _viajeService.GetViajesAsync();
-
-            return JsonSerializer.Serialize(viajes, new JsonSerializerOptions
-            {
-                WriteIndented = true,
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-            });
+            // Instanciamos el servicio ACÁ ADENTRO. Si algo explota (Oracle, Mongo, config nula), lo atrapamos.
+            var viajeService = _sp.GetRequiredService<IViajeService>();
+            
+            var viajes = await viajeService.GetViajesAsync();
+            return System.Text.Json.JsonSerializer.Serialize(viajes);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Fallo en la Tool MCP al consultar viajes.");
-            return JsonSerializer.Serialize(new { status = "error", mensaje = ex.Message });
+            return $"ERROR_CRITICO_VISTO_POR_ARQUITECTO: {ex.Message} | CAUSA INTERNA: {ex.InnerException?.Message}";
         }
     }
 }

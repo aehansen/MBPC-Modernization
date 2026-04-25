@@ -11,20 +11,27 @@ import { cargaApi } from "../../axiosClient";
  * onClose   {Function}  – Callback para cerrar el modal sin cambios.
  * onSuccess {Function}  – Callback ejecutado tras una eliminación exitosa.
  */
-export default function CargaDeleteModal({ carga, onClose, onSuccess }) {
+export default function CargaDeleteModal({ isOpen, onClose, carga, viajeId, onSuccess }) {
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState(null);
 
   const handleConfirm = async () => {
     setIsLoading(true);
     setServerError(null);
-
     try {
-      // El token JWT es inyectado automáticamente por el interceptor de axiosClient.
-      await cargaApi.delete(carga.id);
+        const idViajeReal = viajeId || carga?.viajeId;
 
-      onSuccess?.();
-      onClose?.();
+      // 2. Si sigue sin existir, frenamos todo y avisamos en la UI
+      if (!idViajeReal) {
+        setServerError("Falta el ID del viaje. El componente padre no está pasando el dato correctamente.");
+        setIsLoading(false);
+        return;
+      }
+
+      // 3. Enviamos los datos reales y validados
+      await cargaApi.delete(idViajeReal, carga.id);
+        onSuccess?.();
+        onClose?.();
     } catch (err) {
       const mensaje =
         err.response?.data?.mensaje ??

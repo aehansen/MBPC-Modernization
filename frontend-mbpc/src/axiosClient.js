@@ -67,7 +67,7 @@ export const mapaApi = {
 export const cargaApi = {
   getByViaje: (viajeId) => apiClient.get(`/carga/viaje/${encodeURIComponent(viajeId)}`),
   update: (cargaId, payload) => apiClient.put(`/carga/${encodeURIComponent(cargaId)}`, payload),
-  delete: (cargaId) => apiClient.delete(`/carga/${encodeURIComponent(cargaId)}`),
+  delete: (viajeId, cargaId) => apiClient.delete(`/carga/viaje/${encodeURIComponent(viajeId)}/carga/${encodeURIComponent(cargaId)}`)
 };
 
 export const tipoCargaApi = {

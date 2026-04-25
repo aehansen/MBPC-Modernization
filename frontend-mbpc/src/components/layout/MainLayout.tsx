@@ -1,6 +1,7 @@
 import React from "react";
 import { Toaster } from "react-hot-toast";
 import Navbar from "../Navbar";
+import ChatFloatingWindow from "../chat/ChatFloatingWindow"; // <-- NUEVA IMPORTACIÓN
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TIPOS
@@ -44,9 +45,9 @@ export default function MainLayout({ children }: MainLayoutProps) {
       <footer className="border-t mt-12 p-6 bg-white text-center text-xs text-gray-400">
         <p>
           &copy; {new Date().getFullYear()} Prefectura Naval Argentina - Dirección de Informática y Comunicaciones.
-          <br /> Divisón Sistemas de Información Geográfica
+          <br /> División Sistemas de Información Geográfica
         </p>
-        <p className="mt-1">
+        <p className="mt-1 font-medium">
           MBPC Geo H2
         </p>
       </footer>
@@ -56,6 +57,16 @@ export default function MainLayout({ children }: MainLayoutProps) {
           Se monta aquí en el layout para que sea accesible globalmente
           sin importar qué página hija esté activa.
       ─────────────────────────────────────────────────────────────────────── */}
+
+      {/* ── ASISTENTE IA FLOTANTE ───────────────────────────────────────────
+          Renderizado al final del árbol para garantizar z-index correcto
+          sobre todos los elementos del layout. El componente gestiona su
+          propio estado de visibilidad internamente.
+      ─────────────────────────────────────────────────────────────────────── */}
+      <ChatFloatingWindow 
+        botName="Asistente IA MBPC"
+        welcomeMessage="Bienvenido al sistema MBPC Geo H2. ¿En qué puedo ayudarte hoy?"
+      />
       
     </div>
   );
