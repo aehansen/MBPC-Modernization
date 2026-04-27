@@ -1,7 +1,13 @@
-[bin/]
-[obj/]
-[node_modules/]
-[.vs/]
-[*.user]
-[.env]
-[dist/]
+# .NET
+bin/
+obj/
+.vs/
+*.user
+
+# Node / React
+node_modules/
+dist/
+.env
+
+# Secrets (¡Fundamental!)
+appsettings.Development.json

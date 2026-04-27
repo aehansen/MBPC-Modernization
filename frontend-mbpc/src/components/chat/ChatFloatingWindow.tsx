@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CONFIGURACIÓN DE API
-// Usamos import.meta.env para Vite. 
+// Usamos import.meta.env para Vite.
 // Forzamos 127.0.0.1 en vez de localhost para evitar problemas de resolución IPv6 con Kestrel.
 // ─────────────────────────────────────────────────────────────────────────────
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:5009";
@@ -23,9 +23,15 @@ interface ChatFloatingWindowProps {
   welcomeMessage?: string;
 }
 
+interface ChatRequestBody {
+  message: string;
+  conversationId?: string;
+}
+
 interface ChatApiResponse {
   reply: string;
   isSuccess: boolean;
+  conversationId?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -69,6 +75,10 @@ export default function ChatFloatingWindow({
   const [isOpen, setIsOpen] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+
+  // ── NUEVO: Estado para mantener el ID de conversación entre turnos ──────────
+  const [conversationId, setConversationId] = useState<string | undefined>(undefined);
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "welcome",
@@ -118,14 +128,23 @@ export default function ChatFloatingWindow({
     setInputValue("");
     setIsTyping(true);
 
+    const requestBody: ChatRequestBody = {
+      message: userText,
+      ...(conversationId !== undefined && { conversationId }),
+    };
+
     try {
+      // ── SOLUCIÓN: Obtenemos el token del localStorage (como hace apiClient)
+      const token = localStorage.getItem('mbpc_token'); // <-- Asegurate de que esta sea la key correcta que usás en tu app
+
       const response = await fetch(CHAT_ENDPOINT, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${localStorage.getItem("token")}`
+          // ── SOLUCIÓN: Inyectamos el token en la cabecera Authorization
+          ...(token && { "Authorization": `Bearer ${token}` })
         },
-        body: JSON.stringify({ message: userText }),
+        body: JSON.stringify(requestBody),
       });
 
       if (!response.ok) {
@@ -138,6 +157,10 @@ export default function ChatFloatingWindow({
         throw new Error(data.reply || "Error desconocido en la IA");
       }
 
+      if (data.conversationId) {
+        setConversationId(data.conversationId);
+      }
+
       const botMsg: Message = {
         id: generateId(),
         sender: "bot",
@@ -146,11 +169,14 @@ export default function ChatFloatingWindow({
       };
       setMessages((prev) => [...prev, botMsg]);
 
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const errorMessage =
+        error instanceof Error ? error.message : "Error inesperado";
+
       const errorMsg: Message = {
         id: generateId(),
         sender: "error",
-        text: `Falla técnica: ${error.message}. Asegurate que la API esté corriendo.`,
+        text: `Falla técnica: ${errorMessage}. Asegurate que la API esté corriendo.`,
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMsg]);
@@ -162,7 +188,7 @@ export default function ChatFloatingWindow({
   return (
     <div className="chat-bot-container font-sans">
       {isOpen && (
-        <div 
+        <div
           role="dialog"
           aria-modal="true"
           className="fixed bottom-24 right-6 z-50 w-[350px] md:w-[400px] h-[550px] max-h-[80vh] flex flex-col bg-white rounded-2xl shadow-2xl overflow-hidden border border-slate-200 animate-chat-in"
@@ -191,8 +217,8 @@ export default function ChatFloatingWindow({
             {messages.map((msg) => (
               <div key={msg.id} className={`flex ${msg.sender === "user" ? "justify-end" : "justify-start"}`}>
                 <div className={`max-w-[85%] rounded-2xl p-3 text-sm shadow-sm ${
-                  msg.sender === "user" 
-                    ? "bg-blue-600 text-white rounded-tr-none" 
+                  msg.sender === "user"
+                    ? "bg-blue-600 text-white rounded-tr-none"
                     : msg.sender === "error"
                     ? "bg-red-50 text-red-700 border border-red-200"
                     : "bg-white text-slate-700 border border-slate-200 rounded-tl-none"
