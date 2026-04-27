@@ -59,6 +59,10 @@
               "target": "Package",
               "version": "[8.0.0, )"
             },
+            "Microsoft.SemanticKernel": {
+              "target": "Package",
+              "version": "[1.74.0, )"
+            },
             "MongoDB.Driver": {
               "target": "Package",
               "version": "[3.7.0, )"
@@ -157,6 +161,10 @@
             "Microsoft.Extensions.Hosting": {
               "target": "Package",
               "version": "[8.0.0, )"
+            },
+            "Microsoft.SemanticKernel": {
+              "target": "Package",
+              "version": "[1.74.0, )"
             },
             "ModelContextProtocol": {
               "target": "Package",

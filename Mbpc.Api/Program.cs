@@ -5,10 +5,10 @@ using Microsoft.IdentityModel.Tokens;
 using MongoDB.Driver;
 using Mbpc.Api.Models.Config;
 using Mbpc.Api.Services;
-using Mbpc.Api.Services.Auth; // <-- Nuevo using
+using Mbpc.Api.Services.Auth;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization; // <-- ¡Este era el using que faltaba!
+using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -16,16 +16,15 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers()
     .AddJsonOptions(options =>
     {
-        // Restauramos tu CamelCase original (vital para React)
-        options.JsonSerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
-        options.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
-        // Mantenemos el conversor de Enums
+        options.JsonSerializerOptions.PropertyNamingPolicy        = JsonNamingPolicy.CamelCase;
+        options.JsonSerializerOptions.DefaultIgnoreCondition      = JsonIgnoreCondition.WhenWritingNull;
         options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
     });
 
 builder.Services.AddDistributedMemoryCache();
 builder.Services.AddMemoryCache();
 builder.Services.AddScoped<ITipoCargaService, TipoCargaManagerService>();
+builder.Services.AddScoped<IChatService, ChatManagerService>();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -69,12 +68,12 @@ builder.Services.Configure<OracleDbSettings>(
     builder.Configuration.GetSection("OracleDbSettings"));
 
 // ── JWT ──────────────────────────────────────────────────────────────────────
-var jwtSection  = builder.Configuration.GetSection("JwtSettings");
-var secretKey   = jwtSection["SecretKey"]   ?? throw new InvalidOperationException("JwtSettings:SecretKey no está configurada.");
-var issuer      = jwtSection["Issuer"]      ?? throw new InvalidOperationException("JwtSettings:Issuer no está configurado.");
-var audience    = jwtSection["Audience"]    ?? throw new InvalidOperationException("JwtSettings:Audience no está configurado.");
+var jwtSection = builder.Configuration.GetSection("JwtSettings");
+var secretKey  = jwtSection["SecretKey"]  ?? throw new InvalidOperationException("JwtSettings:SecretKey no está configurada.");
+var issuer     = jwtSection["Issuer"]     ?? throw new InvalidOperationException("JwtSettings:Issuer no está configurado.");
+var audience   = jwtSection["Audience"]   ?? throw new InvalidOperationException("JwtSettings:Audience no está configurado.");
 
-var signingKey  = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey));
+var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(secretKey));
 
 builder.Services.AddAuthentication(options =>
 {
@@ -104,9 +103,12 @@ builder.Services.AddScoped<ICargaService, CargaManagerService>();
 builder.Services.AddScoped<IConvoyManagerService, ConvoyManagerService>();
 builder.Services.AddScoped<IBuqueService, BuqueManagerService>();
 
+// ── Servicio de Chat / IA ────────────────────────────────────────────────────
+builder.Services.AddScoped<IChatService, ChatManagerService>();
+
 // ── IHttpContextAccessor y Dependencias transversales ────────────────────────
 builder.Services.AddHttpContextAccessor();
-builder.Services.AddScoped<ICosteraUserContext, HttpCosteraUserContext>(); // <-- Implementación inyectada aquí
+builder.Services.AddScoped<ICosteraUserContext, HttpCosteraUserContext>();
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
 builder.Services.AddCors(options =>
@@ -129,7 +131,7 @@ app.UseExceptionHandler(errApp =>
 {
     errApp.Run(async context =>
     {
-        context.Response.StatusCode = 500;
+        context.Response.StatusCode  = 500;
         context.Response.ContentType = "application/json";
 
         var feature = context.Features

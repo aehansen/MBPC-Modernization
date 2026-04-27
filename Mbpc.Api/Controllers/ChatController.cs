@@ -1,40 +1,70 @@
+// Archivo: Mbpc.Api/Controllers/ChatController.cs
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Authorization;
 using Mbpc.Api.DTOs;
 using Mbpc.Api.Services;
+using Microsoft.Extensions.Logging;
+using System;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace Mbpc.Api.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    // [Authorize] // Lo dejo comentado temporalmente para facilitar la primera prueba de conexión sin lidiar con el token JWT. Luego lo activamos.
+    // [Authorize] — Descomentá cuando el frontend envíe el JWT correctamente.
     public class ChatController : ControllerBase
     {
-        private readonly IViajeService _viajeService;
+        private readonly IChatService            _chatService;
+        private readonly ILogger<ChatController> _logger;
 
-        public ChatController(IViajeService viajeService)
+        public ChatController(
+            IChatService            chatService,
+            ILogger<ChatController> logger)
         {
-            _viajeService = viajeService;
+            _chatService = chatService;
+            _logger      = logger;
         }
 
         [HttpPost]
-        public async Task<ActionResult<ChatResponseDto>> PostMessage([FromBody] ChatRequestDto request)
+        public async Task<ActionResult<ChatResponseDto>> PostMessage(
+            [FromBody] ChatRequestDto request,
+            CancellationToken ct = default)
         {
-            if (string.IsNullOrWhiteSpace(request.Message))
-                return BadRequest("El mensaje no puede estar vacío.");
+            if (string.IsNullOrWhiteSpace(request?.Message))
+                return BadRequest(new { mensaje = "El mensaje no puede estar vacío." });
 
-            // MOCK DE ORQUESTACIÓN: Simula el tiempo de la IA y consulta la base real
-            await Task.Delay(1000); 
-            var viajes = await _viajeService.GetViajesAsync();
-            
-            var response = new ChatResponseDto
+            try
             {
-                Reply = $"¡Conexión HTTP exitosa desde React al backend .NET! Recibí tu mensaje: '{request.Message}'. " +
-                        $"Además, la API leyó la base local y encontró {viajes.Count} buques en jurisdicción."
-            };
+                var (reply, conversationId) = await _chatService.GetChatResponseAsync(
+                    request.Message,
+                    request.ConversationId,
+                    ct);
 
-            return Ok(response);
+                return Ok(new ChatResponseDto
+                {
+                    Reply          = reply,
+                    IsSuccess      = true,
+                    ConversationId = conversationId
+                });
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("API Key"))
+            {
+                _logger.LogError(ex, "Configuración inválida de Gemini.");
+                return StatusCode(500, new ChatResponseDto
+                {
+                    Reply     = "API Key no configurada.",
+                    IsSuccess = false
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al procesar mensaje con Gemini.");
+                return StatusCode(500, new ChatResponseDto
+                {
+                    Reply     = "Error interno del servidor al contactar al LLM.",
+                    IsSuccess = false
+                });
+            }
         }
     }
 }
