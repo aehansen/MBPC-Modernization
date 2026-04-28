@@ -11,7 +11,7 @@ using Dapper;
 using Mbpc.Api.DTOs;
 using Mbpc.Api.DTOs.Convoy;
 using Mbpc.Api.Models.Mongo;
-using Mbpc.Api.Models.Config; // <--- EL USING QUE FALTABA
+using Mbpc.Api.Models.Config;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -374,10 +374,19 @@ public sealed class ConvoyManagerService : IConvoyManagerService
             .ToList()
             ?? new List<BarcazaMongo>();
 
+        // 1. Fallback a propiedad legacy en la raíz del documento (Documentos no migrados)
+        if (barcazasDeMongo.Count == 0 && detalle?.BarcazasLegacy != null)
+        {
+            _logger.LogDebug(
+                "ResolverBarcazas: Usando barcazas de Mongo desde la propiedad legacy raíz para ViajeId={ViajeId}.",
+                viajeId);
+            barcazasDeMongo = detalle.BarcazasLegacy.Where(b => b is not null).ToList();
+        }
+
         if (barcazasDeMongo.Count > 0)
         {
             _logger.LogDebug(
-                "ResolverBarcazas: Usando {Count} barcaza(s) de MongoDB (vía Etapas) para ViajeId={ViajeId}.",
+                "ResolverBarcazas: Retornando {Count} barcaza(s) desde MongoDB para ViajeId={ViajeId}.",
                 barcazasDeMongo.Count, viajeId);
 
             return barcazasDeMongo
@@ -385,21 +394,24 @@ public sealed class ConvoyManagerService : IConvoyManagerService
                 .ToList();
         }
 
-        if (travelId > 0)
+        // 2. Fallback a Oracle: NUNCA usar el ObjectId, buscar estrictamente el Id relacional
+        long idViajeRelacional = detalle?.IdViaje > 0 ? detalle.IdViaje : travelId;
+
+        if (idViajeRelacional > 0)
         {
             _logger.LogWarning(
                 "ResolverBarcazas: MongoDB no devolvió barcazas para ViajeId={ViajeId}. " +
-                "Activando fallback Oracle con TravelId={TravelId}.",
-                viajeId, travelId);
+                "Activando fallback Oracle con IdViaje Relacional={IdViajeRelacional}.",
+                viajeId, idViajeRelacional);
 
-            var cargasLegacy = await _cargaService.ObtenerCargasPorViaje(travelId.ToString());
+            var cargasLegacy = await _cargaService.ObtenerCargasPorViaje(idViajeRelacional.ToString());
 
             if (cargasLegacy is null || !cargasLegacy.Any())
             {
                 _logger.LogWarning(
-                    "ResolverBarcazas: El fallback a Oracle tampoco devolvió cargas " +
-                    "para TravelId={TravelId}.",
-                    travelId);
+                    "ResolverBarcazas: El fallback a Oracle no devolvió cargas " +
+                    "para IdViaje Relacional={IdViajeRelacional}.",
+                    idViajeRelacional);
                 return [];
             }
 
@@ -410,7 +422,7 @@ public sealed class ConvoyManagerService : IConvoyManagerService
         }
 
         _logger.LogWarning(
-            "ResolverBarcazas: Sin barcazas en Mongo y TravelId=0 para ViajeId={ViajeId}. " +
+            "ResolverBarcazas: Sin barcazas en Mongo y sin IdViaje Relacional para ViajeId={ViajeId}. " +
             "No es posible consultar Oracle.",
             viajeId);
 
