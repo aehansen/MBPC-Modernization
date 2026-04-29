@@ -11,7 +11,7 @@ namespace Mbpc.Api.Controllers;
 /// Controlador de Convoyes — expone la nueva superficie REST explícita.
 /// Patrón Strangler Fig: coexiste con <c>CargaController</c> legacy mientras
 /// el frontend migra gradualmente a estas rutas semánticas.
-/// 
+///
 /// Responsabilidad única: delegar al <see cref="IConvoyManagerService"/> y
 /// traducir excepciones de dominio a respuestas HTTP con <see cref="ProblemDetails"/>.
 /// </summary>
@@ -28,7 +28,7 @@ public sealed class ConvoyController : ControllerBase
         ILogger<ConvoyController> logger)
     {
         _convoyService = convoyService ?? throw new ArgumentNullException(nameof(convoyService));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _logger        = logger        ?? throw new ArgumentNullException(nameof(logger));
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ public sealed class ConvoyController : ControllerBase
             {
                 return NotFound(CrearProblem(
                     status: StatusCodes.Status404NotFound,
-                    title: "Convoy no encontrado",
+                    title:  "Convoy no encontrado",
                     detail: $"No existe un convoy asociado al viaje con Id '{viajeId}'."));
             }
 
@@ -72,7 +72,7 @@ public sealed class ConvoyController : ControllerBase
                 StatusCodes.Status500InternalServerError,
                 CrearProblem(
                     status: StatusCodes.Status500InternalServerError,
-                    title: "Error interno del servidor",
+                    title:  "Error interno del servidor",
                     detail: "Ocurrió un error inesperado. Por favor reintente más tarde."));
         }
     }
@@ -99,7 +99,7 @@ public sealed class ConvoyController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> AmarrarBarcaza(
         [FromRoute] string barcazaId,
-        [FromBody] AmarrarBarcazaRequest request,
+        [FromBody]  AmarrarBarcazaRequest request,
         CancellationToken ct)
     {
         try
@@ -111,21 +111,21 @@ public sealed class ConvoyController : ControllerBase
         {
             return BadRequest(CrearProblem(
                 status: StatusCodes.Status400BadRequest,
-                title: "Datos de amarre inválidos",
+                title:  "Datos de amarre inválidos",
                 detail: ex.Message));
         }
         catch (InvalidOperationException ex)
         {
             return BadRequest(CrearProblem(
                 status: StatusCodes.Status400BadRequest,
-                title: "Operación de amarre no permitida",
+                title:  "Operación de amarre no permitida",
                 detail: ex.Message));
         }
         catch (KeyNotFoundException ex)
         {
             return NotFound(CrearProblem(
                 status: StatusCodes.Status404NotFound,
-                title: "Barcaza no encontrada",
+                title:  "Barcaza no encontrada",
                 detail: ex.Message));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -138,7 +138,7 @@ public sealed class ConvoyController : ControllerBase
                 StatusCodes.Status500InternalServerError,
                 CrearProblem(
                     status: StatusCodes.Status500InternalServerError,
-                    title: "Error interno del servidor",
+                    title:  "Error interno del servidor",
                     detail: "No se pudo completar la operación de amarre. Reintente más tarde."));
         }
     }
@@ -165,7 +165,7 @@ public sealed class ConvoyController : ControllerBase
     [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> FondearBarcaza(
         [FromRoute] string barcazaId,
-        [FromBody] FondearBarcazaRequest request,
+        [FromBody]  FondearBarcazaRequest request,
         CancellationToken ct)
     {
         try
@@ -177,21 +177,21 @@ public sealed class ConvoyController : ControllerBase
         {
             return BadRequest(CrearProblem(
                 status: StatusCodes.Status400BadRequest,
-                title: "Datos de fondeo inválidos",
+                title:  "Datos de fondeo inválidos",
                 detail: ex.Message));
         }
         catch (InvalidOperationException ex)
         {
             return BadRequest(CrearProblem(
                 status: StatusCodes.Status400BadRequest,
-                title: "Operación de fondeo no permitida",
+                title:  "Operación de fondeo no permitida",
                 detail: ex.Message));
         }
         catch (KeyNotFoundException ex)
         {
             return NotFound(CrearProblem(
                 status: StatusCodes.Status404NotFound,
-                title: "Barcaza no encontrada",
+                title:  "Barcaza no encontrada",
                 detail: ex.Message));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -204,7 +204,7 @@ public sealed class ConvoyController : ControllerBase
                 StatusCodes.Status500InternalServerError,
                 CrearProblem(
                     status: StatusCodes.Status500InternalServerError,
-                    title: "Error interno del servidor",
+                    title:  "Error interno del servidor",
                     detail: "No se pudo completar la operación de fondeo. Reintente más tarde."));
         }
     }
@@ -217,20 +217,63 @@ public sealed class ConvoyController : ControllerBase
     /// Adjunta barcazas a un convoy en viaje.
     /// </summary>
     /// <param name="viajeId">Identificador del viaje.</param>
-    /// <param name="request">Payload con los datos de las barcazas a adjuntar.</param>
+    /// <param name="request">Payload con los identificadores string de las barcazas a adjuntar.</param>
     /// <param name="ct">Token de cancelación.</param>
     /// <returns>
     /// <c>200 OK</c> si la operación fue exitosa.
+    /// <c>400 Bad Request</c> si el payload es inválido o la transición de estado es ilegal.
+    /// <c>404 Not Found</c> si el viaje no existe y no puede inicializarse.
+    /// <c>500 Internal Server Error</c> ante cualquier falla inesperada.
     /// </returns>
     [HttpPost("viaje/{viajeId}/adjuntar")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> AdjuntarBarcazas(
         [FromRoute] string viajeId,
-        [FromBody] AdjuntarBarcazasRequest request,
+        [FromBody]  AdjuntarBarcazasRequest request,
         CancellationToken ct)
     {
-        await _convoyService.AdjuntarBarcazasAsync(viajeId, request, ct);
-        return Ok(new { mensaje = "Barcazas adjuntadas correctamente al convoy." });
+        try
+        {
+            await _convoyService.AdjuntarBarcazasAsync(viajeId, request, ct);
+            return Ok(new { mensaje = "Barcazas adjuntadas correctamente al convoy." });
+        }
+        catch (ValidationException ex)
+        {
+            return BadRequest(CrearProblem(
+                status: StatusCodes.Status400BadRequest,
+                title:  "Datos de adjuntar inválidos",
+                detail: ex.Message));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(CrearProblem(
+                status: StatusCodes.Status400BadRequest,
+                title:  "Operación de adjuntar no permitida",
+                detail: ex.Message));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(CrearProblem(
+                status: StatusCodes.Status404NotFound,
+                title:  "Viaje no encontrado",
+                detail: ex.Message));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "Error inesperado al adjuntar barcazas al ViajeId={ViajeId}",
+                viajeId);
+
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                CrearProblem(
+                    status: StatusCodes.Status500InternalServerError,
+                    title:  "Error interno del servidor",
+                    detail: "No se pudo completar la operación de adjuntar. Reintente más tarde."));
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -241,20 +284,63 @@ public sealed class ConvoyController : ControllerBase
     /// Separa barcazas de un convoy en viaje.
     /// </summary>
     /// <param name="viajeId">Identificador del viaje.</param>
-    /// <param name="request">Payload con los datos de las barcazas a separar.</param>
+    /// <param name="request">Payload con los identificadores string de las barcazas a separar.</param>
     /// <param name="ct">Token de cancelación.</param>
     /// <returns>
     /// <c>200 OK</c> si la operación fue exitosa.
+    /// <c>400 Bad Request</c> si el payload es inválido o la transición de estado es ilegal.
+    /// <c>404 Not Found</c> si el viaje no posee un convoy activo.
+    /// <c>500 Internal Server Error</c> ante cualquier falla inesperada.
     /// </returns>
     [HttpPost("viaje/{viajeId}/separar")]
     [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
     public async Task<IActionResult> SepararConvoy(
         [FromRoute] string viajeId,
-        [FromBody] SepararConvoyRequest request,
+        [FromBody]  SepararConvoyRequest request,
         CancellationToken ct)
     {
-        await _convoyService.SepararConvoyAsync(viajeId, request, ct);
-        return Ok(new { mensaje = "Barcazas separadas correctamente del convoy." });
+        try
+        {
+            await _convoyService.SepararConvoyAsync(viajeId, request, ct);
+            return Ok(new { mensaje = "Barcazas separadas correctamente del convoy." });
+        }
+        catch (ValidationException ex)
+        {
+            return BadRequest(CrearProblem(
+                status: StatusCodes.Status400BadRequest,
+                title:  "Datos de separar inválidos",
+                detail: ex.Message));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(CrearProblem(
+                status: StatusCodes.Status400BadRequest,
+                title:  "Operación de separar no permitida",
+                detail: ex.Message));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(CrearProblem(
+                status: StatusCodes.Status404NotFound,
+                title:  "Viaje no encontrado",
+                detail: ex.Message));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "Error inesperado al separar barcazas del ViajeId={ViajeId}",
+                viajeId);
+
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                CrearProblem(
+                    status: StatusCodes.Status500InternalServerError,
+                    title:  "Error interno del servidor",
+                    detail: "No se pudo completar la operación de separar. Reintente más tarde."));
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -268,9 +354,9 @@ public sealed class ConvoyController : ControllerBase
     private ProblemDetails CrearProblem(int status, string title, string detail) =>
         new()
         {
-            Status = status,
-            Title = title,
-            Detail = detail,
+            Status   = status,
+            Title    = title,
+            Detail   = detail,
             Instance = HttpContext.Request.Path
         };
 }

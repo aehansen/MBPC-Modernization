@@ -68,7 +68,7 @@ namespace Mbpc.Api.Services
                     "ORACLE FALLBACK — Parámetro '{Parametro}' es un TravelId numérico. Consultando legacy Oracle.",
                     parametroBusqueda);
 
-                return ObtenerCargasDesdeOracle(travelId, cacheKey);
+                return await ObtenerCargasDesdeOracleAsync(travelId, cacheKey);
             }
 
             // ── 3. Ruta MongoDB (Default CQRS) ───────────────────────────────
@@ -81,15 +81,22 @@ namespace Mbpc.Api.Services
 
         // ── Ruta Oracle: TravelId → EtapaId → SP traer_cargas ───────────────
 
-        private IEnumerable<CargaDto> ObtenerCargasDesdeOracle(long travelId, string cacheKey)
+        private async Task<IEnumerable<CargaDto>> ObtenerCargasDesdeOracleAsync(long travelId, string cacheKey)
         {
+            // ── BYPASS TEMPRANO: Previene el timeout de 60s en desarrollo ────
+            if (_env.IsDevelopment())
+            {
+                _logger.LogWarning("[DEV BYPASS] Omitiendo conexión a Oracle en ObtenerCargasDesdeOracle para evitar timeouts de red. Retornando lista vacía.");
+                return Enumerable.Empty<CargaDto>();
+            }
+
             try
             {
                 using var connection = new OracleConnection(_oracleConnectionString);
-                connection.Open();
+                await connection.OpenAsync();
 
                 // 2a. Obtener la etapa activa vinculada al viaje
-                var etapaId = connection.ExecuteScalar<long?>(
+                var etapaId = await connection.ExecuteScalarAsync<long?>(
                     "SELECT MAX(ETAPA_ID) FROM TBL_ETAPA WHERE VIAJE_ID = :TravelId",
                     new { TravelId = travelId });
 
@@ -110,7 +117,7 @@ namespace Mbpc.Api.Services
                 spParams.Add("vEtapaId", etapaId.Value,              OracleDbType.Int64,     ParameterDirection.Input);
                 spParams.Add("vCursor",  dbType: OracleDbType.RefCursor, direction: ParameterDirection.Output);
 
-                var rawRows = connection.Query<OracleCargaRow>(
+                var rawRows = await connection.QueryAsync<OracleCargaRow>(
                     "mbpc.traer_cargas",
                     spParams,
                     commandType: CommandType.StoredProcedure);
@@ -143,17 +150,8 @@ namespace Mbpc.Api.Services
             }
             catch (OracleException ex)
             {
-                if (!_env.IsDevelopment())
-                {
-                    _logger.LogError(ex, "Error de Oracle en producción al obtener cargas para TravelId {TravelId}.", travelId);
-                    throw;
-                }
-
-                _logger.LogWarning(
-                    "Oracle no disponible en desarrollo. Retornando lista vacía para TravelId {TravelId}. Error: {Message}",
-                    travelId, ex.Message);
-
-                return Enumerable.Empty<CargaDto>();
+                _logger.LogError(ex, "Error de Oracle en producción al obtener cargas para TravelId {TravelId}.", travelId);
+                throw;
             }
         }
 
@@ -367,9 +365,12 @@ namespace Mbpc.Api.Services
                     _logger.LogInformation("Sincronizando estado en MongoDB (amarre) para barcaza {Id}", id);
 
                     // ── Load ─────────────────────────────────────────────────
+                    // FIX: b.Nombre tiene [BsonIgnore] y el LINQ provider de Mongo no puede serializarlo.
+                    // Usamos las propiedades físicas de respaldo (NombreModern / NombreLegacy) que sí
+                    // están mapeadas en BSON. El paso Mutate (FirstOrDefault en memoria) sigue usando b.Nombre.
                     var filtro = Builders<ViajeDetalleMongo>.Filter.ElemMatch(
                         d => d.Etapas,
-                        etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.Nombre == id));
+                        etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.NombreModern == id || b.NombreLegacy == id));
 
                     var doc = _detailsCollection.Find(filtro).FirstOrDefault();
                     if (doc is null)
@@ -451,9 +452,12 @@ namespace Mbpc.Api.Services
                     _logger.LogInformation("Sincronizando estado en MongoDB (fondeo) para barcaza {Id}", id);
 
                     // ── Load ─────────────────────────────────────────────────
+                    // FIX: b.Nombre tiene [BsonIgnore] y el LINQ provider de Mongo no puede serializarlo.
+                    // Usamos las propiedades físicas de respaldo (NombreModern / NombreLegacy) que sí
+                    // están mapeadas en BSON. El paso Mutate (FirstOrDefault en memoria) sigue usando b.Nombre.
                     var filtro = Builders<ViajeDetalleMongo>.Filter.ElemMatch(
                         d => d.Etapas,
-                        etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.Nombre == id));
+                        etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.NombreModern == id || b.NombreLegacy == id));
 
                     var doc = _detailsCollection.Find(filtro).FirstOrDefault();
                     if (doc is null)
@@ -536,9 +540,12 @@ namespace Mbpc.Api.Services
                         "Sincronizando CANTIDAD EXACTA ({Toneladas}) en MongoDB para embarcación {Id}", toneladas, id);
 
                     // ── Load ─────────────────────────────────────────────────
+                    // FIX: b.Nombre tiene [BsonIgnore] y el LINQ provider de Mongo no puede serializarlo.
+                    // Usamos las propiedades físicas de respaldo (NombreModern / NombreLegacy) que sí
+                    // están mapeadas en BSON. El paso Mutate (FirstOrDefault en memoria) sigue usando b.Nombre.
                     var filtro = Builders<ViajeDetalleMongo>.Filter.ElemMatch(
                         d => d.Etapas,
-                        etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.Nombre == id));
+                        etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.NombreModern == id || b.NombreLegacy == id));
 
                     var doc = _detailsCollection.Find(filtro).FirstOrDefault();
                     if (doc is null)
@@ -621,9 +628,12 @@ namespace Mbpc.Api.Services
                         "Sincronizando CANTIDAD EXACTA ({Toneladas}) en MongoDB para embarcación {Id}", toneladas, id);
 
                     // ── Load ─────────────────────────────────────────────────
+                    // FIX: b.Nombre tiene [BsonIgnore] y el LINQ provider de Mongo no puede serializarlo.
+                    // Usamos las propiedades físicas de respaldo (NombreModern / NombreLegacy) que sí
+                    // están mapeadas en BSON. El paso Mutate (FirstOrDefault en memoria) sigue usando b.Nombre.
                     var filtro = Builders<ViajeDetalleMongo>.Filter.ElemMatch(
                         d => d.Etapas,
-                        etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.Nombre == id));
+                        etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.NombreModern == id || b.NombreLegacy == id));
 
                     var doc = _detailsCollection.Find(filtro).FirstOrDefault();
                     if (doc is null)
@@ -847,10 +857,13 @@ namespace Mbpc.Api.Services
                     // al documento del viaje indicado por dto.ViajeId, evitando
                     // que una barcaza con igual nombre en otro viaje sea modificada
                     // por error (corrupción de datos cruzados).
+                    // FIX: b.Nombre tiene [BsonIgnore] y el LINQ provider de Mongo no puede serializarlo.
+                    // Usamos las propiedades físicas de respaldo (NombreModern / NombreLegacy) que sí
+                    // están mapeadas en BSON. El paso Mutate (FirstOrDefault en memoria) sigue usando b.Nombre.
                     var filtroViajeId   = Builders<ViajeDetalleMongo>.Filter.Eq(x => x.VesselName, dto.ViajeId);
                     var filtroElemMatch = Builders<ViajeDetalleMongo>.Filter.ElemMatch(
                         d => d.Etapas,
-                        etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.Nombre == id));
+                        etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.NombreModern == id || b.NombreLegacy == id));
                     var filtro = Builders<ViajeDetalleMongo>.Filter.And(filtroViajeId, filtroElemMatch);
 
                     var doc = await _detailsCollection.Find(filtro).FirstOrDefaultAsync();
@@ -1070,9 +1083,12 @@ namespace Mbpc.Api.Services
         {
             try
             {
+                // FIX: b.Nombre tiene [BsonIgnore] y el LINQ provider de Mongo no puede serializarlo.
+                // Usamos las propiedades físicas de respaldo (NombreModern / NombreLegacy) que sí
+                // están mapeadas en BSON.
                 var filtro = Builders<ViajeDetalleMongo>.Filter.ElemMatch(
                     d => d.Etapas,
-                    etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.Nombre == idBarcaza));
+                    etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.NombreModern == idBarcaza || b.NombreLegacy == idBarcaza));
 
                 var buqueDoc = _detailsCollection.Find(filtro).FirstOrDefault();
 

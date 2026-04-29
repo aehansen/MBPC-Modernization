@@ -47,7 +47,12 @@ function AccionesRow({
     'px-3 py-1.5 rounded text-xs font-semibold tracking-wide transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed border';
 
   return (
-    <div className="flex flex-wrap justify-end gap-1.5">
+    <div
+      className="flex flex-wrap justify-end gap-1.5"
+      // Evita que el clic en los botones de acción propague el evento
+      // al <tr> padre y cambie el viajeSeleccionadoId involuntariamente.
+      onClick={(e) => e.stopPropagation()}
+    >
       <BotonZarpar viaje={viaje} />
       <BotonAmarrar viaje={viaje} />
       <BotonFondear viaje={viaje} />
@@ -83,6 +88,9 @@ export default function ViajesDashboard() {
   const [page, setPage] = useState(1);
   const [filtro, setFiltro] = useState('');
   const [debouncedFiltro, setDebouncedFiltro] = useState('');
+
+  // Estado para el viaje seleccionado en la tabla (alimenta PanelGestionConvoy)
+  const [viajeSeleccionadoId, setViajeSeleccionadoId] = useState<string | null>(null);
 
   // Debounce: espera 500ms tras el último cambio del filtro antes de disparar la query.
   // Cuando el valor debounced cambia, se resetea la página a 1 para evitar que el usuario
@@ -182,30 +190,42 @@ export default function ViajesDashboard() {
                   </td>
                 </tr>
               ) : (
-                filas.map((viaje) => (
-                  <tr key={viaje.id} className="transition-colors hover:bg-gray-50">
-                    <td className="px-4 py-3 font-semibold text-[#002454]">
-                      {viaje.buque || 'N/D'}
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">{viaje.ruta || 'N/D'}</td>
-                    <td className="px-4 py-3 text-gray-500 tabular-nums">
-                      {viaje.fechaInicioFormateada || 'N/D'}
-                    </td>
-                    <td className="px-4 py-3">
-                      <EstadoBadge estado={viaje.estadoActual} />
-                    </td>
-                    <td className="px-4 py-3 text-gray-500">
-                      {viaje.costeraId ?? <span className="italic">—</span>}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <AccionesRow
-                        viaje={viaje}
-                        onActualizarPosicion={handleAbrirPosicion}
-                        onVerCargas={handleAbrirCargas}
-                      />
-                    </td>
-                  </tr>
-                ))
+                filas.map((viaje) => {
+                  const isSeleccionado = viaje.id === viajeSeleccionadoId;
+                  return (
+                    <tr
+                      key={viaje.id}
+                      onClick={() => setViajeSeleccionadoId(viaje.id)}
+                      className={[
+                        'transition-colors cursor-pointer',
+                        isSeleccionado
+                          ? 'bg-blue-50 border-l-4 border-blue-600'
+                          : 'hover:bg-gray-50 border-l-4 border-transparent',
+                      ].join(' ')}
+                    >
+                      <td className="px-4 py-3 font-semibold text-[#002454]">
+                        {viaje.buque || 'N/D'}
+                      </td>
+                      <td className="px-4 py-3 text-gray-600">{viaje.ruta || 'N/D'}</td>
+                      <td className="px-4 py-3 text-gray-500 tabular-nums">
+                        {viaje.fechaInicioFormateada || 'N/D'}
+                      </td>
+                      <td className="px-4 py-3">
+                        <EstadoBadge estado={viaje.estadoActual} />
+                      </td>
+                      <td className="px-4 py-3 text-gray-500">
+                        {viaje.costeraId ?? <span className="italic">—</span>}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <AccionesRow
+                          viaje={viaje}
+                          onActualizarPosicion={handleAbrirPosicion}
+                          onVerCargas={handleAbrirCargas}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -252,17 +272,28 @@ export default function ViajesDashboard() {
           onClose={() => setModalCargas({ isOpen: false, viaje: null })}
         />
       )}
-      {/* 🧪 ÁREA DE PRUEBAS - GESTIÓN DE CONVOYES */}
+
+      {/* GESTIÓN DE CONVOYES — Alimentado por la fila seleccionada en la grilla */}
       <div className="mt-10 border-t-4 border-dashed border-gray-200 pt-8">
         <div className="mb-4 px-2 flex items-center gap-2">
-          <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-1 rounded">REAL-TIME</span>
-          <h3 className="text-lg font-bold text-gray-700">Gestión de Convoy (Data Orquestada)</h3>
+          <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-1 rounded">
+            REAL-TIME
+          </span>
+          <h3 className="text-lg font-bold text-gray-700">
+            Gestión de Convoy (Data Orquestada)
+          </h3>
         </div>
-        
-        {/* Le pasamos el ID directamente. 
-            Ya no importa si el CAROLINA está en esta página de la grilla o no, 
-            el componente lo va a buscar al Backend por su cuenta. */}
-        <PanelGestionConvoy viajeId="68a7cab6e8ed737b66c63d95" />
+
+        {viajeSeleccionadoId === null ? (
+          <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white py-14 text-center text-gray-500">
+            <span className="text-4xl">🚢</span>
+            <p className="text-sm font-medium">
+              Seleccione un buque de la lista superior para gestionar su convoy.
+            </p>
+          </div>
+        ) : (
+          <PanelGestionConvoy viajeId={viajeSeleccionadoId} />
+        )}
       </div>
     </div>
   );

@@ -1,3 +1,5 @@
+// Mbpc.Api/Models/Mongo/ViajeDetalleMongo.cs
+
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
 using System;
@@ -24,14 +26,35 @@ namespace Mbpc.Api.Models.Mongo
         [BsonElement("Destination")]
         public string? Destination { get; set; }
 
-        [BsonElement("etapas")]
-        public List<EtapaMongo> Etapas { get; set; } = new();
+        // ─── TÉCNICA DE PROPIEDADES DE RESPALDO (Tolerancia BSON) ───
+        [BsonElement("ETAPAS")] public List<EtapaMongo>? EtapasLegacy { get; set; }
+        [BsonElement("etapas")] public List<EtapaMongo>? EtapasModern { get; set; }
+        
+        [BsonIgnore] 
+        public List<EtapaMongo> Etapas 
+        { 
+            get 
+            {
+                if (EtapasModern != null) return EtapasModern;
+                if (EtapasLegacy != null) return EtapasLegacy;
+                // Inicialización perezosa segura para no agregar a una lista "huerfana"
+                EtapasModern = new List<EtapaMongo>();
+                return EtapasModern;
+            }
+            set => EtapasModern = value; 
+        }
 
-        // PROPIEDAD DE RESPALDO LEGACY
-        // Captura las barcazas que aún existan en la raíz del documento
-        [BsonElement("barcazas")]
-        [BsonIgnoreIfNull]
-        public List<BarcazaMongo>? BarcazasLegacy { get; set; }
+        // PROPIEDAD DE RESPALDO LEGACY RAÍZ
+        // Captura las barcazas que aún existan en la raíz del documento (pre-CQRS)
+        [BsonElement("BARCAZAS")] public List<BarcazaMongo>? BarcazasRootLegacy { get; set; }
+        [BsonElement("barcazas")] public List<BarcazaMongo>? BarcazasRootModern { get; set; }
+        
+        [BsonIgnore]
+        public List<BarcazaMongo>? BarcazasLegacy
+        {
+            get => BarcazasRootModern ?? BarcazasRootLegacy;
+            set => BarcazasRootModern = value;
+        }
 
         [BsonElement("CosteraId")]
         public int? CosteraId { get; set; }
@@ -40,34 +63,40 @@ namespace Mbpc.Api.Models.Mongo
     [BsonIgnoreExtraElements]
     public class EtapaMongo
     {
-        [BsonElement("EtapaId")]
-        public long EtapaId { get; set; }
+        [BsonElement("ETAPA_ID")] public long? EtapaIdLegacy { get; set; }
+        [BsonElement("etapaId")]  public long? EtapaIdModern { get; set; }
+        [BsonElement("EtapaId")]  public long? EtapaIdPascal { get; set; }
+        [BsonIgnore] public long EtapaId { get => EtapaIdPascal ?? EtapaIdModern ?? EtapaIdLegacy ?? 0; set => EtapaIdPascal = value; }
 
-        [BsonElement("FechaInicio")]
-        public DateTime? FechaInicio { get; set; }
+        [BsonElement("FECHA_INICIO")] public DateTime? FechaInicioLegacy { get; set; }
+        [BsonElement("fechaInicio")]  public DateTime? FechaInicioModern { get; set; }
+        [BsonElement("FechaInicio")]  public DateTime? FechaInicioPascal { get; set; }
+        [BsonIgnore] public DateTime? FechaInicio { get => FechaInicioPascal ?? FechaInicioModern ?? FechaInicioLegacy; set => FechaInicioPascal = value; }
 
-        [BsonElement("remolcador")]
-        public RemolcadorMongo? Remolcador { get; set; }
+        [BsonElement("REMOLCADOR")] public RemolcadorMongo? RemolcadorLegacy { get; set; }
+        [BsonElement("remolcador")] public RemolcadorMongo? RemolcadorModern { get; set; }
+        [BsonIgnore] public RemolcadorMongo? Remolcador { get => RemolcadorModern ?? RemolcadorLegacy; set => RemolcadorModern = value; }
 
-        [BsonElement("barcazas")]
-        public List<BarcazaMongo>? Barcazas { get; set; }
+        [BsonElement("BARCAZAS")] public List<BarcazaMongo>? BarcazasLegacy { get; set; }
+        [BsonElement("barcazas")] public List<BarcazaMongo>? BarcazasModern { get; set; }
+        [BsonIgnore] public List<BarcazaMongo>? Barcazas { get => BarcazasModern ?? BarcazasLegacy; set => BarcazasModern = value; }
     }
 
     [BsonIgnoreExtraElements]
     public class RemolcadorMongo
     {
-        [BsonElement("Nombre")]
-        public string? Nombre { get; set; }
+        [BsonElement("NOMBRE")] public string? NombreLegacy { get; set; }
+        [BsonElement("nombre")] public string? NombreModern { get; set; }
+        [BsonIgnore] public string? Nombre { get => NombreModern ?? NombreLegacy; set => NombreModern = value; }
 
-        [BsonElement("Matricula")]
-        public string? Matricula { get; set; }
+        [BsonElement("MATRICULA")] public string? MatriculaLegacy { get; set; }
+        [BsonElement("matricula")] public string? MatriculaModern { get; set; }
+        [BsonIgnore] public string? Matricula { get => MatriculaModern ?? MatriculaLegacy; set => MatriculaModern = value; }
     }
 
     [BsonIgnoreExtraElements]
     public class BarcazaMongo
     {
-        // ─── TÉCNICA DE PROPIEDADES DE RESPALDO (Tolerancia BSON) ───
-        
         [BsonElement("ID_VIAJE")] public long? IdViajeLegacy { get; set; }
         [BsonElement("idViaje")]  public long? IdViajeModern { get; set; }
         [BsonIgnore] public long IdViaje { get => IdViajeModern ?? IdViajeLegacy ?? 0; set => IdViajeModern = value; }

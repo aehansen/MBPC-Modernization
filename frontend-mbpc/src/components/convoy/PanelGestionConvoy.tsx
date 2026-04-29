@@ -6,10 +6,13 @@ import axiosInstance from '@/axiosClient';
 import {
   useAmarrarBarcaza,
   useFondearBarcaza,
+  useAdjuntarBarcazas,
+  useSepararConvoy,
 } from '@/hooks/useGestionConvoy';
 import type { DotNetProblemDetails } from '@/hooks/useGestionConvoy';
 import type { EstadoBarcaza } from '@/types/convoy.types';
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import BarcazaAutocomplete from './BarcazaAutocomplete'; // Importamos el nuevo componente
 
 // ============================================================================
 // DTOs — reflejan el ConvoyDto del backend en camelCase estricto
@@ -50,6 +53,44 @@ interface PanelGestionConvoyProps {
 }
 
 // ============================================================================
+// Modal State Types
+// ============================================================================
+
+type AccionModal = 'amarrar' | 'fondear';
+
+interface EstadoModal {
+  abierto: boolean;
+  accion: AccionModal | null;
+  barcazaId: string | null;
+  barcazaNombre: string;
+  destino: string;
+}
+
+const MODAL_INICIAL: EstadoModal = {
+  abierto: false,
+  accion: null,
+  barcazaId: null,
+  barcazaNombre: '',
+  destino: '',
+};
+
+interface EstadoModalAdjuntar {
+  abierto: boolean;
+  barcazaId: string;
+  ubicacion: string;
+}
+
+interface EstadoModalSeparar {
+  abierto: boolean;
+  barcazaId: string;
+  barcazaNombre: string;
+  ubicacion: string;
+}
+
+const MODAL_ADJUNTAR_INICIAL: EstadoModalAdjuntar = { abierto: false, barcazaId: '', ubicacion: '' };
+const MODAL_SEPARAR_INICIAL: EstadoModalSeparar = { abierto: false, barcazaId: '', barcazaNombre: '', ubicacion: '' };
+
+// ============================================================================
 // Query Keys — objeto centralizado para evitar magic strings
 // ============================================================================
 
@@ -62,7 +103,6 @@ const convoyKeys = {
 // ============================================================================
 
 const fetchConvoy = async (id: string) => {
-    // FIX: Ruta correcta del controlador de .NET. axiosClient ya inyecta el '/api' base.
     const { data } = await axiosInstance.get<ConvoyDto>(`/convoyes/viaje/${id}`);
     return data;
 };
@@ -71,10 +111,6 @@ const fetchConvoy = async (id: string) => {
 // Helpers
 // ============================================================================
 
-/**
- * Extrae un mensaje legible del error de la mutación sin recurrir a `any`.
- * Maneja texto plano, ProblemDetails estándar y ValidationProblemDetails.
- */
 function resolverMensajeError(error: Error | null): string {
   if (!error) return '';
   if (isAxiosError<DotNetProblemDetails | string>(error) && error.response?.data) {
@@ -124,7 +160,6 @@ function AlertaError({ mensaje, onDismiss }: { mensaje: string; onDismiss: () =>
   );
 }
 
-/** Skeleton para el header del convoy mientras carga. */
 function SkeletonHeader() {
   return (
     <div className="bg-[#002454] p-5 rounded-xl flex justify-between items-center mb-6 shadow-md animate-pulse">
@@ -140,7 +175,6 @@ function SkeletonHeader() {
   );
 }
 
-/** Skeleton para una tarjeta de barcaza mientras carga. */
 function SkeletonBarcaza() {
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5 space-y-3 shadow-sm animate-pulse">
@@ -163,7 +197,6 @@ function SkeletonBarcaza() {
   );
 }
 
-/** Estado de error de la query principal (no de mutaciones). */
 function ErrorFetchConvoy({ mensaje, onRetry }: { mensaje: string; onRetry: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center py-16 gap-4">
@@ -187,6 +220,226 @@ function ErrorFetchConvoy({ mensaje, onRetry }: { mensaje: string; onRetry: () =
 }
 
 // ============================================================================
+// Modales de Interacción
+// ============================================================================
+
+interface ModalDestinoProps {
+  estado: EstadoModal;
+  isPending: boolean;
+  onChange: (destino: string) => void;
+  onConfirmar: () => void;
+  onCancelar: () => void;
+}
+
+function ModalDestino({ estado, isPending, onChange, onConfirmar, onCancelar }: ModalDestinoProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (estado.abierto) {
+      const t = setTimeout(() => inputRef.current?.focus(), 50);
+      return () => clearTimeout(t);
+    }
+  }, [estado.abierto]);
+
+  useEffect(() => {
+    if (!estado.abierto) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancelar();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [estado.abierto, onCancelar]);
+
+  if (!estado.abierto) return null;
+
+  const esAmarrar = estado.accion === 'amarrar';
+  const titulo = esAmarrar ? 'Amarrar Barcaza' : 'Fondear Barcaza';
+  const label = esAmarrar ? 'Muelle de destino' : 'Zona de fondeo';
+  const placeholder = esAmarrar ? 'Ej: Muelle 3' : 'Ej: Zona Beta';
+  const textoPendiente = esAmarrar ? 'Amarrando...' : 'Fondeando...';
+  const textoConfirmar = esAmarrar ? 'Amarrar' : 'Fondear';
+
+  const IconoAccion = esAmarrar ? (
+    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+    </svg>
+  ) : (
+    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12H3l9-9 9 9h-2M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" />
+    </svg>
+  );
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      onClick={(e) => { if (e.target === e.currentTarget) onCancelar(); }}
+    >
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" aria-hidden="true" />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm border border-gray-200 overflow-hidden">
+        <div className="bg-[#104a8e] px-6 py-4 flex items-center gap-3 text-white">
+          <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
+            {IconoAccion}
+          </div>
+          <div className="min-w-0">
+            <h2 className="font-bold text-base leading-tight">{titulo}</h2>
+            {estado.barcazaNombre && (
+              <p className="text-blue-200 text-xs mt-0.5 truncate">{estado.barcazaNombre}</p>
+            )}
+          </div>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-1.5">
+              {label}
+            </label>
+            <input
+              ref={inputRef}
+              type="text"
+              value={estado.destino}
+              onChange={(e) => onChange(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && estado.destino.trim() && !isPending) onConfirmar();
+              }}
+              placeholder={placeholder}
+              disabled={isPending}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#104a8e]/40 focus:border-[#104a8e] disabled:bg-gray-50 transition-colors"
+            />
+          </div>
+          <div className="flex gap-2.5 pt-1">
+            <button onClick={onCancelar} disabled={isPending} className="flex-1 border border-gray-300 text-gray-700 py-2.5 rounded-lg text-sm font-semibold hover:bg-gray-50 disabled:opacity-40 transition-colors">
+              Cancelar
+            </button>
+            <button onClick={onConfirmar} disabled={isPending || !estado.destino.trim()} className="flex-1 bg-[#104a8e] text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-[#002454] disabled:opacity-40 flex items-center justify-center gap-1.5 transition-colors">
+              {isPending ? 'Procesando...' : textoConfirmar}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface ModalAdjuntarProps {
+  viajeId: string;
+  estado: EstadoModalAdjuntar;
+  isPending: boolean;
+  setEstado: React.Dispatch<React.SetStateAction<EstadoModalAdjuntar>>;
+  onConfirmar: () => void;
+  onCancelar: () => void;
+}
+
+function ModalAdjuntar({ viajeId, estado, isPending, setEstado, onConfirmar, onCancelar }: ModalAdjuntarProps) {
+  if (!estado.abierto) return null;
+
+  return (
+    <div role="dialog" className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) onCancelar(); }}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" aria-hidden="true" />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm border border-gray-200 overflow-hidden">
+        <div className="bg-[#104a8e] px-6 py-4 flex items-center gap-3 text-white">
+          <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+          </div>
+          <h2 className="font-bold text-base leading-tight">Adjuntar Barcaza</h2>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <div>
+            <div className="mb-3">
+              {/* Nuevo Componente de Autocompletado */}
+              <BarcazaAutocomplete 
+                etapaId={viajeId} 
+                onSelect={(b) => setEstado({ ...estado, barcazaId: b.idBuque.toString() })} 
+                onClear={() => setEstado({ ...estado, barcazaId: '' })}
+                disabled={isPending}
+              />
+            </div>
+            <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-1.5">Ubicación</label>
+            <input
+              type="text"
+              value={estado.ubicacion}
+              onChange={(e) => setEstado({ ...estado, ubicacion: e.target.value })}
+              placeholder="Ej: Km 420"
+              disabled={isPending}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#104a8e]/40 focus:border-[#104a8e]"
+            />
+          </div>
+          <div className="flex gap-2.5 pt-1">
+            <button onClick={onCancelar} disabled={isPending} className="flex-1 border border-gray-300 text-gray-700 py-2.5 rounded-lg text-sm font-semibold hover:bg-gray-50 disabled:opacity-40 transition-colors">Cancelar</button>
+            <button onClick={onConfirmar} disabled={isPending || !estado.barcazaId.trim() || !estado.ubicacion.trim()} className="flex-1 bg-[#104a8e] text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-[#002454] disabled:opacity-40 transition-colors">
+              {isPending ? 'Adjuntando...' : 'Adjuntar'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface ModalSepararProps {
+  estado: EstadoModalSeparar;
+  isPending: boolean;
+  setEstado: React.Dispatch<React.SetStateAction<EstadoModalSeparar>>;
+  onConfirmar: () => void;
+  onCancelar: () => void;
+}
+
+function ModalSeparar({ estado, isPending, setEstado, onConfirmar, onCancelar }: ModalSepararProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (estado.abierto) {
+      const t = setTimeout(() => inputRef.current?.focus(), 50);
+      return () => clearTimeout(t);
+    }
+  }, [estado.abierto]);
+
+  if (!estado.abierto) return null;
+
+  return (
+    <div role="dialog" className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={(e) => { if (e.target === e.currentTarget) onCancelar(); }}>
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" aria-hidden="true" />
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm border border-gray-200 overflow-hidden">
+        <div className="bg-red-600 px-6 py-4 flex items-center gap-3 text-white">
+          <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </div>
+          <div className="min-w-0">
+            <h2 className="font-bold text-base leading-tight">Separar Barcaza</h2>
+            <p className="text-red-200 text-xs mt-0.5 truncate">{estado.barcazaNombre}</p>
+          </div>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <p className="text-sm text-gray-600">Estás a punto de separar la barcaza <strong>{estado.barcazaNombre}</strong> del convoy. ¿Dónde quedará ubicada?</p>
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-1.5">Ubicación final</label>
+            <input
+              ref={inputRef}
+              type="text"
+              value={estado.ubicacion}
+              onChange={(e) => setEstado({ ...estado, ubicacion: e.target.value })}
+              placeholder="Ej: Muelle Principal"
+              disabled={isPending}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-red-500/40 focus:border-red-500"
+            />
+          </div>
+          <div className="flex gap-2.5 pt-1">
+            <button onClick={onCancelar} disabled={isPending} className="flex-1 border border-gray-300 text-gray-700 py-2.5 rounded-lg text-sm font-semibold hover:bg-gray-50 disabled:opacity-40 transition-colors">Cancelar</button>
+            <button onClick={onConfirmar} disabled={isPending || !estado.ubicacion.trim()} className="flex-1 bg-red-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-red-700 disabled:opacity-40 transition-colors">
+              {isPending ? 'Separando...' : 'Separar Barcaza'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
 // Componente Principal
 // ============================================================================
 
@@ -194,6 +447,11 @@ export default function PanelGestionConvoy({ viajeId }: PanelGestionConvoyProps)
   const queryClient = useQueryClient();
   const [errorMutacion, setErrorMutacion] = useState<string | null>(null);
   const [pendingBarcazaId, setPendingBarcazaId] = useState<string | null>(null);
+
+  // ─── Estado de los Modales ──────────────────────────────────────────────────
+  const [modal, setModal] = useState<EstadoModal>(MODAL_INICIAL);
+  const [modalAdjuntar, setModalAdjuntar] = useState<EstadoModalAdjuntar>(MODAL_ADJUNTAR_INICIAL);
+  const [modalSeparar, setModalSeparar] = useState<EstadoModalSeparar>(MODAL_SEPARAR_INICIAL);
 
   // ─── Data Fetching ─────────────────────────────────────────────────────────
   const {
@@ -205,7 +463,6 @@ export default function PanelGestionConvoy({ viajeId }: PanelGestionConvoyProps)
   } = useQuery<ConvoyDto, Error>({
     queryKey: convoyKeys.detail(viajeId),
     queryFn: () => fetchConvoy(viajeId),
-    // No reintentar en 404: el viaje no existe, no es un error transitorio.
     retry: (failureCount, error) => {
       if (isAxiosError(error) && error.response?.status === 404) return false;
       return failureCount < 2;
@@ -215,172 +472,239 @@ export default function PanelGestionConvoy({ viajeId }: PanelGestionConvoyProps)
   // ─── Mutaciones ────────────────────────────────────────────────────────────
   const mutAmarrar = useAmarrarBarcaza();
   const mutFondear = useFondearBarcaza();
+  const mutAdjuntar = useAdjuntarBarcazas();
+  const mutSeparar = useSepararConvoy();
 
-  /**
-   * Invalida la query del convoy actual para que React Query refetch
-   * y la UI refleje el nuevo estado de la barcaza tras una mutación exitosa.
-   */
   function invalidarConvoy() {
     queryClient.invalidateQueries({ queryKey: convoyKeys.detail(viajeId) });
   }
 
-  function handleAmarrar(barcazaId: string) {
+  // ─── Apertura de Modales ───────────────────────────────────────────────────
+
+  function abrirModalAmarrar(barcazaId: string, barcazaNombre: string) {
     setErrorMutacion(null);
+    setModal({ abierto: true, accion: 'amarrar', barcazaId, barcazaNombre, destino: '' });
+  }
+
+  function abrirModalFondear(barcazaId: string, barcazaNombre: string) {
+    setErrorMutacion(null);
+    setModal({ abierto: true, accion: 'fondear', barcazaId, barcazaNombre, destino: '' });
+  }
+
+  function abrirModalAdjuntar() {
+    setErrorMutacion(null);
+    setModalAdjuntar({ abierto: true, barcazaId: '', ubicacion: '' });
+  }
+
+  function abrirModalSeparar(barcazaId: string, barcazaNombre: string) {
+    setErrorMutacion(null);
+    setModalSeparar({ abierto: true, barcazaId, barcazaNombre, ubicacion: '' });
+  }
+
+  function cerrarModales() {
+    setModal(MODAL_INICIAL);
+    setModalAdjuntar(MODAL_ADJUNTAR_INICIAL);
+    setModalSeparar(MODAL_SEPARAR_INICIAL);
+  }
+
+  function actualizarDestino(destino: string) {
+    setModal((prev) => ({ ...prev, destino }));
+  }
+
+  // ─── Confirmación desde el Modal ───────────────────────────────────────────
+
+  function handleConfirmarDestino() {
+    if (!modal.barcazaId || !modal.destino.trim() || !modal.accion) return;
+    const { barcazaId, accion, destino } = modal;
     setPendingBarcazaId(barcazaId);
-    mutAmarrar.mutate(
-      { barcazaId, payload: { nuevoMuelle: 'Muelle 1' } },
+    cerrarModales();
+
+    const handlers = {
+      onSuccess: invalidarConvoy,
+      onError: (err: unknown) => setErrorMutacion(resolverMensajeError(err as Error)),
+      onSettled: () => setPendingBarcazaId(null),
+    };
+
+    if (accion === 'amarrar') {
+      mutAmarrar.mutate({ barcazaId, payload: { nuevoMuelle: destino.trim() } }, handlers);
+    } else {
+      mutFondear.mutate({ barcazaId, payload: { zonaFondeo: destino.trim() } }, handlers);
+    }
+  }
+
+  function handleConfirmarAdjuntar() {
+    if (!modalAdjuntar.barcazaId.trim() || !modalAdjuntar.ubicacion.trim()) return;
+    const { barcazaId, ubicacion } = modalAdjuntar;
+    cerrarModales();
+
+    mutAdjuntar.mutate(
+      { viajeId, payload: { barcazasIds: [barcazaId.trim()], ubicacion: ubicacion.trim() } },
       {
         onSuccess: invalidarConvoy,
-        onError:   (err) => setErrorMutacion(resolverMensajeError(err)),
+        onError: (err: unknown) => setErrorMutacion(resolverMensajeError(err as Error)),
+      }
+    );
+  }
+
+  function handleConfirmarSeparar() {
+    if (!modalSeparar.barcazaId || !modalSeparar.ubicacion.trim()) return;
+    const { barcazaId, ubicacion } = modalSeparar;
+    setPendingBarcazaId(barcazaId);
+    cerrarModales();
+
+    mutSeparar.mutate(
+      { viajeId, payload: { barcazasIds: [barcazaId], ubicacion: ubicacion.trim() } },
+      {
+        onSuccess: invalidarConvoy,
+        onError: (err: unknown) => setErrorMutacion(resolverMensajeError(err as Error)),
         onSettled: () => setPendingBarcazaId(null),
       }
     );
   }
 
-  function handleFondear(barcazaId: string) {
-    setErrorMutacion(null);
-    setPendingBarcazaId(barcazaId);
-    mutFondear.mutate(
-      { barcazaId, payload: { zonaFondeo: 'Zona Alfa' } },
-      {
-        onSuccess: invalidarConvoy,
-        onError:   (err) => setErrorMutacion(resolverMensajeError(err)),
-        onSettled: () => setPendingBarcazaId(null),
-      }
-    );
-  }
-
-  // ─── Tonelaje total (derivado del ConvoyDto, no calculado en el cliente) ──
+  // ─── Tonelaje total ──
   const tonelajeTotal = convoy?.barcazas.reduce((acc, b) => acc + b.tonelaje, 0) ?? 0;
+  const modalIsPending = modal.abierto && (mutAmarrar.isPending || mutFondear.isPending);
 
   // ─── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="bg-gray-50 rounded-xl border border-gray-200 overflow-hidden font-sans shadow-sm">
-      <div className="p-6">
-        {/* Alerta de errores de mutación */}
-        {errorMutacion && (
-          <AlertaError mensaje={errorMutacion} onDismiss={() => setErrorMutacion(null)} />
-        )}
+    <>
+      <ModalDestino estado={modal} isPending={modalIsPending} onChange={actualizarDestino} onConfirmar={handleConfirmarDestino} onCancelar={cerrarModales} />
+      <ModalAdjuntar viajeId={viajeId} estado={modalAdjuntar} isPending={mutAdjuntar.isPending} setEstado={setModalAdjuntar} onConfirmar={handleConfirmarAdjuntar} onCancelar={cerrarModales} />
+      <ModalSeparar estado={modalSeparar} isPending={mutSeparar.isPending} setEstado={setModalSeparar} onConfirmar={handleConfirmarSeparar} onCancelar={cerrarModales} />
 
-        {/* ── Estado: Cargando ───────────────────────────────────────────── */}
-        {isLoading && (
-          <>
-            <SkeletonHeader />
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-              {Array.from({ length: 3 }).map((_, i) => (
-                <SkeletonBarcaza key={i} />
-              ))}
-            </div>
-          </>
-        )}
+      <div className="bg-gray-50 rounded-xl border border-gray-200 overflow-hidden font-sans shadow-sm">
+        <div className="p-6">
+          {errorMutacion && <AlertaError mensaje={errorMutacion} onDismiss={() => setErrorMutacion(null)} />}
 
-        {/* ── Estado: Error de fetch ─────────────────────────────────────── */}
-        {isError && (
-          <ErrorFetchConvoy
-            mensaje={resolverMensajeError(queryError)}
-            onRetry={refetch}
-          />
-        )}
-
-        {/* ── Estado: Datos disponibles ──────────────────────────────────── */}
-        {convoy && (
-          <>
-            {/* Header Institucional PNA */}
-            <div className="bg-[#002454] p-5 rounded-xl flex justify-between items-center text-white mb-6 shadow-md">
-              <div>
-                <h2 className="text-xl font-bold tracking-tight">
-                  Tractor: {convoy.remolcador?.nombre ?? convoy.nombreBuque}
-                </h2>
-                <p className="text-sm text-blue-200 mt-0.5">
-                  Estado: {convoy.remolcador?.estado ?? 'Operativo'}
-                </p>
-              </div>
-
-              <div className="text-right">
-                <p className="text-xs text-blue-200 uppercase tracking-widest font-bold">Tonelaje Total</p>
-                <p className="text-2xl font-bold tabular-nums">
-                  {tonelajeTotal.toLocaleString('es-AR')}{' '}
-                  <span className="text-sm font-normal">TN</span>
-                </p>
-              </div>
-            </div>
-
-            {/* Grid de Barcazas */}
-            {convoy.barcazas.length === 0 ? (
-              <div className="bg-white border-2 border-dashed border-gray-300 rounded-xl p-12 text-center">
-                <p className="text-gray-500 font-semibold">No hay unidades asignadas a este convoy.</p>
-              </div>
-            ) : (
+          {isLoading && (
+            <>
+              <SkeletonHeader />
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
-                {convoy.barcazas.map((b) => {
-                  const estadoCfg = ESTADO_CONFIG[b.estado] ?? ESTADO_CONFIG.EnTransito;
-                  const isPending =
-                    pendingBarcazaId === b.id &&
-                    (mutAmarrar.isPending || mutFondear.isPending);
-
-                  return (
-                    <div
-                      key={b.id}
-                      className="bg-white rounded-xl border border-gray-200 p-5 space-y-3 shadow-sm hover:border-[#104a8e]/30 transition-colors"
-                    >
-                      {/* Encabezado Tarjeta */}
-                      <div className="flex justify-between items-start">
-                        <div className="min-w-0 pr-2">
-                          <h3 className="font-bold text-gray-900 truncate" title={b.nombre}>
-                            {b.nombre}
-                          </h3>
-                          <p className="text-[11px] text-gray-400 font-mono mt-0.5">
-                            {b.matricula ?? 'S/M'}
-                          </p>
-                        </div>
-                        <span
-                          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border flex-shrink-0 ${estadoCfg.badgeCls}`}
-                        >
-                          {estadoCfg.label}
-                        </span>
-                      </div>
-
-                      {/* Datos Carga */}
-                      <div className="grid grid-cols-2 gap-2 mt-2">
-                        <div className="bg-gray-50 rounded-lg p-2 text-center border border-gray-100">
-                          <p className="text-[10px] text-gray-400 uppercase font-bold">Carga</p>
-                          <p className="text-xs font-semibold text-gray-700 truncate" title={b.tipoCarga}>
-                            {b.tipoCarga}
-                          </p>
-                        </div>
-                        <div className="bg-gray-50 rounded-lg p-2 text-center border border-gray-100">
-                          <p className="text-[10px] text-gray-400 uppercase font-bold">Peso</p>
-                          <p className="text-xs font-mono font-semibold text-[#104a8e]">
-                            {b.tonelaje.toLocaleString('es-AR')} {b.unidad}
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Acciones */}
-                      <div className="flex gap-2 pt-2 border-t border-gray-100 mt-auto">
-                        <button
-                          onClick={() => handleAmarrar(b.id)}
-                          disabled={isPending || b.estado === 'Amarrada' || b.estado === 'FueraDeServicio'}
-                          className="flex-1 bg-[#104a8e] text-white py-1.5 rounded-lg text-xs font-semibold hover:bg-[#002454] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-                        >
-                          {isPending && mutAmarrar.isPending ? 'Amarrando...' : 'Amarrar'}
-                        </button>
-                        <button
-                          onClick={() => handleFondear(b.id)}
-                          disabled={isPending || b.estado === 'Fondeada' || b.estado === 'FueraDeServicio'}
-                          className="flex-1 border border-[#104a8e] text-[#104a8e] py-1.5 rounded-lg text-xs font-semibold hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-                        >
-                          {isPending && mutFondear.isPending ? 'Fondeando...' : 'Fondear'}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
+                {Array.from({ length: 3 }).map((_, i) => <SkeletonBarcaza key={i} />)}
               </div>
-            )}
-          </>
-        )}
+            </>
+          )}
+
+          {isError && <ErrorFetchConvoy mensaje={resolverMensajeError(queryError)} onRetry={refetch} />}
+
+          {convoy && (
+            <>
+              {/* Header Institucional */}
+              <div className="bg-[#002454] p-5 rounded-xl flex justify-between items-center text-white mb-6 shadow-md">
+                <div className="flex flex-col gap-2">
+                  <div>
+                    <h2 className="text-xl font-bold tracking-tight">
+                      Tractor: {convoy.remolcador?.nombre ?? convoy.nombreBuque}
+                    </h2>
+                    <p className="text-sm text-blue-200 mt-0.5">
+                      Estado: {convoy.remolcador?.estado ?? 'Operativo'}
+                    </p>
+                  </div>
+                  <button
+                    onClick={abrirModalAdjuntar}
+                    className="w-max mt-1 border border-blue-400 text-blue-100 hover:bg-blue-800/50 hover:text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    Adjuntar Barcaza
+                  </button>
+                </div>
+
+                <div className="text-right">
+                  <p className="text-xs text-blue-200 uppercase tracking-widest font-bold">Tonelaje Total</p>
+                  <p className="text-2xl font-bold tabular-nums">
+                    {tonelajeTotal.toLocaleString('es-AR')}{' '}
+                    <span className="text-sm font-normal">TN</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* Grid de Barcazas / Empty State */}
+              {convoy.barcazas.length === 0 ? (
+                <div className="bg-white border-2 border-dashed border-gray-300 rounded-xl p-12 text-center">
+                  <p className="text-gray-500 font-semibold">No hay barcazas asociadas a este convoy.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+                  {convoy.barcazas.map((b) => {
+                    const estadoCfg = ESTADO_CONFIG[b.estado] ?? ESTADO_CONFIG.EnTransito;
+                    const isPending =
+                      pendingBarcazaId === b.id &&
+                      (mutAmarrar.isPending || mutFondear.isPending || mutSeparar.isPending);
+
+                    return (
+                      <div
+                        key={b.id}
+                        className="bg-white rounded-xl border border-gray-200 p-5 space-y-3 shadow-sm hover:border-[#104a8e]/30 transition-colors"
+                      >
+                        <div className="flex justify-between items-start">
+                          <div className="min-w-0 pr-2">
+                            <h3 className="font-bold text-gray-900 truncate" title={b.nombre}>
+                              {b.nombre}
+                            </h3>
+                            <p className="text-[11px] text-gray-400 font-mono mt-0.5">
+                              {b.matricula ?? 'S/M'}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${estadoCfg.badgeCls}`}>
+                              {estadoCfg.label}
+                            </span>
+                            <button
+                              onClick={() => abrirModalSeparar(b.id, b.nombre)}
+                              disabled={isPending}
+                              className="text-gray-400 hover:text-red-600 hover:bg-red-50 p-1 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              title="Separar barcaza del convoy"
+                            >
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                              </svg>
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 mt-2">
+                          <div className="bg-gray-50 rounded-lg p-2 text-center border border-gray-100">
+                            <p className="text-[10px] text-gray-400 uppercase font-bold">Carga</p>
+                            <p className="text-xs font-semibold text-gray-700 truncate" title={b.tipoCarga}>
+                              {b.tipoCarga}
+                            </p>
+                          </div>
+                          <div className="bg-gray-50 rounded-lg p-2 text-center border border-gray-100">
+                            <p className="text-[10px] text-gray-400 uppercase font-bold">Peso</p>
+                            <p className="text-xs font-mono font-semibold text-[#104a8e]">
+                              {b.tonelaje.toLocaleString('es-AR')} {b.unidad}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex gap-2 pt-2 border-t border-gray-100 mt-auto">
+                          <button
+                            onClick={() => abrirModalAmarrar(b.id, b.nombre)}
+                            disabled={isPending || b.estado === 'Amarrada' || b.estado === 'FueraDeServicio'}
+                            className="flex-1 bg-[#104a8e] text-white py-1.5 rounded-lg text-xs font-semibold hover:bg-[#002454] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                          >
+                            {isPending && mutAmarrar.isPending ? 'Amarrando...' : 'Amarrar'}
+                          </button>
+                          <button
+                            onClick={() => abrirModalFondear(b.id, b.nombre)}
+                            disabled={isPending || b.estado === 'Fondeada' || b.estado === 'FueraDeServicio'}
+                            className="flex-1 border border-[#104a8e] text-[#104a8e] py-1.5 rounded-lg text-xs font-semibold hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                          >
+                            {isPending && mutFondear.isPending ? 'Fondeando...' : 'Fondear'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }

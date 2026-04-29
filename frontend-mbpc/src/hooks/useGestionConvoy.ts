@@ -5,6 +5,8 @@
 //   GET  /api/convoyes/viaje/{viajeId}
 //   PUT  /api/convoyes/barcazas/{barcazaId}/amarrar
 //   PUT  /api/convoyes/barcazas/{barcazaId}/fondear
+//   POST /api/convoyes/viaje/{viajeId}/adjuntar
+//   POST /api/convoyes/viaje/{viajeId}/separar
 //
 // Capa de red: axiosInstance desde @/axiosClient (ya inyecta /api).
 // Invalidación automática tras cada mutación exitosa.
@@ -129,6 +131,72 @@ export function useFondearBarcaza() {
     mutationFn: async ({ barcazaId, payload }) => {
       await axiosInstance.put(
         `/convoyes/barcazas/${encodeURIComponent(barcazaId)}/fondear`,
+        payload,
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: convoyKeys.all });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Hook de Mutación — POST /api/convoyes/viaje/{viajeId}/adjuntar
+// ---------------------------------------------------------------------------
+
+export interface AdjuntarBarcazasRequest {
+  barcazasIds: string[];
+  ubicacion: string;
+}
+
+interface AdjuntarVariables {
+  viajeId: string;
+  payload: AdjuntarBarcazasRequest;
+}
+
+/**
+ * Adjunta barcazas a un convoy en viaje.
+ */
+export function useAdjuntarBarcazas() {
+  const queryClient = useQueryClient();
+
+  return useMutation<void, Error, AdjuntarVariables>({
+    mutationFn: async ({ viajeId, payload }) => {
+      await axiosInstance.post(
+        `/convoyes/viaje/${encodeURIComponent(viajeId)}/adjuntar`,
+        payload,
+      );
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: convoyKeys.all });
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Hook de Mutación — POST /api/convoyes/viaje/{viajeId}/separar
+// ---------------------------------------------------------------------------
+
+export interface SepararConvoyRequest {
+  barcazasIds: string[];
+  ubicacion: string;
+}
+
+interface SepararVariables {
+  viajeId: string;
+  payload: SepararConvoyRequest;
+}
+
+/**
+ * Separa barcazas de un convoy en viaje.
+ */
+export function useSepararConvoy() {
+  const queryClient = useQueryClient();
+
+  return useMutation<void, Error, SepararVariables>({
+    mutationFn: async ({ viajeId, payload }) => {
+      await axiosInstance.post(
+        `/convoyes/viaje/${encodeURIComponent(viajeId)}/separar`,
         payload,
       );
     },
