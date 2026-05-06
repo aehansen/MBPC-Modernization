@@ -23,6 +23,14 @@ namespace Mbpc.Api.Services
         Task<List<ViajePosicionMongo>> GetViajesAsync(string? nombre = null, int pagina = 1, int tamanio = 50);
 
         /// <summary>
+        /// Retorna viajes proyectados como DTOs, paginados. El filtro por CosteraId
+        /// se aplica internamente desde el contexto HTTP del usuario autenticado.
+        /// El parámetro opcional <paramref name="nombre"/> aplica un filtro Regex
+        /// case-insensitive sobre VesselName directamente en MongoDB, antes de paginar.
+        /// </summary>
+        Task<List<ViajeDto>> ObtenerViajesDtoAsync(string? nombre, int pagina, int tamanio);
+
+        /// <summary>
         /// Retorna la última posición de un buque por MMSI. Valida internamente
         /// que el registro pertenezca a la costera del usuario autenticado.
         /// </summary>

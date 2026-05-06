@@ -17,7 +17,6 @@ namespace Mbpc.Api.Models.Mongo
         [BsonElement("VesselName")]
         public string VesselName { get; set; } = null!;
 
-        // Puede ser nulo en algunos registros (ej: ANGELITA B)
         [BsonElement("MMSI")]
         public string? Mmsi { get; set; }
 
@@ -36,7 +35,7 @@ namespace Mbpc.Api.Models.Mongo
         [BsonElement("NavegationStatusDesc")]
         public string NavegationStatusDesc { get; set; } = null!;
 
-        [BsonElement("SpeedOverGroud")] // Respetamos el typo original de la base
+        [BsonElement("SpeedOverGroud")] 
         public double SpeedOverGround { get; set; }
 
         [BsonElement("CourseOverGround")]
@@ -54,12 +53,24 @@ namespace Mbpc.Api.Models.Mongo
         [BsonElement("location")]
         public LocationMongo? Location { get; set; }
 
-        // ── MULTITENANT GEOGRÁFICO ──
-        // El campo CosteraId en BSON es numérico (Int32).
-        // CosteraId == 0  →  registro global / Super Admin.
-        // CosteraId  > 0  →  registro restringido a esa jurisdicción costera.
+        // ── MULTITENANT GEOGRÁFICO RESILIENTE ──
         [BsonElement("CosteraId")]
-        public int? CosteraId { get; set; }
+        public object? CosteraIdRaw { get; set; } // Captura Int o String sin explotar
+
+        [BsonIgnore]
+        public int? CosteraId 
+        { 
+            get 
+            {
+                if (CosteraIdRaw == null) return null;
+                if (CosteraIdRaw is int i) return i;
+                if (CosteraIdRaw is long l) return (int)l;
+                // Si es un string (ej: "RÍO PARANÁ..."), intentamos parsear o devolvemos null
+                if (int.TryParse(CosteraIdRaw.ToString(), out var result)) return result;
+                return null; 
+            }
+            set => CosteraIdRaw = value;
+        }
     }
 
     public class LocationMongo

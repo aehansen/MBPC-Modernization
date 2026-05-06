@@ -1,18 +1,7 @@
 // src/hooks/useGestionConvoy.ts
-//
-// Hooks de TanStack Query v5 para el módulo de Gestión de Convoyes.
-// Consume los endpoints de ConvoyController:
-//   GET  /api/convoyes/viaje/{viajeId}
-//   PUT  /api/convoyes/barcazas/{barcazaId}/amarrar
-//   PUT  /api/convoyes/barcazas/{barcazaId}/fondear
-//   POST /api/convoyes/viaje/{viajeId}/adjuntar
-//   POST /api/convoyes/viaje/{viajeId}/separar
-//
-// Capa de red: axiosInstance desde @/axiosClient (ya inyecta /api).
-// Invalidación automática tras cada mutación exitosa.
-
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import axiosInstance from '@/axiosClient';
+import { cargasKeys } from './useCargasApi';
 import type {
   ConvoyDto,
   AmarrarBarcazaRequest,
@@ -20,13 +9,8 @@ import type {
 } from '@/types/convoy.types';
 
 // ---------------------------------------------------------------------------
-// Tipos compartidos de Error Handling (copiados de ModalActualizarPosicion)
+// Tipos compartidos de Error Handling
 // ---------------------------------------------------------------------------
-
-/**
- * Forma del cuerpo de error que devuelve ASP.NET Core (RFC 9457 / ProblemDetails).
- * Incluye el fallback `mensaje` y el diccionario `errors` de ValidationProblemDetails.
- */
 export interface DotNetProblemDetails {
   detail?: string;
   title?: string;
@@ -37,11 +21,6 @@ export interface DotNetProblemDetails {
 // ---------------------------------------------------------------------------
 // Query Keys
 // ---------------------------------------------------------------------------
-
-/**
- * Fábrica de query keys tipada.
- * Centraliza las claves para invalidaciones consistentes.
- */
 export const convoyKeys = {
   all: ['convoy'] as const,
   byViaje: (viajeId: string) => ['convoy', 'viaje', viajeId] as const,
@@ -50,12 +29,6 @@ export const convoyKeys = {
 // ---------------------------------------------------------------------------
 // Hook de Consulta — GET /api/convoyes/viaje/{viajeId}
 // ---------------------------------------------------------------------------
-
-/**
- * Obtiene la composición completa del convoy asociado a un viaje.
- *
- * @param viajeId - Identificador del viaje. Si es string vacío, la query queda deshabilitada.
- */
 export function useObtenerConvoy(viajeId: string) {
   return useQuery<ConvoyDto, Error>({
     queryKey: convoyKeys.byViaje(viajeId),
@@ -67,9 +40,8 @@ export function useObtenerConvoy(viajeId: string) {
       return data;
     },
     enabled: viajeId.trim().length > 0,
-    staleTime: 30_000, // 30 s — los datos de convoy cambian con poca frecuencia
+    staleTime: 30_000,
     retry: (failureCount, error) => {
-      // No reintentar en errores 4xx (el error es del cliente, no transitorio)
       if (
         'response' in error &&
         (error as { response?: { status?: number } }).response?.status !== undefined
@@ -85,16 +57,12 @@ export function useObtenerConvoy(viajeId: string) {
 // ---------------------------------------------------------------------------
 // Hook de Mutación — PUT /api/convoyes/barcazas/{barcazaId}/amarrar
 // ---------------------------------------------------------------------------
-
 interface AmarrarVariables {
   barcazaId: string;
+  viajeId: string; // Incorporamos viajeId para la invalidación cruzada
   payload: AmarrarBarcazaRequest;
 }
 
-/**
- * Amarra una barcaza al muelle indicado.
- * Invalida el cache de convoy en onSuccess para refrescar el panel automáticamente.
- */
 export function useAmarrarBarcaza() {
   const queryClient = useQueryClient();
 
@@ -105,8 +73,9 @@ export function useAmarrarBarcaza() {
         payload,
       );
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: convoyKeys.all });
+      queryClient.invalidateQueries({ queryKey: cargasKeys.byViaje(variables.viajeId) }); // Invalidación cruzada
     },
   });
 }
@@ -114,16 +83,12 @@ export function useAmarrarBarcaza() {
 // ---------------------------------------------------------------------------
 // Hook de Mutación — PUT /api/convoyes/barcazas/{barcazaId}/fondear
 // ---------------------------------------------------------------------------
-
 interface FondearVariables {
   barcazaId: string;
+  viajeId: string; // Incorporamos viajeId para la invalidación cruzada
   payload: FondearBarcazaRequest;
 }
 
-/**
- * Fondea una barcaza en la zona indicada.
- * Invalida el cache de convoy en onSuccess para refrescar el panel automáticamente.
- */
 export function useFondearBarcaza() {
   const queryClient = useQueryClient();
 
@@ -134,8 +99,9 @@ export function useFondearBarcaza() {
         payload,
       );
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: convoyKeys.all });
+      queryClient.invalidateQueries({ queryKey: cargasKeys.byViaje(variables.viajeId) }); // Invalidación cruzada
     },
   });
 }
@@ -143,7 +109,6 @@ export function useFondearBarcaza() {
 // ---------------------------------------------------------------------------
 // Hook de Mutación — POST /api/convoyes/viaje/{viajeId}/adjuntar
 // ---------------------------------------------------------------------------
-
 export interface AdjuntarBarcazasRequest {
   barcazasIds: string[];
   ubicacion: string;
@@ -154,9 +119,6 @@ interface AdjuntarVariables {
   payload: AdjuntarBarcazasRequest;
 }
 
-/**
- * Adjunta barcazas a un convoy en viaje.
- */
 export function useAdjuntarBarcazas() {
   const queryClient = useQueryClient();
 
@@ -167,8 +129,9 @@ export function useAdjuntarBarcazas() {
         payload,
       );
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: convoyKeys.all });
+      queryClient.invalidateQueries({ queryKey: cargasKeys.byViaje(variables.viajeId) }); // Invalidación cruzada
     },
   });
 }
@@ -176,7 +139,6 @@ export function useAdjuntarBarcazas() {
 // ---------------------------------------------------------------------------
 // Hook de Mutación — POST /api/convoyes/viaje/{viajeId}/separar
 // ---------------------------------------------------------------------------
-
 export interface SepararConvoyRequest {
   barcazasIds: string[];
   ubicacion: string;
@@ -187,9 +149,6 @@ interface SepararVariables {
   payload: SepararConvoyRequest;
 }
 
-/**
- * Separa barcazas de un convoy en viaje.
- */
 export function useSepararConvoy() {
   const queryClient = useQueryClient();
 
@@ -200,8 +159,9 @@ export function useSepararConvoy() {
         payload,
       );
     },
-    onSuccess: () => {
+    onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: convoyKeys.all });
+      queryClient.invalidateQueries({ queryKey: cargasKeys.byViaje(variables.viajeId) }); // Invalidación cruzada
     },
   });
 }

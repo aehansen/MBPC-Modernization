@@ -4,7 +4,6 @@ import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
 import axiosInstance from '@/axiosClient';
 import {
-  useAmarrarBarcaza,
   useFondearBarcaza,
   useAdjuntarBarcazas,
   useSepararConvoy,
@@ -12,10 +11,10 @@ import {
 import type { DotNetProblemDetails } from '@/hooks/useGestionConvoy';
 import type { EstadoBarcaza } from '@/types/convoy.types';
 import { useState, useRef, useEffect } from 'react';
-import BarcazaAutocomplete from './BarcazaAutocomplete'; // Importamos el nuevo componente
+import BarcazaAutocomplete from './BarcazaAutocomplete';
 
 // ============================================================================
-// DTOs — reflejan el ConvoyDto del backend en camelCase estricto
+// DTOs
 // ============================================================================
 
 interface RemolcadorConvoyDto {
@@ -56,7 +55,7 @@ interface PanelGestionConvoyProps {
 // Modal State Types
 // ============================================================================
 
-type AccionModal = 'amarrar' | 'fondear';
+type AccionModal = 'fondear';
 
 interface EstadoModal {
   abierto: boolean;
@@ -77,6 +76,7 @@ const MODAL_INICIAL: EstadoModal = {
 interface EstadoModalAdjuntar {
   abierto: boolean;
   barcazaId: string;
+  barcazaNombre: string;
   ubicacion: string;
 }
 
@@ -87,20 +87,16 @@ interface EstadoModalSeparar {
   ubicacion: string;
 }
 
-const MODAL_ADJUNTAR_INICIAL: EstadoModalAdjuntar = { abierto: false, barcazaId: '', ubicacion: '' };
+const MODAL_ADJUNTAR_INICIAL: EstadoModalAdjuntar = { abierto: false, barcazaId: '', barcazaNombre: '', ubicacion: '' };
 const MODAL_SEPARAR_INICIAL: EstadoModalSeparar = { abierto: false, barcazaId: '', barcazaNombre: '', ubicacion: '' };
 
 // ============================================================================
-// Query Keys — objeto centralizado para evitar magic strings
+// Query Keys & Fetcher
 // ============================================================================
 
 const convoyKeys = {
   detail: (viajeId: string) => ['convoy', viajeId] as const,
 };
-
-// ============================================================================
-// Fetcher
-// ============================================================================
 
 const fetchConvoy = async (id: string) => {
     const { data } = await axiosInstance.get<ConvoyDto>(`/convoyes/viaje/${id}`);
@@ -110,6 +106,8 @@ const fetchConvoy = async (id: string) => {
 // ============================================================================
 // Helpers
 // ============================================================================
+
+const esNumerico = (str: string) => /^\d+$/.test(str);
 
 function resolverMensajeError(error: Error | null): string {
   if (!error) return '';
@@ -252,23 +250,6 @@ function ModalDestino({ estado, isPending, onChange, onConfirmar, onCancelar }: 
 
   if (!estado.abierto) return null;
 
-  const esAmarrar = estado.accion === 'amarrar';
-  const titulo = esAmarrar ? 'Amarrar Barcaza' : 'Fondear Barcaza';
-  const label = esAmarrar ? 'Muelle de destino' : 'Zona de fondeo';
-  const placeholder = esAmarrar ? 'Ej: Muelle 3' : 'Ej: Zona Beta';
-  const textoPendiente = esAmarrar ? 'Amarrando...' : 'Fondeando...';
-  const textoConfirmar = esAmarrar ? 'Amarrar' : 'Fondear';
-
-  const IconoAccion = esAmarrar ? (
-    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-    </svg>
-  ) : (
-    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12H3l9-9 9 9h-2M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" />
-    </svg>
-  );
-
   return (
     <div
       role="dialog"
@@ -280,10 +261,12 @@ function ModalDestino({ estado, isPending, onChange, onConfirmar, onCancelar }: 
       <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-sm border border-gray-200 overflow-hidden">
         <div className="bg-[#104a8e] px-6 py-4 flex items-center gap-3 text-white">
           <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center flex-shrink-0">
-            {IconoAccion}
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12H3l9-9 9 9h-2M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" />
+            </svg>
           </div>
           <div className="min-w-0">
-            <h2 className="font-bold text-base leading-tight">{titulo}</h2>
+            <h2 className="font-bold text-base leading-tight">Fondear Barcaza</h2>
             {estado.barcazaNombre && (
               <p className="text-blue-200 text-xs mt-0.5 truncate">{estado.barcazaNombre}</p>
             )}
@@ -292,7 +275,7 @@ function ModalDestino({ estado, isPending, onChange, onConfirmar, onCancelar }: 
         <div className="px-6 py-5 space-y-4">
           <div>
             <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-1.5">
-              {label}
+              Zona de fondeo
             </label>
             <input
               ref={inputRef}
@@ -302,7 +285,7 @@ function ModalDestino({ estado, isPending, onChange, onConfirmar, onCancelar }: 
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && estado.destino.trim() && !isPending) onConfirmar();
               }}
-              placeholder={placeholder}
+              placeholder="Ej: Zona Beta"
               disabled={isPending}
               className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#104a8e]/40 focus:border-[#104a8e] disabled:bg-gray-50 transition-colors"
             />
@@ -312,7 +295,7 @@ function ModalDestino({ estado, isPending, onChange, onConfirmar, onCancelar }: 
               Cancelar
             </button>
             <button onClick={onConfirmar} disabled={isPending || !estado.destino.trim()} className="flex-1 bg-[#104a8e] text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-[#002454] disabled:opacity-40 flex items-center justify-center gap-1.5 transition-colors">
-              {isPending ? 'Procesando...' : textoConfirmar}
+              {isPending ? 'Procesando...' : 'Fondear'}
             </button>
           </div>
         </div>
@@ -348,11 +331,10 @@ function ModalAdjuntar({ viajeId, estado, isPending, setEstado, onConfirmar, onC
         <div className="px-6 py-5 space-y-4">
           <div>
             <div className="mb-3">
-              {/* Nuevo Componente de Autocompletado */}
               <BarcazaAutocomplete 
                 etapaId={viajeId} 
-                onSelect={(b) => setEstado({ ...estado, barcazaId: b.idBuque.toString() })} 
-                onClear={() => setEstado({ ...estado, barcazaId: '' })}
+                onSelect={(b) => setEstado({ ...estado, barcazaId: b.idBuque.toString(), barcazaNombre: b.nombre })} 
+                onClear={() => setEstado({ ...estado, barcazaId: '', barcazaNombre: '' })}
                 disabled={isPending}
               />
             </div>
@@ -409,12 +391,12 @@ function ModalSeparar({ estado, isPending, setEstado, onConfirmar, onCancelar }:
             </svg>
           </div>
           <div className="min-w-0">
-            <h2 className="font-bold text-base leading-tight">Separar Barcaza</h2>
+            <h2 className="font-bold text-base leading-tight">Liberar Barcaza</h2>
             <p className="text-red-200 text-xs mt-0.5 truncate">{estado.barcazaNombre}</p>
           </div>
         </div>
         <div className="px-6 py-5 space-y-4">
-          <p className="text-sm text-gray-600">Estás a punto de separar la barcaza <strong>{estado.barcazaNombre}</strong> del convoy. ¿Dónde quedará ubicada?</p>
+          <p className="text-sm text-gray-600">Estás a punto de liberar la barcaza <strong>{estado.barcazaNombre}</strong> del convoy. ¿Dónde quedará ubicada amarrada?</p>
           <div>
             <label className="block text-xs font-semibold text-gray-600 uppercase tracking-wider mb-1.5">Ubicación final</label>
             <input
@@ -430,7 +412,7 @@ function ModalSeparar({ estado, isPending, setEstado, onConfirmar, onCancelar }:
           <div className="flex gap-2.5 pt-1">
             <button onClick={onCancelar} disabled={isPending} className="flex-1 border border-gray-300 text-gray-700 py-2.5 rounded-lg text-sm font-semibold hover:bg-gray-50 disabled:opacity-40 transition-colors">Cancelar</button>
             <button onClick={onConfirmar} disabled={isPending || !estado.ubicacion.trim()} className="flex-1 bg-red-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-red-700 disabled:opacity-40 transition-colors">
-              {isPending ? 'Separando...' : 'Separar Barcaza'}
+              {isPending ? 'Liberando...' : 'Liberar Barcaza'}
             </button>
           </div>
         </div>
@@ -470,7 +452,6 @@ export default function PanelGestionConvoy({ viajeId }: PanelGestionConvoyProps)
   });
 
   // ─── Mutaciones ────────────────────────────────────────────────────────────
-  const mutAmarrar = useAmarrarBarcaza();
   const mutFondear = useFondearBarcaza();
   const mutAdjuntar = useAdjuntarBarcazas();
   const mutSeparar = useSepararConvoy();
@@ -481,11 +462,6 @@ export default function PanelGestionConvoy({ viajeId }: PanelGestionConvoyProps)
 
   // ─── Apertura de Modales ───────────────────────────────────────────────────
 
-  function abrirModalAmarrar(barcazaId: string, barcazaNombre: string) {
-    setErrorMutacion(null);
-    setModal({ abierto: true, accion: 'amarrar', barcazaId, barcazaNombre, destino: '' });
-  }
-
   function abrirModalFondear(barcazaId: string, barcazaNombre: string) {
     setErrorMutacion(null);
     setModal({ abierto: true, accion: 'fondear', barcazaId, barcazaNombre, destino: '' });
@@ -493,7 +469,7 @@ export default function PanelGestionConvoy({ viajeId }: PanelGestionConvoyProps)
 
   function abrirModalAdjuntar() {
     setErrorMutacion(null);
-    setModalAdjuntar({ abierto: true, barcazaId: '', ubicacion: '' });
+    setModalAdjuntar({ abierto: true, barcazaId: '', barcazaNombre: '', ubicacion: '' });
   }
 
   function abrirModalSeparar(barcazaId: string, barcazaNombre: string) {
@@ -515,7 +491,7 @@ export default function PanelGestionConvoy({ viajeId }: PanelGestionConvoyProps)
 
   function handleConfirmarDestino() {
     if (!modal.barcazaId || !modal.destino.trim() || !modal.accion) return;
-    const { barcazaId, accion, destino } = modal;
+    const { barcazaId, destino } = modal;
     setPendingBarcazaId(barcazaId);
     cerrarModales();
 
@@ -525,20 +501,16 @@ export default function PanelGestionConvoy({ viajeId }: PanelGestionConvoyProps)
       onSettled: () => setPendingBarcazaId(null),
     };
 
-    if (accion === 'amarrar') {
-      mutAmarrar.mutate({ barcazaId, payload: { nuevoMuelle: destino.trim() } }, handlers);
-    } else {
-      mutFondear.mutate({ barcazaId, payload: { zonaFondeo: destino.trim() } }, handlers);
-    }
+    mutFondear.mutate({ barcazaId, payload: { zonaFondeo: destino.trim() } }, handlers);
   }
 
   function handleConfirmarAdjuntar() {
     if (!modalAdjuntar.barcazaId.trim() || !modalAdjuntar.ubicacion.trim()) return;
-    const { barcazaId, ubicacion } = modalAdjuntar;
+    const { barcazaId, barcazaNombre, ubicacion } = modalAdjuntar;
     cerrarModales();
 
     mutAdjuntar.mutate(
-      { viajeId, payload: { barcazasIds: [barcazaId.trim()], ubicacion: ubicacion.trim() } },
+      { viajeId, payload: { barcazasIds: [barcazaId.trim()], barcazaNombre: barcazaNombre.trim(), ubicacion: ubicacion.trim() } as any },
       {
         onSuccess: invalidarConvoy,
         onError: (err: unknown) => setErrorMutacion(resolverMensajeError(err as Error)),
@@ -562,11 +534,13 @@ export default function PanelGestionConvoy({ viajeId }: PanelGestionConvoyProps)
     );
   }
 
-  // ─── Tonelaje total ──
   const tonelajeTotal = convoy?.barcazas.reduce((acc, b) => acc + b.tonelaje, 0) ?? 0;
-  const modalIsPending = modal.abierto && (mutAmarrar.isPending || mutFondear.isPending);
+  const modalIsPending = modal.abierto && (mutFondear.isPending);
 
-  // ─── Render ────────────────────────────────────────────────────────────────
+  // Parseamos un tractor o buque amigable para el frontend
+  const rawTractorName = convoy?.remolcador?.nombre ?? convoy?.nombreBuque ?? "Remolcador Desconocido";
+  const tractorVisual = esNumerico(rawTractorName) ? `Remolcador ${rawTractorName}` : rawTractorName;
+
   return (
     <>
       <ModalDestino estado={modal} isPending={modalIsPending} onChange={actualizarDestino} onConfirmar={handleConfirmarDestino} onCancelar={cerrarModales} />
@@ -595,7 +569,7 @@ export default function PanelGestionConvoy({ viajeId }: PanelGestionConvoyProps)
                 <div className="flex flex-col gap-2">
                   <div>
                     <h2 className="text-xl font-bold tracking-tight">
-                      Tractor: {convoy.remolcador?.nombre ?? convoy.nombreBuque}
+                      Convoy: {tractorVisual}
                     </h2>
                     <p className="text-sm text-blue-200 mt-0.5">
                       Estado: {convoy.remolcador?.estado ?? 'Operativo'}
@@ -630,9 +604,12 @@ export default function PanelGestionConvoy({ viajeId }: PanelGestionConvoyProps)
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                   {convoy.barcazas.map((b) => {
                     const estadoCfg = ESTADO_CONFIG[b.estado] ?? ESTADO_CONFIG.EnTransito;
-                    const isPending =
-                      pendingBarcazaId === b.id &&
-                      (mutAmarrar.isPending || mutFondear.isPending || mutSeparar.isPending);
+                    const isPending = pendingBarcazaId === b.id && (mutSeparar.isPending);
+                    
+                    // Fallback para nombres estrictamente numéricos (Hito 5.8 visual)
+                    const barcazaVisual = esNumerico(b.nombre) 
+                      ? (b.matricula ? b.matricula : `BZA-${b.nombre}`) 
+                      : b.nombre;
 
                     return (
                       <div
@@ -641,8 +618,8 @@ export default function PanelGestionConvoy({ viajeId }: PanelGestionConvoyProps)
                       >
                         <div className="flex justify-between items-start">
                           <div className="min-w-0 pr-2">
-                            <h3 className="font-bold text-gray-900 truncate" title={b.nombre}>
-                              {b.nombre}
+                            <h3 className="font-bold text-gray-900 truncate" title={barcazaVisual}>
+                              {barcazaVisual}
                             </h3>
                             <p className="text-[11px] text-gray-400 font-mono mt-0.5">
                               {b.matricula ?? 'S/M'}
@@ -652,48 +629,42 @@ export default function PanelGestionConvoy({ viajeId }: PanelGestionConvoyProps)
                             <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${estadoCfg.badgeCls}`}>
                               {estadoCfg.label}
                             </span>
-                            <button
-                              onClick={() => abrirModalSeparar(b.id, b.nombre)}
-                              disabled={isPending}
-                              className="text-gray-400 hover:text-red-600 hover:bg-red-50 p-1 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                              title="Separar barcaza del convoy"
-                            >
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                              </svg>
-                            </button>
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-2 gap-2 mt-2">
+                        <div className="grid grid-cols-3 gap-2 mt-2">
                           <div className="bg-gray-50 rounded-lg p-2 text-center border border-gray-100">
-                            <p className="text-[10px] text-gray-400 uppercase font-bold">Carga</p>
+                            <p className="text-[10px] text-gray-400 uppercase font-bold">Tipo</p>
                             <p className="text-xs font-semibold text-gray-700 truncate" title={b.tipoCarga}>
-                              {b.tipoCarga}
+                              {b.tipoCarga && b.tipoCarga !== 'A Definir' ? b.tipoCarga : <span className="italic text-gray-400">Sin datos</span>}
                             </p>
                           </div>
                           <div className="bg-gray-50 rounded-lg p-2 text-center border border-gray-100">
                             <p className="text-[10px] text-gray-400 uppercase font-bold">Peso</p>
                             <p className="text-xs font-mono font-semibold text-[#104a8e]">
-                              {b.tonelaje.toLocaleString('es-AR')} {b.unidad}
+                              {b.tonelaje > 0
+                                ? `${b.tonelaje.toLocaleString('es-AR')} ${b.unidad || 'Tn'}`
+                                : <span className="italic text-gray-400">—</span>}
+                            </p>
+                          </div>
+                          {/* Mercadería: nombre real del producto (Soja, Gasoil, etc.) */}
+                          <div className="bg-gray-50 rounded-lg p-2 text-center border border-gray-100">
+                            <p className="text-[10px] text-gray-400 uppercase font-bold">Mercadería</p>
+                            <p className="text-xs font-semibold text-gray-700 truncate" title={b.tipoCarga ?? undefined}>
+                              {b.tipoCarga && b.tipoCarga !== 'A Definir'
+                                ? b.tipoCarga
+                                : <span className="italic text-gray-400">A Definir</span>}
                             </p>
                           </div>
                         </div>
 
                         <div className="flex gap-2 pt-2 border-t border-gray-100 mt-auto">
                           <button
-                            onClick={() => abrirModalAmarrar(b.id, b.nombre)}
-                            disabled={isPending || b.estado === 'Amarrada' || b.estado === 'FueraDeServicio'}
-                            className="flex-1 bg-[#104a8e] text-white py-1.5 rounded-lg text-xs font-semibold hover:bg-[#002454] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                            onClick={() => abrirModalSeparar(b.id, barcazaVisual)}
+                            disabled={isPending || b.estado !== 'Amarrada'}
+                            className="w-full bg-[#104a8e] text-white py-1.5 rounded-lg text-xs font-semibold hover:bg-[#002454] disabled:opacity-40 disabled:cursor-not-allowed transition-all"
                           >
-                            {isPending && mutAmarrar.isPending ? 'Amarrando...' : 'Amarrar'}
-                          </button>
-                          <button
-                            onClick={() => abrirModalFondear(b.id, b.nombre)}
-                            disabled={isPending || b.estado === 'Fondeada' || b.estado === 'FueraDeServicio'}
-                            className="flex-1 border border-[#104a8e] text-[#104a8e] py-1.5 rounded-lg text-xs font-semibold hover:bg-blue-50 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-                          >
-                            {isPending && mutFondear.isPending ? 'Fondeando...' : 'Fondear'}
+                            {isPending && mutSeparar.isPending ? 'Liberando...' : 'Liberar Barcaza'}
                           </button>
                         </div>
                       </div>

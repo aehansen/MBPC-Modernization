@@ -1,3 +1,4 @@
+// Mbpc.Api/Controllers/ViajesController.cs
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Mbpc.Api.Services;
@@ -21,18 +22,6 @@ namespace Mbpc.Api.Controllers
             _logger       = logger;
         }
 
-        // ── GETs de lectura ───────────────────────────────────────────────────
-
-        /// <summary>
-        /// Lista paginada de posiciones activas desde MongoDB (max 200 por página).
-        /// El filtrado multitenant por CosteraId se resuelve internamente en el servicio
-        /// a partir del Claim del JWT; el Controller solo valida que el Claim exista.
-        ///
-        /// El parámetro opcional <paramref name="nombre"/> se propaga al servicio para
-        /// aplicar un filtro Regex case-insensitive sobre VesselName directamente en MongoDB,
-        /// antes de paginar, garantizando que la búsqueda cubra toda la colección de la costera
-        /// y no solo la página visual activa.
-        /// </summary>
         [HttpGet]
         public async Task<ActionResult<List<ViajeDto>>> GetViajes(
             [FromQuery] string? nombre  = null,
@@ -56,24 +45,12 @@ namespace Mbpc.Api.Controllers
                 "GetViajes — CosteraId: {CosteraId} | Nombre: '{Nombre}' | Página: {Pagina} | Tamaño: {Tamanio}",
                 costeraIdClaim, nombre ?? "TODOS", pagina, tamanio);
 
-            var posicionesMongo = await _viajeService.GetViajesAsync(nombre, pagina, tamanio);
-
-            var viajesDto = posicionesMongo.Select(p => new ViajeDto
-            {
-                Id                    = p.Id,
-                Buque                 = p.VesselName ?? "DESCONOCIDO",
-                Ruta                  = $"{p.Origin ?? "Sin Origen"} ➔ {p.Destination ?? "Sin Destino"} | Pos: {Math.Round(p.Latitude, 4)}, {Math.Round(p.Longitude, 4)}",
-                FechaInicioFormateada = p.MsgTime.ToString("dd/MM/yyyy HH:mm"),
-                EstadoActual          = p.NavegationStatusDesc ?? "N/A"
-            }).ToList();
+            // Controlador anoréxico: El mapeo ahora ocurre en el Service (Hito 5.8)
+            var viajesDto = await _viajeService.ObtenerViajesDtoAsync(nombre, pagina, tamanio);
 
             return Ok(viajesDto);
         }
 
-        /// <summary>
-        /// Busca un buque específico por MMSI.
-        /// El filtro de costera se aplica internamente en el servicio.
-        /// </summary>
         [HttpGet("{mmsi}")]
         public async Task<ActionResult<ViajePosicionMongo>> GetViajeByMmsi(string mmsi)
         {
@@ -91,10 +68,6 @@ namespace Mbpc.Api.Controllers
             return Ok(viaje);
         }
 
-        /// <summary>
-        /// Barcos actualmente en puerto (filtro por estado de navegación + datos Oracle).
-        /// El filtro de costera se aplica internamente en el servicio.
-        /// </summary>
         [HttpGet("puerto")]
         public async Task<ActionResult<List<BarcoPuertoDto>>> GetBarcosEnPuerto()
         {
@@ -115,10 +88,6 @@ namespace Mbpc.Api.Controllers
             return Ok(barcos);
         }
 
-        /// <summary>
-        /// Búsqueda de viajes históricos por criterios múltiples. Fuente: Oracle.
-        /// El filtro de costera se aplica internamente en el servicio.
-        /// </summary>
         [HttpGet("historico")]
         public async Task<ActionResult<List<ViajeHistoricoDto>>> GetHistorico(
             [FromQuery] string?   nombre    = null,
@@ -158,12 +127,6 @@ namespace Mbpc.Api.Controllers
             return Ok(historico);
         }
 
-        // ── Endpoint del Mapa AIS ─────────────────────────────────────────────
-
-        /// <summary>
-        /// Retorna los puntos GeoJSON-ready para el mapa ArcGIS.
-        /// El filtro multitenant por CosteraId se aplica internamente en el servicio.
-        /// </summary>
         [HttpGet("mapa")]
         public async Task<ActionResult<List<MapaViajeDto>>> GetMapaViajes(
             [FromQuery] string? mmsi        = null,
@@ -187,25 +150,9 @@ namespace Mbpc.Api.Controllers
             return Ok(puntos);
         }
 
-        // ── POSTs y PUTs de escritura (CQRS + MÁQUINA DE ESTADOS) ─────────────
-
-        /// <summary>
-        /// Inicia un nuevo viaje (escribe en Oracle + inserta en MongoDB y details_mbpc).
-        /// El buque nace con estado "Amarrado" según regla de negocio.
-        /// El CosteraId se inyecta en el DTO desde el Claim del token.
-        ///
-        /// Responsabilidades del Controller (y solo estas):
-        ///   1. Validar ModelState (DataAnnotations del DTO).
-        ///   2. Verificar que el Claim CosteraId exista en el JWT.
-        ///   3. Inyectar el CosteraId en el DTO antes de delegar.
-        ///   4. Delegar a IViajeService y traducir el resultado a HTTP.
-        /// </summary>
         [HttpPost]
         public async Task<ActionResult> IniciarViaje([FromBody] NuevoViajeDto nuevoViaje)
         {
-            // ── 1. Validación de ModelState (DataAnnotations) ─────────────────
-            // [ApiController] devuelve 400 automáticamente si ModelState es inválido,
-            // pero lo dejamos explícito para mayor claridad y trazabilidad en los logs.
             if (!ModelState.IsValid)
             {
                 _logger.LogWarning(
@@ -217,7 +164,6 @@ namespace Mbpc.Api.Controllers
                 return ValidationProblem(ModelState);
             }
 
-            // ── 2. Validación del Claim de identidad multitenant ──────────────
             var costeraIdClaim = User.FindFirstValue("CosteraId");
 
             if (string.IsNullOrWhiteSpace(costeraIdClaim))
@@ -228,17 +174,12 @@ namespace Mbpc.Api.Controllers
                 return Forbid();
             }
 
-            // ── 3. Inyección del CosteraId en el DTO ─────────────────────────
-            // El Controller es el único punto donde CosteraId se extrae del contexto HTTP
-            // y se asigna al DTO. El Service NUNCA debe leer el Claim para este flujo
-            // de escritura; ya llega correctamente etiquetado en el DTO.
             nuevoViaje.CosteraId = costeraIdClaim;
 
             _logger.LogInformation(
-                "IniciarViaje — BuqueId: '{BuqueId}' | Origen: '{Origen}' | Destino: '{Destino}' | CosteraId: {CosteraId}",
-                nuevoViaje.BuqueId, nuevoViaje.Origen, nuevoViaje.Destino, costeraIdClaim);
+                "IniciarViaje — BuqueId: '{BuqueId}' | Origen: '{Origen}' | Destino: '{Destino}' | Latitud: {Latitud} | Longitud: {Longitud} | CosteraId: {CosteraId}",
+                nuevoViaje.BuqueId, nuevoViaje.Origen, nuevoViaje.Destino, nuevoViaje.Latitud, nuevoViaje.Longitud, costeraIdClaim);
 
-            // ── 4. Delegación total al Service ────────────────────────────────
             var exito = await _viajeService.IniciarViajeAsync(nuevoViaje);
 
             if (!exito)
@@ -263,10 +204,6 @@ namespace Mbpc.Api.Controllers
             });
         }
 
-        /// <summary>
-        /// Zarpa el buque → NavegationStatusDesc = "Navegando".
-        /// Valida que el estado actual permita zarpar (No puede estar Fondeado).
-        /// </summary>
         [HttpPut("{id}/zarpar")]
         public async Task<ActionResult> ZarparViaje(string id)
         {
@@ -282,9 +219,6 @@ namespace Mbpc.Api.Controllers
             return Ok(new { mensaje = $"Buque '{id}' zarpó. Estado → 'Navegando'." });
         }
 
-        /// <summary>
-        /// Amarra el buque → NavegationStatusDesc = "Amarrado".
-        /// </summary>
         [HttpPut("{id}/amarrar")]
         public async Task<ActionResult> AmarrarViaje(string id)
         {
@@ -300,9 +234,6 @@ namespace Mbpc.Api.Controllers
             return Ok(new { mensaje = $"Buque '{id}' amarrado. Estado → 'Amarrado'." });
         }
 
-        /// <summary>
-        /// Fondea el buque → NavegationStatusDesc = "Fondeado".
-        /// </summary>
         [HttpPut("{id}/fondear")]
         public async Task<ActionResult> FondearViaje(string id)
         {
@@ -318,10 +249,6 @@ namespace Mbpc.Api.Controllers
             return Ok(new { mensaje = $"Buque '{id}' fondeado. Estado → 'Fondeado'." });
         }
 
-        /// <summary>
-        /// Reanuda el buque → NavegationStatusDesc = "Reanudado".
-        /// Paso previo obligatorio para zarpar desde un estado de fondeo.
-        /// </summary>
         [HttpPut("{id}/reanudar")]
         public async Task<ActionResult> ReanudarViaje(string id)
         {
@@ -337,25 +264,11 @@ namespace Mbpc.Api.Controllers
             return Ok(new { mensaje = $"Buque '{id}' reanudado. Estado → 'Reanudado'." });
         }
 
-        /// <summary>
-        /// Actualiza la posición geográfica de un buque (lat/lng + timestamp).
-        ///
-        /// Reglas de negocio aplicadas en IViajeService.ActualizarPosicionAsync:
-        ///   • Haversine: calcula distancia entre posición anterior y nueva.
-        ///   • Cinemática: si velocidad calculada > 60 kn → HTTP 400 "Cinemática inválida".
-        ///   • Persistencia dual: actualiza el doc activo en MongoDB E inserta copia en tracklog.
-        ///
-        /// Responsabilidades del Controller (y solo estas):
-        ///   1. Validar ModelState (DataAnnotations del DTO).
-        ///   2. Verificar que el Claim CosteraId exista.
-        ///   3. Delegar a IViajeService y traducir resultado a HTTP.
-        /// </summary>
         [HttpPut("{id}/posicion")]
         public async Task<ActionResult> ActualizarPosicion(
             string id,
             [FromBody] ActualizarPosicionDto dto)
         {
-            // ── 1. Validación de ModelState ───────────────────────────────────
             if (!ModelState.IsValid)
             {
                 _logger.LogWarning(
@@ -368,7 +281,6 @@ namespace Mbpc.Api.Controllers
                 return ValidationProblem(ModelState);
             }
 
-            // ── 2. Validación del Claim multitenant ───────────────────────────
             var costeraIdClaim = User.FindFirstValue("CosteraId");
 
             if (string.IsNullOrWhiteSpace(costeraIdClaim))
@@ -382,7 +294,6 @@ namespace Mbpc.Api.Controllers
             if (string.IsNullOrWhiteSpace(id))
                 return BadRequest(new { mensaje = "El ID del viaje es requerido." });
 
-            // Tolerancia de 5 minutos para timestamps de transponders con deriva de reloj.
             if (dto.FechaReporte > DateTime.UtcNow.AddMinutes(5))
             {
                 return BadRequest(new
@@ -395,7 +306,6 @@ namespace Mbpc.Api.Controllers
                 "ActualizarPosicion — Id: '{Id}' | Lat: {Lat} | Lng: {Lng} | FechaReporte: {Fecha} | CosteraId: {CosteraId}",
                 id, dto.Latitud, dto.Longitud, dto.FechaReporte, costeraIdClaim);
 
-            // ── 3. Delegación al Service ──────────────────────────────────────
             PosicionActualizadaResultDto? resultado;
 
             try
@@ -404,7 +314,6 @@ namespace Mbpc.Api.Controllers
             }
             catch (InvalidOperationException ex) when (ex.Message.StartsWith("Cinemática inválida"))
             {
-                // El servicio lanza esta excepción tipada cuando la velocidad calculada > 60 kn.
                 _logger.LogWarning(
                     "ActualizarPosicion bloqueada por cinemática inválida para Id: '{Id}'. Detalle: {Msg}",
                     id, ex.Message);

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   useCargas,
   useCrearCarga,
@@ -6,7 +7,9 @@ import {
   useFondearCarga,
   useCargarToneladas,
   useDescargarToneladas,
+  cargasKeys,
 } from '../../hooks/useCargasApi';
+import { convoyKeys } from '../../hooks/useGestionConvoy';
 import type { TipoCarga } from '../../types/cargas.types';
 
 // Importamos los modales de edición y eliminación generados
@@ -32,6 +35,8 @@ interface CargasModalProps {
 }
 
 export default function CargasModal({ viajeId, viajeNombreBuque, onClose }: CargasModalProps) {
+  const queryClient = useQueryClient();
+
   // Extraemos refetch para poder recargar la grilla tras editar/eliminar
   const { data: cargas = [], isLoading, refetch } = useCargas(viajeId);
   const { mutate: crearCarga, isPending: isCreando } = useCrearCarga();
@@ -79,7 +84,11 @@ export default function CargasModal({ viajeId, viajeNombreBuque, onClose }: Carg
 
   const handleSuccessAbm = () => {
     cerrarModalAbm();
-    if (refetch) refetch(); // Recargamos los datos desde Mongo/Oracle
+    // Invalidamos las dos queries canónicas que alimentan esta vista:
+    // 1. La lista de cargas del modal (cargasKeys.byViaje → ['cargas', 'viaje', viajeId])
+    queryClient.invalidateQueries({ queryKey: cargasKeys.byViaje(viajeId) });
+    // 2. El panel inferior de convoy (convoyKeys.byViaje → ['convoy', 'viaje', viajeId])
+    queryClient.invalidateQueries({ queryKey: convoyKeys.byViaje(viajeId) });
   };
 
   // ─── FIX: Race Condition en handleClickOutside ────────────────────────────
@@ -165,8 +174,9 @@ export default function CargasModal({ viajeId, viajeNombreBuque, onClose }: Carg
           setShowForm(false);
           setMercaderiaSeleccionada(null);
 
-          // Recargamos la grilla para ver la bodega/barcaza nueva
-          if (refetch) refetch();
+          // Invalidamos las dos queries canónicas para refrescar ambos paneles
+          queryClient.invalidateQueries({ queryKey: cargasKeys.byViaje(viajeId) });
+          queryClient.invalidateQueries({ queryKey: convoyKeys.byViaje(viajeId) });
         },
       }
     );
@@ -330,14 +340,27 @@ export default function CargasModal({ viajeId, viajeNombreBuque, onClose }: Carg
                   )}
                   {cargas.map(carga => (
                     <tr key={carga.id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 text-sm text-gray-900 font-medium">{carga.descripcionLista}</td>
+                      {/* DESCRIPCIÓN: descripcionLista viene hidratada del backend como
+                          "UABL 101 (PY-101) - Soja" o "A Definir" para barcazas sin declarar */}
+                      <td className="px-4 py-3 text-sm text-gray-900 font-medium">
+                        {carga.descripcionLista && carga.descripcionLista !== 'A Definir'
+                          ? carga.descripcionLista
+                          : <span className="italic text-gray-400">A Definir</span>}
+                      </td>
                       <td className="px-4 py-3 text-sm text-gray-900">
-                        <span className={`px-2 py-1 text-xs rounded-full font-medium ${carga.nivelRiesgo === 'Alto' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}`}>
-                          {carga.nivelRiesgo}
+                        <span className={`px-2 py-1 text-xs rounded-full font-medium ${
+                          carga.nivelRiesgo === 'Alto' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'
+                        }`}>
+                          {carga.nivelRiesgo || '—'}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-900">{carga.muelleActual || '-'}</td>
-                      <td className="px-4 py-3 text-sm text-right font-medium">{carga.tonelaje} t</td>
+                      {/* TONELAJE: formateado con separador de miles; guion si es 0 */}
+                      <td className="px-4 py-3 text-sm text-right font-medium">
+                        {carga.tonelaje > 0
+                          ? `${carga.tonelaje.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} t`
+                          : <span className="italic text-gray-400">—</span>}
+                      </td>
                       <td className="px-4 py-3 text-sm text-center">
                         <div className="flex justify-center items-center gap-3">
                           <button onClick={() => handleAccion('amarrar', carga.id)} className="text-blue-600 hover:text-blue-800 text-xs font-bold transition-colors">Amarrar</button>

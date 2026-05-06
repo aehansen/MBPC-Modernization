@@ -16,5 +16,9 @@ namespace Mbpc.Api.DTOs
         // ── Hito 5.7: diferenciación explícita de Bodega vs Barcaza ──────────
         // Calculado en la capa de servicio; nunca persiste en base de datos.
         public string TipoUnidad { get; set; } = string.Empty;
+
+        // ── Hito 5.9: Propiedades para edición de carga ─────────────────────
+        public int? MercaderiaId { get; set; }
+        public string? MercaderiaNombre { get; set; }
     }
 }

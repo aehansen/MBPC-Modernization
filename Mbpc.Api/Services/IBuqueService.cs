@@ -42,5 +42,25 @@ namespace Mbpc.Api.Services
         /// que representan barcazas disponibles.
         /// </returns>
         Task<IEnumerable<BuqueAutocompleteDto>> BuscarBarcazasDisponiblesAsync(string etapaId, string query);
+
+        /// <summary>
+        /// Obtiene los detalles de un buque o barcaza específico por su ID.
+        /// Se usa principalmente para hidratar nombres a partir de IDs guardados.
+        /// </summary>
+        /// <param name="idBuque">ID numérico del buque a consultar.</param>
+        /// <returns>Detalle del buque, o nulo si no se encuentra.</returns>
+        Task<BuqueAutocompleteDto?> ObtenerBuquePorIdAsync(long idBuque);
+
+        /// <summary>
+        /// Obtiene en una sola operación los datos de múltiples buques/barcazas
+        /// por sus IDs, devolviendo un diccionario <c>IdBuque → BuqueAutocompleteDto</c>.
+        /// Evita el problema N+1 al hidratar DTOs de convoy.
+        /// </summary>
+        /// <param name="ids">Colección de IDs numéricos a resolver. Los duplicados se ignorarán.</param>
+        /// <returns>
+        /// Diccionario indexado por <c>IdBuque</c>. Los IDs no encontrados
+        /// simplemente no aparecerán como keys.
+        /// </returns>
+        Task<Dictionary<long, BuqueAutocompleteDto>> ObtenerBuquesPorIdsAsync(IEnumerable<long> ids);
     }
 }

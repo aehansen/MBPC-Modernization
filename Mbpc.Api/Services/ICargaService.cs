@@ -12,5 +12,7 @@ namespace Mbpc.Api.Services
         Task<bool> AgregarCargaAsync(string viajeNombreBuque, NuevaCargaDto nuevaCarga);
         Task<bool> ModificarCargaAsync(string id, ModificarCargaDto dto);
         Task<bool> EliminarCargaAsync(string viajeId, string cargaId);
+        
+        Task<bool> SincronizarAmarreConvoyAsync(string viajeId);
     }
 }

@@ -22,6 +22,12 @@ namespace Mbpc.Api.DTOs
         public long BarcazaId { get; set; }
 
         /// <summary>
+        /// Nombre real de la barcaza obtenido del padrón. 
+        /// Se utiliza para desnormalizar el dato en MongoDB y evitar el ID numérico en la UI.
+        /// </summary>
+        public string? BarcazaNombre { get; set; }
+
+        /// <summary>
         /// Tipo de carga transportada (ej: "Barcaza" o "Bodega").
         /// </summary>
         [Required(ErrorMessage = "El tipo de carga es requerido.")]

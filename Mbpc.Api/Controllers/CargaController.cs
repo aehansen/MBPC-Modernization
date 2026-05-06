@@ -74,7 +74,6 @@ namespace Mbpc.Api.Controllers
             if (string.IsNullOrWhiteSpace(id))
                 return BadRequest(new { mensaje = "El ID de la embarcación es requerido." });
 
-            // Permitimos 0 para que pase a EN LASTRE
             if (toneladas < 0)
                 return BadRequest(new { mensaje = "La cantidad de toneladas no puede ser negativa." });
 
@@ -85,11 +84,6 @@ namespace Mbpc.Api.Controllers
 
         // ── PUT: modificar carga ──────────────────────────────────────────────
 
-        /// <summary>
-        /// Modifica los datos de una barcaza existente (BarcazaId, Tipo, Tonelaje).
-        /// CQRS: actualiza Oracle mediante SP y hace Load-Mutate-Save en MongoDB.
-        /// El campo ViajeId en el DTO ancla la operación al documento correcto (fix de scoping).
-        /// </summary>
         [HttpPut("{id}")]
         public async Task<ActionResult> ModificarCarga(string id, [FromBody] ModificarCargaDto dto)
         {
@@ -139,31 +133,27 @@ namespace Mbpc.Api.Controllers
         /// filtre estrictamente por documento de viaje antes de remover la barcaza,
         /// evitando que bodegas con ID "0" sean eliminadas del viaje incorrecto.
         /// </summary>
-        [HttpDelete("viaje/{viajeId}/carga/{id}")]
-        public async Task<ActionResult> EliminarCarga(string viajeId, string id)
+        [HttpDelete("{viajeId}/eliminar/{cargaId}")]
+        public async Task<ActionResult> EliminarCarga(string viajeId, string cargaId)
         {
             if (string.IsNullOrWhiteSpace(viajeId))
                 return BadRequest(new { mensaje = "El ViajeId es requerido para el scoping. No se puede eliminar una carga sin especificar el viaje al que pertenece." });
 
-            if (string.IsNullOrWhiteSpace(id))
+            if (string.IsNullOrWhiteSpace(cargaId))
                 return BadRequest(new { mensaje = "El ID de la carga es requerido." });
 
-            _logger.LogInformation("Eliminar carga ID='{Id}' del viaje '{ViajeId}'.", id, viajeId);
+            _logger.LogInformation("Eliminar carga ID='{CargaId}' del viaje '{ViajeId}'.", cargaId, viajeId);
 
-            var exito = await _cargaService.EliminarCargaAsync(viajeId, id);
+            var exito = await _cargaService.EliminarCargaAsync(viajeId, cargaId);
 
             if (!exito)
-                return StatusCode(500, new { mensaje = $"Error interno al eliminar la carga con ID '{id}' del viaje '{viajeId}'." });
+                return StatusCode(500, new { mensaje = $"Error interno al eliminar la carga con ID '{cargaId}' del viaje '{viajeId}'." });
 
-            return Ok(new { mensaje = $"Carga '{id}' eliminada correctamente del manifiesto del viaje '{viajeId}'." });
+            return Ok(new { mensaje = $"Carga '{cargaId}' eliminada correctamente del manifiesto del viaje '{viajeId}'." });
         }
 
         // ── POST: agregar carga al viaje ──────────────────────────────────────
 
-        /// <summary>
-        /// Agrega una nueva carga (Barcaza o Bodega) al manifiesto del buque.
-        /// CQRS: escribe en Oracle y hace Load-Mutate-Save en MongoDB.
-        /// </summary>
         [HttpPost("viaje/{viajeNombreBuque}")]
         public async Task<ActionResult> AgregarCarga(
             string viajeNombreBuque,

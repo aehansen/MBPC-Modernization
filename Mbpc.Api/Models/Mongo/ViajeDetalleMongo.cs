@@ -1,5 +1,3 @@
-// Mbpc.Api/Models/Mongo/ViajeDetalleMongo.cs
-
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
 using System;
@@ -7,6 +5,23 @@ using System.Collections.Generic;
 
 namespace Mbpc.Api.Models.Mongo
 {
+    // ─────────────────────────────────────────────────────────────────────────────
+    // ESTRATEGIA DE MAPPING:
+    //
+    //  • [BsonIgnoreExtraElements] → silencia campos legacy (MAYÚSCULAS, Pascal, etc.)
+    //    mientras se migra la base. No rompe si existen, simplemente los ignora.
+    //
+    //  • [BsonElement("camelCase")] → define el nombre canónico de escritura (Modern).
+    //
+    //  • [BsonIgnoreIfNull] → nunca persiste un campo null en MongoDB.
+    //    Evita que documentos nuevos queden llenos de basura.
+    //
+    //  • CosteraId usa [BsonRepresentation] + lógica de conversión en getter
+    //    para tolerar int, long o string provenientes de documentos sucios.
+    //
+    //  • Propiedades [BsonIgnore] → lógica de negocio pura, nunca se serializan.
+    // ─────────────────────────────────────────────────────────────────────────────
+
     [BsonIgnoreExtraElements]
     public class ViajeDetalleMongo
     {
@@ -15,122 +30,163 @@ namespace Mbpc.Api.Models.Mongo
         public string Id { get; set; } = null!;
 
         [BsonElement("IdViaje")]
-        public long IdViaje { get; set; }
+        [BsonIgnoreIfNull]
+        public long? IdViaje { get; set; }
 
         [BsonElement("VesselName")]
+        [BsonIgnoreIfNull]
         public string? VesselName { get; set; }
 
         [BsonElement("Origin")]
+        [BsonIgnoreIfNull]
         public string? Origin { get; set; }
 
         [BsonElement("Destination")]
+        [BsonIgnoreIfNull]
         public string? Destination { get; set; }
 
-        // ─── TÉCNICA DE PROPIEDADES DE RESPALDO (Tolerancia BSON) ───
-        [BsonElement("ETAPAS")] public List<EtapaMongo>? EtapasLegacy { get; set; }
-        [BsonElement("etapas")] public List<EtapaMongo>? EtapasModern { get; set; }
-        
-        [BsonIgnore] 
-        public List<EtapaMongo> Etapas 
-        { 
-            get 
-            {
-                if (EtapasModern != null) return EtapasModern;
-                if (EtapasLegacy != null) return EtapasLegacy;
-                // Inicialización perezosa segura para no agregar a una lista "huerfana"
-                EtapasModern = new List<EtapaMongo>();
-                return EtapasModern;
-            }
-            set => EtapasModern = value; 
-        }
+        [BsonElement("ETAPAS")]
+        [BsonIgnoreIfNull]
+        public List<EtapaMongo>? Etapas { get; set; }
 
-        // PROPIEDAD DE RESPALDO LEGACY RAÍZ
-        // Captura las barcazas que aún existan en la raíz del documento (pre-CQRS)
-        [BsonElement("BARCAZAS")] public List<BarcazaMongo>? BarcazasRootLegacy { get; set; }
-        [BsonElement("barcazas")] public List<BarcazaMongo>? BarcazasRootModern { get; set; }
-        
-        [BsonIgnore]
-        public List<BarcazaMongo>? BarcazasLegacy
-        {
-            get => BarcazasRootModern ?? BarcazasRootLegacy;
-            set => BarcazasRootModern = value;
-        }
+        [BsonElement("BARCAZAS")]
+        [BsonIgnoreIfNull]
+        public List<BarcazaMongo>? Barcazas { get; set; }
 
+        // ── MULTITENANT GEOGRÁFICO RESILIENTE ────────────────────────────────────
+        // Se almacena como BsonValue para tolerar int, long o string en documentos
+        // sucios. El getter expuesto a negocio siempre devuelve int?.
         [BsonElement("CosteraId")]
-        public int? CosteraId { get; set; }
+        [BsonIgnoreIfNull]
+        public BsonValue? CosteraIdRaw { get; set; }
+
+        [BsonIgnore]
+        public int? CosteraId
+        {
+            get
+            {
+                if (CosteraIdRaw == null || CosteraIdRaw.IsBsonNull) return null;
+                if (CosteraIdRaw.IsInt32) return CosteraIdRaw.AsInt32;
+                if (CosteraIdRaw.IsInt64) return (int)CosteraIdRaw.AsInt64;
+                if (int.TryParse(CosteraIdRaw.ToString(), out var result)) return result;
+                return null;
+            }
+            set => CosteraIdRaw = value.HasValue ? (BsonValue)value.Value : BsonNull.Value;
+        }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────────
 
     [BsonIgnoreExtraElements]
     public class EtapaMongo
     {
-        [BsonElement("ETAPA_ID")] public long? EtapaIdLegacy { get; set; }
-        [BsonElement("etapaId")]  public long? EtapaIdModern { get; set; }
-        [BsonElement("EtapaId")]  public long? EtapaIdPascal { get; set; }
-        [BsonIgnore] public long EtapaId { get => EtapaIdPascal ?? EtapaIdModern ?? EtapaIdLegacy ?? 0; set => EtapaIdPascal = value; }
+        [BsonElement("ETAPA_ID")]
+        [BsonIgnoreIfNull]
+        public long? EtapaId { get; set; }
 
-        [BsonElement("FECHA_INICIO")] public DateTime? FechaInicioLegacy { get; set; }
-        [BsonElement("fechaInicio")]  public DateTime? FechaInicioModern { get; set; }
-        [BsonElement("FechaInicio")]  public DateTime? FechaInicioPascal { get; set; }
-        [BsonIgnore] public DateTime? FechaInicio { get => FechaInicioPascal ?? FechaInicioModern ?? FechaInicioLegacy; set => FechaInicioPascal = value; }
+        [BsonElement("FECHA_INICIO")]
+        [BsonIgnoreIfNull]
+        public DateTime? FechaInicio { get; set; }
 
-        [BsonElement("REMOLCADOR")] public RemolcadorMongo? RemolcadorLegacy { get; set; }
-        [BsonElement("remolcador")] public RemolcadorMongo? RemolcadorModern { get; set; }
-        [BsonIgnore] public RemolcadorMongo? Remolcador { get => RemolcadorModern ?? RemolcadorLegacy; set => RemolcadorModern = value; }
+        [BsonElement("FECHA_FIN")]
+        [BsonIgnoreIfNull]
+        public DateTime? FechaFin { get; set; }
 
-        [BsonElement("BARCAZAS")] public List<BarcazaMongo>? BarcazasLegacy { get; set; }
-        [BsonElement("barcazas")] public List<BarcazaMongo>? BarcazasModern { get; set; }
-        [BsonIgnore] public List<BarcazaMongo>? Barcazas { get => BarcazasModern ?? BarcazasLegacy; set => BarcazasModern = value; }
+        [BsonElement("REMOLCADOR")]
+        [BsonIgnoreIfNull]
+        public RemolcadorMongo? Remolcador { get; set; }
+
+        [BsonElement("BARCAZAS")]
+        [BsonIgnoreIfNull]
+        public List<BarcazaMongo>? Barcazas { get; set; }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────────
 
     [BsonIgnoreExtraElements]
     public class RemolcadorMongo
     {
-        [BsonElement("NOMBRE")] public string? NombreLegacy { get; set; }
-        [BsonElement("nombre")] public string? NombreModern { get; set; }
-        [BsonIgnore] public string? Nombre { get => NombreModern ?? NombreLegacy; set => NombreModern = value; }
+        [BsonElement("NOMBRE")]
+        [BsonIgnoreIfNull]
+        public string? Nombre { get; set; }
 
-        [BsonElement("MATRICULA")] public string? MatriculaLegacy { get; set; }
-        [BsonElement("matricula")] public string? MatriculaModern { get; set; }
-        [BsonIgnore] public string? Matricula { get => MatriculaModern ?? MatriculaLegacy; set => MatriculaModern = value; }
+        [BsonElement("MATRICULA")]
+        [BsonIgnoreIfNull]
+        public string? Matricula { get; set; }
     }
+
+    // ─────────────────────────────────────────────────────────────────────────────
 
     [BsonIgnoreExtraElements]
     public class BarcazaMongo
     {
-        [BsonElement("ID_VIAJE")] public long? IdViajeLegacy { get; set; }
-        [BsonElement("idViaje")]  public long? IdViajeModern { get; set; }
-        [BsonIgnore] public long IdViaje { get => IdViajeModern ?? IdViajeLegacy ?? 0; set => IdViajeModern = value; }
+        // FIX: documentos legacy pueden traer idViaje como BsonNull → long? evita FormatException
+        [BsonElement("ID_VIAJE")]
+        [BsonIgnoreIfNull]
+        public long? IdViaje { get; set; }
 
-        [BsonElement("BARCAZA")] public string? NombreLegacy { get; set; }
-        [BsonElement("nombre")]  public string? NombreModern { get; set; }
-        [BsonIgnore] public string Nombre { get => NombreModern ?? NombreLegacy ?? string.Empty; set => NombreModern = value; }
+        [BsonElement("BARCAZA")]
+        [BsonIgnoreIfNull]
+        public string? Nombre { get; set; }
 
-        [BsonElement("BANDERA")] public string? BanderaLegacy { get; set; }
-        [BsonElement("bandera")] public string? BanderaModern { get; set; }
-        [BsonIgnore] public string Bandera { get => BanderaModern ?? BanderaLegacy ?? string.Empty; set => BanderaModern = value; }
+        [BsonElement("BANDERA")]
+        [BsonIgnoreIfNull]
+        public string? Bandera { get; set; }
 
-        [BsonElement("MATRICULA")] public string? MatriculaLegacy { get; set; }
-        [BsonElement("matricula")] public string? MatriculaModern { get; set; }
-        [BsonIgnore] public string? Matricula { get => MatriculaModern ?? MatriculaLegacy; set => MatriculaModern = value; }
+        [BsonElement("MATRICULA")]
+        [BsonIgnoreIfNull]
+        public string? Matricula { get; set; }
 
-        [BsonElement("CARGA")] public string? CargaLegacy { get; set; }
-        [BsonElement("carga")] public string? CargaModern { get; set; }
-        [BsonIgnore] public string Carga { get => CargaModern ?? CargaLegacy ?? string.Empty; set => CargaModern = value; }
+        [BsonElement("CARGA")]
+        [BsonIgnoreIfNull]
+        public string? Carga { get; set; }
 
-        [BsonElement("CANTIDAD")] public double? CantidadLegacy { get; set; }
-        [BsonElement("cantidad")] public double? CantidadModern { get; set; }
-        [BsonIgnore] public double Cantidad { get => CantidadModern ?? CantidadLegacy ?? 0; set => CantidadModern = value; }
+        [BsonElement("CANTIDAD")]
+        [BsonIgnoreIfNull]
+        public double? Cantidad { get; set; }
 
-        [BsonElement("UNIDAD")] public string? UnidadLegacy { get; set; }
-        [BsonElement("unidad")] public string? UnidadModern { get; set; }
-        [BsonIgnore] public string Unidad { get => UnidadModern ?? UnidadLegacy ?? string.Empty; set => UnidadModern = value; }
+        [BsonElement("UNIDAD")]
+        [BsonIgnoreIfNull]
+        public string? Unidad { get; set; }
 
-        [BsonElement("MUELLE_ACTUAL")] public string? MuelleActualLegacy { get; set; }
-        [BsonElement("muelleActual")]  public string? MuelleActualModern { get; set; }
-        [BsonIgnore] public string? MuelleActual { get => MuelleActualModern ?? MuelleActualLegacy; set => MuelleActualModern = value; }
+        [BsonElement("MUELLE_ACTUAL")]
+        [BsonIgnoreIfNull]
+        public string? MuelleActual { get; set; }
 
-        [BsonElement("MERCADERIA_ID")] public int? MercaderiaIdLegacy { get; set; }
-        [BsonElement("mercaderiaId")]  public int? MercaderiaIdModern { get; set; }
-        [BsonIgnore] public int? MercaderiaId { get => MercaderiaIdModern ?? MercaderiaIdLegacy; set => MercaderiaIdModern = value; }
+        [BsonElement("MERCADERIA_ID")]
+        [BsonIgnoreIfNull]
+        public int? MercaderiaId { get; set; }
+
+        // ── PROPIEDADES DE NEGOCIO (nunca se serializan) ─────────────────────────
+
+        /// <summary>
+        /// Descripción amigable de la unidad de medida para presentación en UI.
+        /// </summary>
+        [BsonIgnore]
+        public string UnidadDescripcion => Unidad?.ToUpperInvariant() switch
+        {
+            "TN"  => "Toneladas",
+            "M3"  => "Metros Cúbicos",
+            "BBL" => "Barriles",
+            "KG"  => "Kilogramos",
+            _     => Unidad ?? string.Empty
+        };
+
+        /// <summary>
+        /// Indica si la barcaza lleva carga líquida según el tipo de mercadería.
+        /// </summary>
+        [BsonIgnore]
+        public bool EsCargaLiquida =>
+            Carga != null &&
+            (Carga.Contains("petroleo", StringComparison.OrdinalIgnoreCase) ||
+             Carga.Contains("combustible", StringComparison.OrdinalIgnoreCase) ||
+             Carga.Contains("gas", StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>
+        /// Resumen compacto para logs y trazabilidad.
+        /// </summary>
+        [BsonIgnore]
+        public string Resumen =>
+            $"[{Matricula ?? "SIN MATRÍCULA"}] {Nombre ?? "SIN NOMBRE"} — {Cantidad?.ToString("N2") ?? "0"} {Unidad}";
     }
 }

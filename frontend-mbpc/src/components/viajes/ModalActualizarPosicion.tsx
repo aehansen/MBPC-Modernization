@@ -1,411 +1,840 @@
-/**
- * src/components/viajes/ModalActualizarPosicion.tsx
- *
- * Modal institucional para actualizar la posición geográfica de un buque.
- * - Tipado estricto: cero `any`. Errores manejados con isAxiosError + ProblemDetails robusto.
- * - TanStack Query v5 a través de useActualizarPosicion.
- * - Accesibilidad: role="dialog", aria-modal, aria-labelledby, foco atrapado básico.
- * - UI: Tailwind CSS, tema azul institucional PNA.
- */
+// src/components/viajes/ModalNuevoViaje.tsx
+// ──────────────────────────────────────────────────────────────────────────────
+// Modal para registrar un nuevo viaje en el sistema MBPC.
+// Usa react-hook-form para manejo del formulario y validaciones,
+// Tailwind CSS para estilos, y el hook useNuevoViaje para la mutación.
+// ──────────────────────────────────────────────────────────────────────────────
 
-import { useState, useEffect, useId } from 'react';
-import { isAxiosError } from 'axios';
-import { parseCoordinates, formatearDMS } from '@/utils/coordinates';
-import { useActualizarPosicion } from '@/hooks/useActualizarPosicion';
-import type { CoordenadasDecimales } from '@/utils/coordinates';
+import { useEffect, useState, useRef } from "react";
+import { useForm, type SubmitHandler } from "react-hook-form";
+import { useNuevoViaje } from "@/hooks/useNuevoViaje";
+import {
+  DeclaracionMalvinasEnum,
+  DECLARACION_MALVINAS_LABELS,
+  type NuevoViajeFormValues,
+  type NuevoViajeRequest,
+  type NuevoViajeResponse,
+  type NuevoViajeError,
+} from "@/types/viajes.types";
 
-// ---------------------------------------------------------------------------
-// Props
-// ---------------------------------------------------------------------------
+// ─── Tipos Locales ────────────────────────────────────────────────────────────
 
-interface ModalActualizarPosicionProps {
-  viajeId: string;
-  nombreBuque: string;
+interface BuqueAutocomplete {
+  idBuque: number;
+  nombre: string;
+  matricula: string;
+  omi: string;
+  tipo: string;
+}
+
+// Extendemos los valores del formulario para incluir los campos DMS locales
+interface FormValuesExtendidos extends Omit<NuevoViajeFormValues, "posicion"> {
+  latGrados?: number;
+  latMinutos?: number;
+  latSegundos?: number;
+  latDir: "N" | "S";
+  lonGrados?: number;
+  lonMinutos?: number;
+  lonSegundos?: number;
+  lonDir: "E" | "W";
+  rioCanalKmPar?: number;
+}
+
+// ─── Props ────────────────────────────────────────────────────────────────────
+
+interface ModalNuevoViajeProps {
+  isOpen: boolean;
   onClose: () => void;
-  /** Callback opcional invocado tras un éxito confirmado antes de cerrar. */
-  onExito?: () => void;
+  onSuccess?: (response: NuevoViajeResponse) => void;
+  onError?: (error: NuevoViajeError) => void;
 }
 
-// ---------------------------------------------------------------------------
-// Tipos Locales (Error Handling)
-// ---------------------------------------------------------------------------
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-interface DotNetProblemDetails {
-  detail?: string;
-  title?: string;
-  mensaje?: string; // Fallback por si hay código legacy
-  errors?: Record<string, string[]>; // Formato de ValidationProblemDetails de .NET
+function toIsoUtcString(localDateTimeString: string): string {
+  return new Date(localDateTimeString).toISOString();
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+function getNowLocalMin(): string {
+  const now = new Date();
+  const offset = now.getTimezoneOffset() * 60_000;
+  return new Date(now.getTime() - offset).toISOString().slice(0, 16);
+}
 
-/**
- * Extrae un mensaje legible del error de la mutación sin recurrir a `any`.
- * Maneja texto plano, ProblemDetails estándar, y ValidationProblemDetails (ModelState).
- */
-function resolverMensajeError(error: Error | null): string {
-  if (!error) return '';
-
-  if (isAxiosError<DotNetProblemDetails | string>(error) && error.response?.data) {
-    const data = error.response.data;
-
-    // 1. Si el backend devuelve un string plano (text/plain)
-    if (typeof data === 'string') {
-      return data;
-    }
-
-    // 2. Si el backend devuelve un objeto (application/problem+json)
-    if (typeof data === 'object' && data !== null) {
-      // 2a. Si tiene diccionario de errores (ValidationProblemDetails)
-      if (data.errors && Object.keys(data.errors).length > 0) {
-        const primeraLlave = Object.keys(data.errors)[0];
-        const primerError = data.errors[primeraLlave][0];
-        if (primerError) return primerError;
-      }
-
-      // 2b. ProblemDetails estándar o custom
-      if (data.detail) return data.detail;
-      if (data.mensaje) return data.mensaje;
-      
-      // Evitamos mostrar el título genérico poco amigable de .NET
-      if (data.title && !data.title.toLowerCase().includes('validation')) {
-        return data.title;
-      }
-    }
+// Conversión limpia de DMS a Decimal
+function dmsToDecimal(grados: number, minutos: number, segundos: number, direccion: string): number {
+  let decimal = Number(grados) + Number(minutos) / 60 + Number(segundos) / 3600;
+  if (direccion === "S" || direccion === "W") {
+    decimal = decimal * -1;
   }
-
-  // Fallback final genérico de Axios
-  return error.message;
+  return Number(decimal.toFixed(6));
 }
 
-// ---------------------------------------------------------------------------
-// Íconos inline (SVG) para no depender de librerías de íconos externas
-// ---------------------------------------------------------------------------
+// ─── Subcomponentes internos ──────────────────────────────────────────────────
 
-const IconClose = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-  </svg>
-);
+interface FieldErrorProps {
+  message?: string;
+}
 
-const IconCheck = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-  </svg>
-);
+function FieldError({ message }: FieldErrorProps) {
+  if (!message) return null;
+  return (
+    <p className="mt-1 text-xs text-red-400 flex items-center gap-1">
+      <span aria-hidden="true">⚠</span>
+      {message}
+    </p>
+  );
+}
 
-const IconError = () => (
-  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-  </svg>
-);
+interface LabelProps {
+  htmlFor: string;
+  children: React.ReactNode;
+  required?: boolean;
+}
 
-const IconSpinner = () => (
-  <svg
-    className="animate-spin w-4 h-4 text-white"
-    fill="none"
-    viewBox="0 0 24 24"
-    aria-hidden="true"
-  >
-    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-    <path
-      className="opacity-75"
-      fill="currentColor"
-      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-    />
-  </svg>
-);
+function Label({ htmlFor, children, required = false }: LabelProps) {
+  return (
+    <label
+      htmlFor={htmlFor}
+      className="block text-xs font-semibold tracking-widest uppercase text-slate-400 mb-1"
+    >
+      {children}
+      {required && (
+        <span className="text-cyan-400 ml-1" aria-label="requerido">
+          *
+        </span>
+      )}
+    </label>
+  );
+}
 
-// ---------------------------------------------------------------------------
-// Componente principal
-// ---------------------------------------------------------------------------
+const inputClass =
+  "w-full bg-slate-800/60 border border-slate-600/50 text-slate-100 text-sm " +
+  "rounded px-3 py-2 placeholder-slate-500 " +
+  "focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/40 " +
+  "disabled:opacity-50 disabled:cursor-not-allowed " +
+  "transition-colors duration-150";
 
-export default function ModalActualizarPosicion({
-  viajeId,
-  nombreBuque,
+const errorInputClass =
+  "w-full bg-slate-800/60 border border-red-500/60 text-slate-100 text-sm " +
+  "rounded px-3 py-2 placeholder-slate-500 " +
+  "focus:outline-none focus:border-red-400 focus:ring-1 focus:ring-red-400/40 " +
+  "disabled:opacity-50 transition-colors duration-150";
+
+function getInputClass(hasError: boolean): string {
+  return hasError ? errorInputClass : inputClass;
+}
+
+// ─── Componente principal ─────────────────────────────────────────────────────
+
+export function ModalNuevoViaje({
+  isOpen,
   onClose,
-  onExito,
-}: ModalActualizarPosicionProps) {
-  const inputId = useId();
-  const titleId = useId();
+  onSuccess,
+  onError,
+}: ModalNuevoViajeProps) {
+  const nowMin = getNowLocalMin();
 
-  const [inputValor, setInputValor] = useState('');
-  const [coordsParsed, setCoordsParsed] = useState<CoordenadasDecimales | null>(null);
+  const {
+    register,
+    handleSubmit,
+    reset,
+    watch,
+    setValue,
+    formState: { errors },
+  } = useForm<FormValuesExtendidos>({
+    defaultValues: {
+      buqueId: undefined as unknown as number,
+      origen: "",
+      destino: "",
+      proximoPuntoControl: "",
+      fechaPartida: "",
+      eta: "",
+      declaracionMalvinas: DeclaracionMalvinasEnum.NoVieneDeMalvinas_L,
+      muelleSalida: "",
+      agenciaMaritima: "",
+      motivoViaje: "",
+      zoe: "",
+      latGrados: undefined,
+      latMinutos: undefined,
+      latSegundos: undefined,
+      latDir: "S",
+      lonGrados: undefined,
+      lonMinutos: undefined,
+      lonSegundos: undefined,
+      lonDir: "W",
+      rioCanalKmPar: undefined,
+    },
+  });
 
-  const mutation = useActualizarPosicion(viajeId);
+  const { mutate, isPending } = useNuevoViaje();
 
-  // Parsear coordenadas en tiempo real y resetear la mutación al editar.
+  const [buqueSearchTerm, setBuqueSearchTerm] = useState("");
+  const [buqueSuggestions, setBuqueSuggestions] = useState<BuqueAutocomplete[]>([]);
+  const [showBuqueDropdown, setShowBuqueDropdown] = useState(false);
+  const [isLoadingBuques, setIsLoadingBuques] = useState(false);
+  const buqueDropdownRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    setCoordsParsed(parseCoordinates(inputValor));
-    mutation.reset();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [inputValor]);
+    if (!isOpen) {
+      reset();
+      setBuqueSearchTerm("");
+      setBuqueSuggestions([]);
+      setShowBuqueDropdown(false);
+    }
+  }, [isOpen, reset]);
 
-  const handleSubmit = () => {
-    if (!coordsParsed) return;
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !isPending) onClose();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, isPending, onClose]);
 
-    mutation.mutate(
-      {
-        latitud: coordsParsed.lat,
-        longitud: coordsParsed.lng,
-        fechaReporte: new Date().toISOString(),
+  useEffect(() => {
+    if (!showBuqueDropdown) return;
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        buqueDropdownRef.current &&
+        !buqueDropdownRef.current.contains(event.target as Node)
+      ) {
+        setShowBuqueDropdown(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showBuqueDropdown]);
+
+  useEffect(() => {
+    const delayDebounceFn = setTimeout(async () => {
+      if (buqueSearchTerm.trim().length >= 2) {
+        setIsLoadingBuques(true);
+        try {
+          const token = localStorage.getItem("mbpc_token");
+          const res = await fetch(
+            `/api/buques/autocomplete?query=${encodeURIComponent(buqueSearchTerm)}`,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+            }
+          );
+          if (res.ok) {
+            const data: BuqueAutocomplete[] = await res.json();
+            setBuqueSuggestions(data);
+            setShowBuqueDropdown(true);
+          }
+        } catch (error) {
+          console.error("Error buscando buques:", error);
+        } finally {
+          setIsLoadingBuques(false);
+        }
+      } else {
+        setBuqueSuggestions([]);
+        setShowBuqueDropdown(false);
+      }
+    }, 400);
+
+    return () => clearTimeout(delayDebounceFn);
+  }, [buqueSearchTerm]);
+
+  const fechaPartidaValue = watch("fechaPartida");
+
+  const onSubmit: SubmitHandler<FormValuesExtendidos> = (formValues) => {
+    
+    // Convertir DMS a Decimal si los datos fueron completados
+    let latitudDecimal: number | undefined = undefined;
+    let longitudDecimal: number | undefined = undefined;
+
+    if (formValues.latGrados != null && formValues.latMinutos != null && formValues.latSegundos != null) {
+      latitudDecimal = dmsToDecimal(formValues.latGrados, formValues.latMinutos, formValues.latSegundos, formValues.latDir);
+    }
+
+    if (formValues.lonGrados != null && formValues.lonMinutos != null && formValues.lonSegundos != null) {
+      longitudDecimal = dmsToDecimal(formValues.lonGrados, formValues.lonMinutos, formValues.lonSegundos, formValues.lonDir);
+    }
+
+    // Adaptamos el Request con las nuevas propiedades numéricas
+    const payload: NuevoViajeRequest & { latitud?: number; longitud?: number } = {
+      buqueId: Number(formValues.buqueId),
+      nombreBuque: buqueSearchTerm || undefined,
+      origen: formValues.origen,
+      destino: formValues.destino,
+      proximoPuntoControl: formValues.proximoPuntoControl,
+      fechaPartida: toIsoUtcString(formValues.fechaPartida),
+      eta: toIsoUtcString(formValues.eta),
+      declaracionMalvinas: formValues.declaracionMalvinas,
+      muelleSalida: formValues.muelleSalida || undefined,
+      agenciaMaritima: formValues.agenciaMaritima || undefined,
+      motivoViaje: formValues.motivoViaje || undefined,
+      zoe: formValues.zoe || undefined,
+      latitud: latitudDecimal,
+      longitud: longitudDecimal,
+      rioCanalKmPar:
+        formValues.rioCanalKmPar != null &&
+        formValues.rioCanalKmPar !== (undefined as unknown as number)
+          ? Number(formValues.rioCanalKmPar)
+          : undefined,
+    };
+
+    mutate(payload as NuevoViajeRequest, {
+      onSuccess: (response) => {
+        onSuccess?.(response);
+        onClose();
       },
-      {
-        onSuccess: () => {
-          setTimeout(() => {
-            onExito?.();
-            onClose();
-          }, 2500);
-        },
+      onError: (error) => {
+        onError?.(error);
       },
-    );
+    });
   };
 
-  // El botón "Guardar" solo se habilita si hay coordenadas válidas,
-  // la mutación no está en curso y aún no fue exitosa.
-  const puedeEnviar =
-    coordsParsed !== null && !mutation.isPending && !mutation.isSuccess;
-
-  // Mensaje de error resuelto de forma tipada (sin `any`).
-  const errorMessage = resolverMensajeError(mutation.error);
-
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
+  if (!isOpen) return null;
 
   return (
-    /* Overlay con blur */
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm"
-      role="presentation"
-      onClick={(e) => {
-        // Cierra al hacer clic fuera de la tarjeta si no hay operación en curso.
-        if (e.target === e.currentTarget && !mutation.isPending) onClose();
-      }}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="modal-nuevo-viaje-title"
     >
-      {/* Tarjeta del modal */}
       <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden flex flex-col"
-      >
-        {/* ── Header institucional ───────────────────────────────────────── */}
-        <div className="bg-[#002454] px-6 py-4 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
-            <img
-              src="https://www.argentina.gob.ar/sites/default/files/styles/isotipo/public/imagenEncabezado/prefectura-escudo.png?itok=EywBfOaV"
-              alt="Escudo PNA"
-              className="h-9 w-auto flex-shrink-0"
-            />
-            <div className="min-w-0">
+        className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm"
+        onClick={!isPending ? onClose : undefined}
+        aria-hidden="true"
+      />
+
+      <div className="relative z-10 w-full max-w-3xl max-h-[92vh] flex flex-col bg-slate-900 border border-slate-700/60 rounded-lg shadow-2xl shadow-black/60">
+        <div className="h-1 w-full bg-gradient-to-r from-cyan-500 via-sky-400 to-cyan-600 shrink-0 rounded-t-lg" />
+
+        <div className="px-6 py-4 border-b border-slate-700/60 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl" aria-hidden="true">
+              ⚓
+            </span>
+            <div>
               <h2
-                id={titleId}
-                className="text-white font-bold text-lg leading-tight truncate"
+                id="modal-nuevo-viaje-title"
+                className="text-base font-bold text-slate-100 leading-tight"
               >
-                Actualizar Posición
+                Registrar Nuevo Viaje
               </h2>
-              <p className="text-blue-200 text-xs font-semibold tracking-widest uppercase truncate">
-                {nombreBuque}
+              <p className="text-xs text-slate-400 mt-0.5">
+                Completá los datos del buque y la ruta para iniciar el viaje.
               </p>
             </div>
           </div>
-
           <button
             type="button"
             onClick={onClose}
-            disabled={mutation.isPending}
+            disabled={isPending}
             aria-label="Cerrar modal"
-            className="flex-shrink-0 text-blue-200 hover:text-white transition-colors disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-white rounded"
+            className="text-slate-500 hover:text-slate-200 disabled:opacity-40 
+                       disabled:cursor-not-allowed transition-colors duration-150 
+                       rounded p-1 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
           >
-            <IconClose />
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              aria-hidden="true"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d="M6 18L18 6M6 6l12 12"
+              />
+            </svg>
           </button>
         </div>
 
-        {/* ── Cuerpo ────────────────────────────────────────────────────── */}
-        <div className="p-6 flex flex-col gap-5">
-          {/* Campo de coordenadas */}
-          <div>
-            <label
-              htmlFor={inputId}
-              className="block text-xs font-bold text-gray-600 uppercase tracking-widest mb-2"
-            >
-              Coordenadas <span className="normal-case font-normal text-gray-400">(DMS o Decimal)</span>
-            </label>
-            <input
-              id={inputId}
-              type="text"
-              autoFocus
-              autoComplete="off"
-              spellCheck={false}
-              disabled={mutation.isPending || mutation.isSuccess}
-              placeholder='Ej: 34° 35′ 29″ S, 58° 21′ 22″ W'
-              className="
-                w-full px-4 py-3
-                bg-gray-50 border border-gray-300 rounded-xl
-                text-gray-900 placeholder-gray-400 text-sm font-mono
-                transition-all outline-none
-                focus:bg-white focus:ring-2 focus:ring-[#104a8e] focus:border-transparent
-                disabled:opacity-60 disabled:cursor-not-allowed
-              "
-              value={inputValor}
-              onChange={(e) => setInputValor(e.target.value)}
-            />
-          </div>
+        <form
+          id="form-nuevo-viaje"
+          onSubmit={handleSubmit(onSubmit)}
+          noValidate
+          className="overflow-y-auto flex-1 px-6 py-5 space-y-6 scrollbar-thin scrollbar-track-slate-800 scrollbar-thumb-slate-600"
+        >
+          {/* ── SECCIÓN 1: Identificación del Buque ─────────────────── */}
+          <section>
+            <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-500 mb-3 flex items-center gap-2">
+              <span className="block w-4 h-px bg-cyan-500/50" aria-hidden="true" />
+              Identificación del Buque
+            </h3>
 
-          {/* ── Feedback de parsing ─────────────────────────────────────── */}
-          {inputValor.trim().length > 0 && !mutation.isSuccess && (
-            <div
-              className={`
-                px-4 py-3 rounded-xl border flex items-start gap-3
-                transition-colors duration-200
-                ${coordsParsed
-                  ? 'bg-green-50 border-green-200'
-                  : 'bg-red-50 border-red-200'}
-              `}
-            >
-              {coordsParsed ? (
-                <>
-                  <span className="text-green-600 mt-0.5 flex-shrink-0">
-                    <IconCheck />
-                  </span>
-                  <div className="min-w-0">
-                    <p className="text-green-800 text-sm font-semibold">
-                      Coordenadas válidas
-                    </p>
-                    <p className="text-green-700 text-xs font-mono mt-1 leading-relaxed">
-                      Lat: {coordsParsed.lat.toFixed(6)}
-                      <br />
-                      Lng: {coordsParsed.lng.toFixed(6)}
-                    </p>
-                    <p className="text-green-600/80 text-[10px] mt-1">
-                      {formatearDMS(coordsParsed.lat, coordsParsed.lng)}
-                    </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4">
+              <div className="sm:col-span-2 relative" ref={buqueDropdownRef}>
+                <Label htmlFor="buqueSearchTerm" required>
+                  Buque
+                </Label>
+                <input
+                  id="buqueSearchTerm"
+                  type="text"
+                  placeholder="Buscar por nombre, matrícula u OMI..."
+                  disabled={isPending}
+                  autoComplete="off"
+                  className={getInputClass(!!errors.buqueId)}
+                  value={buqueSearchTerm}
+                  onChange={(e) => {
+                    setBuqueSearchTerm(e.target.value);
+                    setValue("buqueId", undefined as unknown as number);
+                  }}
+                  onFocus={() => {
+                    if (buqueSuggestions.length > 0) setShowBuqueDropdown(true);
+                  }}
+                />
+                <input
+                  type="hidden"
+                  {...register("buqueId", {
+                    required: "Debe seleccionar un buque de la lista.",
+                  })}
+                />
+                <FieldError message={errors.buqueId?.message} />
+
+                {showBuqueDropdown && (
+                  <div className="absolute z-50 w-full mt-1 bg-slate-800 border border-slate-600 rounded-md shadow-lg max-h-60 overflow-y-auto scrollbar-thin scrollbar-track-slate-800 scrollbar-thumb-slate-600">
+                    {isLoadingBuques ? (
+                      <div className="px-4 py-3 text-sm text-slate-400">
+                        Buscando buques...
+                      </div>
+                    ) : buqueSuggestions.length > 0 ? (
+                      <ul className="py-1">
+                        {buqueSuggestions.map((buque) => (
+                          <li
+                            key={buque.idBuque}
+                            className="px-4 py-2 hover:bg-cyan-600 cursor-pointer transition-colors"
+                            onClick={() => {
+                              setValue("buqueId", buque.idBuque, {
+                                shouldValidate: true,
+                              });
+                              setBuqueSearchTerm(buque.nombre);
+                              setShowBuqueDropdown(false);
+                            }}
+                          >
+                            <div className="text-sm font-semibold text-slate-100">
+                              {buque.nombre}
+                            </div>
+                            <div className="text-xs text-slate-400 mt-0.5">
+                              OMI: {buque.omi || "N/A"} | Matrícula:{" "}
+                              {buque.matricula || "N/A"} | Tipo: {buque.tipo}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : buqueSearchTerm.trim().length >= 2 ? (
+                      <div className="px-4 py-3 text-sm text-slate-400">
+                        No se encontraron resultados.
+                      </div>
+                    ) : null}
                   </div>
-                </>
-              ) : (
-                <>
-                  <span className="text-red-500 mt-0.5 flex-shrink-0">
-                    <IconError />
-                  </span>
-                  <p className="text-red-700 text-sm font-medium leading-snug">
-                    Formato irreconocible. Revisa los símbolos o usa formato decimal.
-                  </p>
-                </>
-              )}
-            </div>
-          )}
+                )}
+              </div>
 
-          {/* ── Error del backend (tipado con isAxiosError + ProblemDetails) ── */}
-          {mutation.isError && errorMessage && (
-            <div
-              role="alert"
-              className="px-4 py-3 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3"
-            >
-              <span className="text-red-500 mt-0.5 flex-shrink-0">
-                <IconError />
-              </span>
               <div>
-                <p className="text-red-800 text-sm font-semibold">
-                  Error al actualizar
-                </p>
-                <p className="text-red-700 text-xs mt-0.5 leading-snug">
-                  {errorMessage}
-                </p>
+                <Label htmlFor="agenciaMaritima">Agencia Marítima</Label>
+                <input
+                  id="agenciaMaritima"
+                  type="text"
+                  placeholder="Ej: Agencia del Plata S.A."
+                  disabled={isPending}
+                  className={getInputClass(!!errors.agenciaMaritima)}
+                  {...register("agenciaMaritima", {
+                    maxLength: {
+                      value: 200,
+                      message: "Máximo 200 caracteres.",
+                    },
+                  })}
+                />
+                <FieldError message={errors.agenciaMaritima?.message} />
+              </div>
+
+              <div>
+                <Label htmlFor="muelleSalida">Muelle de Salida</Label>
+                <input
+                  id="muelleSalida"
+                  type="text"
+                  placeholder="Ej: Muelle 5 - Puerto Nuevo"
+                  disabled={isPending}
+                  className={getInputClass(!!errors.muelleSalida)}
+                  {...register("muelleSalida", {
+                    maxLength: {
+                      value: 200,
+                      message: "Máximo 200 caracteres.",
+                    },
+                  })}
+                />
+                <FieldError message={errors.muelleSalida?.message} />
+              </div>
+
+              <div className="sm:col-span-2">
+                <Label htmlFor="motivoViaje">Motivo del Viaje</Label>
+                <input
+                  id="motivoViaje"
+                  type="text"
+                  placeholder="Ej: Transporte de carga general"
+                  disabled={isPending}
+                  className={getInputClass(!!errors.motivoViaje)}
+                  {...register("motivoViaje", {
+                    maxLength: {
+                      value: 500,
+                      message: "Máximo 500 caracteres.",
+                    },
+                  })}
+                />
+                <FieldError message={errors.motivoViaje?.message} />
               </div>
             </div>
-          )}
+          </section>
 
-          {/* ── Éxito con datos cinemáticos ─────────────────────────────── */}
-          {mutation.isSuccess && mutation.data && (
-            <div
-              role="status"
-              aria-live="polite"
-              className="px-4 py-4 bg-blue-50 border border-blue-200 rounded-xl"
-            >
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-[#104a8e]">
-                  <IconCheck />
-                </span>
-                <p className="text-[#002454] font-bold text-sm">
-                  Posición actualizada correctamente
-                </p>
+          {/* ── SECCIÓN 2: Ruta y Tiempos ───────────────────────────── */}
+          <section>
+            <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-500 mb-3 flex items-center gap-2">
+              <span className="block w-4 h-px bg-cyan-500/50" aria-hidden="true" />
+              Ruta y Tiempos
+            </h3>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4">
+              <div>
+                <Label htmlFor="origen" required>
+                  Origen
+                </Label>
+                <input
+                  id="origen"
+                  type="text"
+                  placeholder="Ej: Buenos Aires"
+                  disabled={isPending}
+                  className={getInputClass(!!errors.origen)}
+                  {...register("origen", {
+                    required: "El origen es requerido.",
+                    minLength: { value: 2, message: "Mínimo 2 caracteres." },
+                    maxLength: {
+                      value: 200,
+                      message: "Máximo 200 caracteres.",
+                    },
+                  })}
+                />
+                <FieldError message={errors.origen?.message} />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                {/* Velocidad */}
-                <div className="bg-white px-3 py-2.5 rounded-lg border border-blue-100 text-center">
-                  <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-1">
-                    Velocidad
-                  </p>
-                  <p className="text-base font-mono font-semibold text-[#104a8e]">
-                    {mutation.data.velocidadCalculadaKn}
-                    <span className="text-xs font-normal text-gray-500 ml-1">kn</span>
-                  </p>
-                </div>
-
-                {/* Distancia */}
-                <div className="bg-white px-3 py-2.5 rounded-lg border border-blue-100 text-center">
-                  <p className="text-[10px] text-gray-500 uppercase font-bold tracking-wider mb-1">
-                    Distancia
-                  </p>
-                  <p className="text-base font-mono font-semibold text-[#104a8e]">
-                    {mutation.data.distanciaRecorridaNM}
-                    <span className="text-xs font-normal text-gray-500 ml-1">nm</span>
-                  </p>
-                </div>
+              <div>
+                <Label htmlFor="destino" required>
+                  Destino
+                </Label>
+                <input
+                  id="destino"
+                  type="text"
+                  placeholder="Ej: Montevideo"
+                  disabled={isPending}
+                  className={getInputClass(!!errors.destino)}
+                  {...register("destino", {
+                    required: "El destino es requerido.",
+                    minLength: { value: 2, message: "Mínimo 2 caracteres." },
+                    maxLength: {
+                      value: 200,
+                      message: "Máximo 200 caracteres.",
+                    },
+                  })}
+                />
+                <FieldError message={errors.destino?.message} />
               </div>
 
-              <p className="text-[10px] text-blue-400 text-center mt-2">
-                Cerrando automáticamente…
-              </p>
+              <div className="sm:col-span-2">
+                <Label htmlFor="proximoPuntoControl" required>
+                  Próximo Punto de Control
+                </Label>
+                <input
+                  id="proximoPuntoControl"
+                  type="text"
+                  placeholder="Ej: Prefectura Zárate"
+                  disabled={isPending}
+                  className={getInputClass(!!errors.proximoPuntoControl)}
+                  {...register("proximoPuntoControl", {
+                    required: "El próximo punto de control es requerido.",
+                    minLength: { value: 2, message: "Mínimo 2 caracteres." },
+                    maxLength: {
+                      value: 200,
+                      message: "Máximo 200 caracteres.",
+                    },
+                  })}
+                />
+                <FieldError message={errors.proximoPuntoControl?.message} />
+              </div>
+
+              <div>
+                <Label htmlFor="fechaPartida" required>
+                  Fecha y Hora de Partida
+                </Label>
+                <input
+                  id="fechaPartida"
+                  type="datetime-local"
+                  min={nowMin}
+                  disabled={isPending}
+                  className={getInputClass(!!errors.fechaPartida)}
+                  {...register("fechaPartida", {
+                    required: "La fecha de partida es requerida.",
+                  })}
+                />
+                <FieldError message={errors.fechaPartida?.message} />
+              </div>
+
+              <div>
+                <Label htmlFor="eta" required>
+                  ETA (Arribo Estimado)
+                </Label>
+                <input
+                  id="eta"
+                  type="datetime-local"
+                  min={fechaPartidaValue || nowMin}
+                  disabled={isPending}
+                  className={getInputClass(!!errors.eta)}
+                  {...register("eta", {
+                    required: "La ETA es requerida.",
+                    validate: (value) => {
+                      if (!fechaPartidaValue) return true;
+                      return (
+                        new Date(value) > new Date(fechaPartidaValue) ||
+                        "La ETA debe ser posterior a la fecha de partida."
+                      );
+                    },
+                  })}
+                />
+                <FieldError message={errors.eta?.message} />
+              </div>
             </div>
-          )}
-        </div>
+          </section>
 
-        {/* ── Footer con acciones ─────────────────────────────────────────── */}
-        <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
+          {/* ── SECCIÓN 3: Posición y Datos Geográficos ─────────── */}
+          <section>
+            <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-500 mb-3 flex items-center gap-2">
+              <span className="block w-4 h-px bg-cyan-500/50" aria-hidden="true" />
+              Posición y Datos Geográficos
+            </h3>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4">
+              
+              {/* Latitud en DMS */}
+              <div>
+                <Label htmlFor="latGrados">Latitud</Label>
+                <div className="flex gap-2">
+                  <input
+                    id="latGrados"
+                    type="number"
+                    min="0"
+                    max="90"
+                    placeholder="Grados"
+                    disabled={isPending}
+                    className={getInputClass(false)}
+                    {...register("latGrados", { valueAsNumber: true })}
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    placeholder="Min"
+                    disabled={isPending}
+                    className={getInputClass(false)}
+                    {...register("latMinutos", { valueAsNumber: true })}
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    step="0.1"
+                    placeholder="Seg"
+                    disabled={isPending}
+                    className={getInputClass(false)}
+                    {...register("latSegundos", { valueAsNumber: true })}
+                  />
+                  <select
+                    disabled={isPending}
+                    className={getInputClass(false)}
+                    {...register("latDir")}
+                  >
+                    <option value="N">N</option>
+                    <option value="S">S</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Longitud en DMS */}
+              <div>
+                <Label htmlFor="lonGrados">Longitud</Label>
+                <div className="flex gap-2">
+                  <input
+                    id="lonGrados"
+                    type="number"
+                    min="0"
+                    max="180"
+                    placeholder="Grados"
+                    disabled={isPending}
+                    className={getInputClass(false)}
+                    {...register("lonGrados", { valueAsNumber: true })}
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    placeholder="Min"
+                    disabled={isPending}
+                    className={getInputClass(false)}
+                    {...register("lonMinutos", { valueAsNumber: true })}
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    max="59"
+                    step="0.1"
+                    placeholder="Seg"
+                    disabled={isPending}
+                    className={getInputClass(false)}
+                    {...register("lonSegundos", { valueAsNumber: true })}
+                  />
+                  <select
+                    disabled={isPending}
+                    className={getInputClass(false)}
+                    {...register("lonDir")}
+                  >
+                    <option value="E">E</option>
+                    <option value="W">W</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <Label htmlFor="rioCanalKmPar">Río/Canal — Km Par</Label>
+                <input
+                  id="rioCanalKmPar"
+                  type="number"
+                  step="0.1"
+                  min="0"
+                  max="9999.9"
+                  placeholder="Ej: 274.5"
+                  disabled={isPending}
+                  className={getInputClass(!!errors.rioCanalKmPar)}
+                  {...register("rioCanalKmPar", {
+                    min: { value: 0, message: "Debe ser un valor positivo." },
+                    max: { value: 9999.9, message: "Máximo 9999.9 km." },
+                    valueAsNumber: true,
+                  })}
+                />
+                <FieldError message={errors.rioCanalKmPar?.message} />
+              </div>
+
+              <div>
+                <Label htmlFor="zoe">ZOE (Zona Operación Especial)</Label>
+                <input
+                  id="zoe"
+                  type="text"
+                  placeholder="Ej: ZR-Paraná"
+                  disabled={isPending}
+                  className={getInputClass(!!errors.zoe)}
+                  {...register("zoe", {
+                    maxLength: {
+                      value: 100,
+                      message: "Máximo 100 caracteres.",
+                    },
+                  })}
+                />
+                <FieldError message={errors.zoe?.message} />
+              </div>
+            </div>
+          </section>
+
+          {/* ── SECCIÓN 4: Declaración Jurada Malvinas ──────────── */}
+          <section>
+            <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-500 mb-3 flex items-center gap-2">
+              <span className="block w-4 h-px bg-cyan-500/50" aria-hidden="true" />
+              Declaración Jurada Malvinas
+            </h3>
+
+            <div>
+              <Label htmlFor="declaracionMalvinas" required>
+                Código de Declaración
+              </Label>
+              <select
+                id="declaracionMalvinas"
+                disabled={isPending}
+                className={getInputClass(!!errors.declaracionMalvinas)}
+                {...register("declaracionMalvinas", {
+                  required: "La declaración de Malvinas es requerida.",
+                })}
+              >
+                {(
+                  Object.values(
+                    DeclaracionMalvinasEnum
+                  ) as DeclaracionMalvinasEnum[]
+                ).map((value) => (
+                  <option key={value} value={value}>
+                    {DECLARACION_MALVINAS_LABELS[value]}
+                  </option>
+                ))}
+              </select>
+              <FieldError message={errors.declaracionMalvinas?.message} />
+            </div>
+          </section>
+        </form>
+
+        <div className="px-6 py-4 border-t border-slate-700/60 bg-slate-900/80 flex items-center justify-end gap-3 shrink-0">
           <button
             type="button"
             onClick={onClose}
-            disabled={mutation.isPending}
-            className="
-              px-4 py-2 text-sm font-medium rounded-lg
-              border border-gray-300 text-gray-700
-              hover:bg-gray-100 transition-colors
-              disabled:opacity-50 disabled:cursor-not-allowed
-              focus:outline-none focus-visible:ring-2 focus-visible:ring-gray-400
-            "
+            disabled={isPending}
+            className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-slate-200 
+                       border border-slate-600/50 hover:border-slate-500 rounded 
+                       disabled:opacity-40 disabled:cursor-not-allowed
+                       transition-colors duration-150"
           >
             Cancelar
           </button>
 
           <button
-            type="button"
-            onClick={handleSubmit}
-            disabled={!puedeEnviar}
-            aria-busy={mutation.isPending}
-            className="
-              inline-flex items-center gap-2
-              px-5 py-2 text-sm font-semibold rounded-lg text-white
-              transition-all duration-200
-              focus:outline-none focus-visible:ring-2 focus-visible:ring-[#104a8e] focus-visible:ring-offset-2
-              disabled:opacity-40 disabled:cursor-not-allowed
-              bg-[#104a8e] hover:bg-[#002454] active:scale-[0.98]
-            "
+            type="submit"
+            form="form-nuevo-viaje"
+            disabled={isPending}
+            className="px-5 py-2 text-sm font-semibold rounded
+                       bg-cyan-600 hover:bg-cyan-500 text-white
+                       disabled:bg-cyan-900 disabled:text-cyan-600 disabled:cursor-not-allowed
+                       flex items-center gap-2 transition-colors duration-150
+                       focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
           >
-            {mutation.isPending && <IconSpinner />}
-
-            {mutation.isPending
-              ? 'Actualizando…'
-              : mutation.isSuccess
-                ? '✓ Actualizado'
-                : 'Guardar Posición'}
+            {isPending ? (
+              <>
+                <svg
+                  className="animate-spin w-4 h-4 text-cyan-400"
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  aria-hidden="true"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
+                  />
+                </svg>
+                <span>Guardando...</span>
+              </>
+            ) : (
+              <>
+                <span aria-hidden="true">⚓</span>
+                <span>Registrar Viaje</span>
+              </>
+            )}
           </button>
         </div>
       </div>
     </div>
   );
 }
+
+export default ModalNuevoViaje;

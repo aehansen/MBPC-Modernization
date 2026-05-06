@@ -12,9 +12,9 @@ const PAGE_SIZE = 10;
 // ─── Estado badge ─────────────────────────────────────────────────────────────
 
 const ESTADO_STYLES: Record<string, string> = {
-  Navegando:  'bg-green-100 text-green-800 border border-green-200',
-  Amarrado:   'bg-blue-100 text-blue-800 border border-blue-200',
-  Fondeado:   'bg-yellow-100 text-yellow-800 border border-yellow-200',
+  Navegando: 'bg-green-100 text-green-800 border border-green-200',
+  Amarrado: 'bg-blue-100 text-blue-800 border border-blue-200',
+  Fondeado: 'bg-yellow-100 text-yellow-800 border border-yellow-200',
   Programado: 'bg-gray-100 text-gray-800 border border-gray-200',
 };
 
@@ -117,7 +117,7 @@ export default function ViajesDashboard() {
   });
 
   const handleAbrirPosicion = (viaje: ViajeDto) => setModalPosicion({ isOpen: true, viaje });
-  const handleAbrirCargas   = (viaje: ViajeDto) => setModalCargas({ isOpen: true, viaje });
+  const handleAbrirCargas = (viaje: ViajeDto) => setModalCargas({ isOpen: true, viaje });
 
   // Los datos ya vienen filtrados desde el servidor; no se aplica ningún .filter() local.
   const filas: ViajeDto[] = dataPaginada ?? [];
@@ -203,6 +203,7 @@ export default function ViajesDashboard() {
                           : 'hover:bg-gray-50 border-l-4 border-transparent',
                       ].join(' ')}
                     >
+                      {/* Columna Buque: se usa viaje.buque (nombre real hidratado del DTO) */}
                       <td className="px-4 py-3 font-semibold text-[#002454]">
                         {viaje.buque || 'N/D'}
                       </td>

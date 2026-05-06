@@ -1,0 +1,8 @@
+Set objFSO = CreateObject("Scripting.FileSystemObject") 
+Set objFile = objFSO.OpenTextFile("launchSettings.json", 1) 
+strContent = objFile.ReadAll()  
+objFile.Close()  
+strContent = Replace(strContent, "5009", "5173")  
+Set objFile = objFSO.OpenTextFile("launchSettings.json", 2)  
+objFile.Write(strContent)  
+objFile.Close() 

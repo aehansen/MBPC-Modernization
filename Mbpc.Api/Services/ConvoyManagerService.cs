@@ -12,21 +12,24 @@ using Mbpc.Api.DTOs;
 using Mbpc.Api.DTOs.Convoy;
 using Mbpc.Api.Models.Mongo;
 using Mbpc.Api.Models.Config;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Caching.Memory;
 using MongoDB.Driver;
 using Oracle.ManagedDataAccess.Client;
 
 namespace Mbpc.Api.Services;
 
-/// <inheritdoc cref="IConvoyManagerService"/>
 public sealed class ConvoyManagerService : IConvoyManagerService
 {
     private readonly IViajeService                 _viajeService;
     private readonly ICargaService                 _cargaService;
+    private readonly IServiceProvider              _serviceProvider;
     private readonly IHostEnvironment              _env;
     private readonly ILogger<ConvoyManagerService> _logger;
+    private readonly IMemoryCache                  _cache;
 
     private readonly IMongoCollection<ViajeDetalleMongo> _detallesCollection;
     private readonly string _oracleConnectionString;
@@ -34,47 +37,44 @@ public sealed class ConvoyManagerService : IConvoyManagerService
     public ConvoyManagerService(
         IViajeService                  viajeService,
         ICargaService                  cargaService,
+        IServiceProvider               serviceProvider,
         IMongoClient                   mongoClient,
         IOptions<MongoDbSettings>      mongoSettings,
         IOptions<OracleDbSettings>     oracleSettings,
         IHostEnvironment               env,
-        ILogger<ConvoyManagerService>  logger)
+        ILogger<ConvoyManagerService>  logger,
+        IMemoryCache                   cache)
     {
-        _viajeService = viajeService ?? throw new ArgumentNullException(nameof(viajeService));
-        _cargaService = cargaService ?? throw new ArgumentNullException(nameof(cargaService));
-        _env          = env          ?? throw new ArgumentNullException(nameof(env));
-        _logger       = logger       ?? throw new ArgumentNullException(nameof(logger));
+        _viajeService    = viajeService    ?? throw new ArgumentNullException(nameof(viajeService));
+        _cargaService    = cargaService    ?? throw new ArgumentNullException(nameof(cargaService));
+        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        _env             = env             ?? throw new ArgumentNullException(nameof(env));
+        _logger          = logger          ?? throw new ArgumentNullException(nameof(logger));
+        _cache           = cache           ?? throw new ArgumentNullException(nameof(cache));
 
         ArgumentNullException.ThrowIfNull(mongoClient);
         ArgumentNullException.ThrowIfNull(mongoSettings?.Value);
         ArgumentNullException.ThrowIfNull(oracleSettings?.Value);
 
         var database = mongoClient.GetDatabase(mongoSettings.Value.DatabaseName);
-        _detallesCollection = database.GetCollection<ViajeDetalleMongo>("viajes_detalle");
+        _detallesCollection = database.GetCollection<ViajeDetalleMongo>(mongoSettings.Value.DetailsMbpcCollectionName);
 
         _oracleConnectionString = oracleSettings.Value.ConnectionString
                                   ?? throw new ArgumentException("Oracle connection string cannot be null.");
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // CONSULTAS (Armado del Convoy desde MongoDB + Fallback a Oracle)
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /// <inheritdoc/>
     public async Task<ConvoyDto?> ObtenerConvoyPorViajeIdAsync(
         string            viajeId,
         CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(viajeId);
 
-        // BYPASS DE CACHÉ: Leemos directo de Mongo para tener la foto real del Convoy ahora mismo
         var detalle = await _detallesCollection
             .Find(Builders<ViajeDetalleMongo>.Filter.Eq(x => x.Id, viajeId))
             .FirstOrDefaultAsync(ct);
 
         long travelId = detalle?.IdViaje ?? 0;
 
-        // Si por algún motivo no existe en Mongo, usamos el servicio base como red de seguridad
         if (detalle is null)
         {
             var (detalleCache, tId) = await _viajeService.GetViajeDetalleByIdAsync(viajeId, ct);
@@ -100,11 +100,6 @@ public sealed class ConvoyManagerService : IConvoyManagerService
         };
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // MUTACIONES LEGACY (Mapeo a métodos síncronos legacy)
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /// <inheritdoc/>
     public Task AmarrarBarcazaAsync(
         string                barcazaId,
         AmarrarBarcazaRequest request,
@@ -128,7 +123,6 @@ public sealed class ConvoyManagerService : IConvoyManagerService
         return Task.CompletedTask;
     }
 
-    /// <inheritdoc/>
     public Task FondearBarcazaAsync(
         string               barcazaId,
         FondearBarcazaRequest request,
@@ -151,11 +145,6 @@ public sealed class ConvoyManagerService : IConvoyManagerService
         return Task.CompletedTask;
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // MUTACIONES CQRS — ADJUNTAR / SEPARAR (Load-Mutate-Save + Oracle sync)
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /// <inheritdoc/>
     public async Task<bool> AdjuntarBarcazasAsync(
         string                  viajeId,
         AdjuntarBarcazasRequest request,
@@ -176,7 +165,6 @@ public sealed class ConvoyManagerService : IConvoyManagerService
             string.Join(',', request.BarcazasIds),
             request.Ubicacion);
 
-        // ── Búsqueda en MongoDB — si no existe, se inicializa un documento vacío ────
         var detalle = await _detallesCollection
             .Find(Builders<ViajeDetalleMongo>.Filter.Eq(x => x.Id, viajeId))
             .FirstOrDefaultAsync(ct);
@@ -185,7 +173,7 @@ public sealed class ConvoyManagerService : IConvoyManagerService
         {
             _logger.LogWarning(
                 "AdjuntarBarcazasAsync: Documento BSON no encontrado para ViajeId={ViajeId}. " +
-                "Se inicializa un nuevo ViajeDetalleMongo hidratando el estado legacy de Oracle (anti Split-Brain).",
+                "Se inicializa un nuevo ViajeDetalleMongo hidratando el estado legacy de Oracle.",
                 viajeId);
 
             var barcazasHidratadas = new List<BarcazaMongo>();
@@ -206,11 +194,11 @@ public sealed class ConvoyManagerService : IConvoyManagerService
                             .Where(c => c is not null)
                             .Select(c => new BarcazaMongo
                             {
-                                NombreModern      = c.Id,
-                                CargaModern       = c.NivelRiesgo ?? "General",
-                                CantidadModern    = c.Tonelaje,
-                                UnidadModern      = "TON",
-                                MuelleActualModern = c.MuelleActual
+                                Nombre       = c.Id,
+                                Carga        = c.NivelRiesgo ?? "General",
+                                Cantidad     = c.Tonelaje,
+                                Unidad       = "TON",
+                                MuelleActual = c.MuelleActual
                             })
                             .ToList();
                     }
@@ -220,8 +208,7 @@ public sealed class ConvoyManagerService : IConvoyManagerService
             {
                 _logger.LogWarning(
                     ex,
-                    "AdjuntarBarcazasAsync: Error al hidratar estado legacy desde Oracle para ViajeId={ViajeId}. " +
-                    "Se continúa con etapa vacía.",
+                    "AdjuntarBarcazasAsync: Error al hidratar estado legacy desde Oracle para ViajeId={ViajeId}.",
                     viajeId);
             }
 
@@ -281,6 +268,9 @@ public sealed class ConvoyManagerService : IConvoyManagerService
             "AdjuntarBarcazasAsync: Nueva EtapaId={EtapaId} persistida en MongoDB para ViajeId={ViajeId}.",
             nuevaEtapa.EtapaId, viajeId);
 
+        // INVALIDACIÓN DE CACHÉ DE CARGAS
+        _cache.Remove($"cargas_viaje_{viajeId}");
+
         if (_env.IsDevelopment())
         {
             return true;
@@ -308,7 +298,6 @@ public sealed class ConvoyManagerService : IConvoyManagerService
         return true;
     }
 
-    /// <inheritdoc/>
     public async Task<bool> SepararConvoyAsync(
         string               viajeId,
         SepararConvoyRequest request,
@@ -359,6 +348,9 @@ public sealed class ConvoyManagerService : IConvoyManagerService
             detalle,
             cancellationToken: ct);
 
+        // INVALIDACIÓN DE CACHÉ DE CARGAS
+        _cache.Remove($"cargas_viaje_{viajeId}");
+
         if (_env.IsDevelopment())
         {
             return true;
@@ -385,10 +377,6 @@ public sealed class ConvoyManagerService : IConvoyManagerService
 
         return true;
     }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // HELPERS PRIVADOS
-    // ─────────────────────────────────────────────────────────────────────────
 
     private bool ManejarErrorOracle(OracleException ex, string operacion, string viajeId)
     {
@@ -421,89 +409,121 @@ public sealed class ConvoyManagerService : IConvoyManagerService
         long               travelId,
         ViajeDetalleMongo? detalle)
     {
-        // 1. REGLA DE NEGOCIO: Tomar SOLO las barcazas de la última etapa registrada
+        List<BarcazaMongo> barcazasRaw;
+
         if (detalle?.Etapas != null && detalle.Etapas.Any())
         {
             var ultimaEtapa = detalle.Etapas.OrderByDescending(e => e.EtapaId).First();
-            
-            var barcazasDeUltimaEtapa = ultimaEtapa.Barcazas
+            barcazasRaw = ultimaEtapa.Barcazas
                 ?.Where(b => b is not null)
                 .ToList() ?? new List<BarcazaMongo>();
 
             _logger.LogDebug(
                 "ResolverBarcazas: Usando la última etapa activa (EtapaId={EtapaId}) " +
                 "con {Count} barcaza(s) para ViajeId={ViajeId}.",
-                ultimaEtapa.EtapaId, barcazasDeUltimaEtapa.Count, viajeId);
-
-            // Retornamos sin importar si está vacía. Un convoy vacío es válido post-separación.
-            return barcazasDeUltimaEtapa
-                .Select(MapearBarcazaDesdeMongo)
-                .ToList();
+                ultimaEtapa.EtapaId, barcazasRaw.Count, viajeId);
         }
-
-        // 2. Fallback a propiedad legacy en la raíz del documento (Documentos no migrados a CQRS)
-        if (detalle?.BarcazasLegacy != null && detalle.BarcazasLegacy.Any())
+        else if (detalle?.Barcazas != null && detalle.Barcazas.Any())
         {
-            var barcazasRoot = detalle.BarcazasLegacy.Where(b => b is not null).ToList();
+            barcazasRaw = detalle.Barcazas.Where(b => b is not null).ToList();
 
             _logger.LogDebug(
-                "ResolverBarcazas: Usando {Count} barcaza(s) de Mongo desde la propiedad legacy raíz para ViajeId={ViajeId}.",
-                barcazasRoot.Count, viajeId);
-
-            return barcazasRoot
-                .Select(MapearBarcazaDesdeMongo)
-                .ToList();
+                "ResolverBarcazas: Usando {Count} barcaza(s) de Mongo desde la propiedad raíz para ViajeId={ViajeId}.",
+                barcazasRaw.Count, viajeId);
         }
-
-        // 3. Fallback a Oracle: NUNCA usar el ObjectId, buscar estrictamente el Id relacional
-        long idViajeRelacional = detalle?.IdViaje > 0 ? detalle.IdViaje : travelId;
-
-        if (idViajeRelacional > 0)
+        else
         {
-            _logger.LogWarning(
-                "ResolverBarcazas: MongoDB no devolvió barcazas para ViajeId={ViajeId}. " +
-                "Activando fallback Oracle con IdViaje Relacional={IdViajeRelacional}.",
-                viajeId, idViajeRelacional);
+            long idViajeRelacional = detalle?.IdViaje > 0 ? detalle.IdViaje.GetValueOrDefault() : travelId;
 
-            var cargasLegacy = await _cargaService.ObtenerCargasPorViaje(idViajeRelacional.ToString());
-
-            if (cargasLegacy is null || !cargasLegacy.Any())
+            if (idViajeRelacional > 0)
             {
                 _logger.LogWarning(
-                    "ResolverBarcazas: El fallback a Oracle no devolvió cargas " +
-                    "para IdViaje Relacional={IdViajeRelacional}.",
-                    idViajeRelacional);
-                return [];
+                    "ResolverBarcazas: MongoDB no devolvió barcazas para ViajeId={ViajeId}. " +
+                    "Activando fallback Oracle con IdViaje Relacional={IdViajeRelacional}.",
+                    viajeId, idViajeRelacional);
+
+                var cargasLegacy = await _cargaService.ObtenerCargasPorViaje(idViajeRelacional.ToString());
+
+                if (cargasLegacy is null || !cargasLegacy.Any())
+                {
+                    _logger.LogWarning(
+                        "ResolverBarcazas: El fallback a Oracle no devolvió cargas " +
+                        "para IdViaje Relacional={IdViajeRelacional}.",
+                        idViajeRelacional);
+                    return [];
+                }
+
+                return cargasLegacy
+                    .Where(c => c is not null)
+                    .Select(MapearBarcazaDesdeOracle)
+                    .ToList();
             }
 
-            return cargasLegacy
-                .Where(c => c is not null)
-                .Select(MapearBarcazaDesdeOracle)
-                .ToList();
+            _logger.LogWarning(
+                "ResolverBarcazas: Sin barcazas en Mongo y sin IdViaje Relacional para ViajeId={ViajeId}. " +
+                "No es posible consultar Oracle.",
+                viajeId);
+
+            return [];
         }
 
-        _logger.LogWarning(
-            "ResolverBarcazas: Sin barcazas en Mongo y sin IdViaje Relacional para ViajeId={ViajeId}. " +
-            "No es posible consultar Oracle.",
-            viajeId);
+        // ── Hito 5.9: Patrón Anti-N+1 ──────────────────────────────────────
+        // Resolución diferida para evitar ciclo de DI (mismo patrón que CargaManagerService)
+        var buqueService = _serviceProvider.GetRequiredService<IBuqueService>();
 
-        return [];
+        // Paso 1: Recolectar todos los IDs numéricos únicos de las barcazas
+        var idsNumericos = barcazasRaw
+            .Select(b => b.Nombre)
+            .Where(nombre => !string.IsNullOrWhiteSpace(nombre) && long.TryParse(nombre, out _))
+            .Select(nombre => long.Parse(nombre!))
+            .Distinct()
+            .ToList();
+
+        // Paso 2: Una sola llamada al catálogo → Dictionary<long, BuqueAutocompleteDto>
+        var catalogoBarcazas = idsNumericos.Any()
+            ? await buqueService.ObtenerBuquesPorIdsAsync(idsNumericos)
+            : new Dictionary<long, BuqueAutocompleteDto>();
+
+        _logger.LogDebug(
+            "ResolverBarcazas Hito 5.9 — Batch lookup resolvió {Resueltos}/{Total} ID(s) numéricos en 1 round-trip para ViajeId={ViajeId}.",
+            catalogoBarcazas.Count, idsNumericos.Count, viajeId);
+
+        // Paso 3: Mapear con lookups O(1)
+        return barcazasRaw
+            .Select(b => MapearBarcazaDesdeMongo(b, catalogoBarcazas))
+            .ToList();
     }
 
-    private static BarcazaConvoyDto MapearBarcazaDesdeMongo(BarcazaMongo b) =>
-        new(
-            Id:           string.IsNullOrWhiteSpace(b.Matricula) ? b.Nombre : b.Matricula,
-            Nombre:       b.Nombre,
-            Bandera:      b.Bandera,
-            Matricula:    b.Matricula,
-            TipoCarga:    b.Carga,
-            Tonelaje:     b.Cantidad,
-            Unidad:       b.Unidad,
+    private static BarcazaConvoyDto MapearBarcazaDesdeMongo(
+        BarcazaMongo b,
+        Dictionary<long, BuqueAutocompleteDto> catalogo)
+    {
+        // Hito 5.9: Si el Nombre es un ID numérico, resolverlo desde el catálogo batch (lookup O(1))
+        string nombreDisplay = b.Nombre ?? "S/N";
+        string? matriculaDisplay = b.Matricula;
+
+        if (!string.IsNullOrWhiteSpace(b.Nombre)
+            && long.TryParse(b.Nombre, out long idNum)
+            && catalogo.TryGetValue(idNum, out var info))
+        {
+            nombreDisplay    = info.Nombre ?? b.Nombre;
+            matriculaDisplay = info.Matricula ?? b.Matricula;
+        }
+
+        return new BarcazaConvoyDto(
+            Id:           string.IsNullOrWhiteSpace(b.Matricula) ? b.Nombre! : b.Matricula,
+            Nombre:       nombreDisplay,
+            Bandera:      b.Bandera ?? "N/A",
+            Matricula:    matriculaDisplay,
+            TipoCarga:    b.Carga ?? "A Definir",
+            Tonelaje:     b.Cantidad ?? 0d,
+            Unidad:       b.Unidad ?? "TON",
             MuelleActual: b.MuelleActual,
             Estado:       string.IsNullOrWhiteSpace(b.MuelleActual)
                               ? EstadoBarcaza.EnTransito
                               : EstadoBarcaza.Amarrada
         );
+    }
 
     private static BarcazaConvoyDto MapearBarcazaDesdeOracle(CargaDto c) =>
         new(

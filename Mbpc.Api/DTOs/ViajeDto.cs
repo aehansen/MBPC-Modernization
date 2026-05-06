@@ -1,8 +1,3 @@
-// ViajeDto.cs
-// DTOs de presentación — exponen al Frontend la información nueva de EJE 1
-// sin filtrar ruido de implementación Mongo/BSON.
-// Namespace: Mbpc.Api.DTOs
-
 namespace Mbpc.Api.DTOs
 {
     // ══════════════════════════════════════════════════════════════════════════
@@ -12,6 +7,7 @@ namespace Mbpc.Api.DTOs
     {
         public string Id { get; set; } = null!;
         public string Buque { get; set; } = null!;
+        public string NombreBuque { get; set; } = string.Empty;
         /// <summary>Concatenación "Origen → Destino".</summary>
         public string Ruta { get; set; } = null!;
         public string FechaInicioFormateada { get; set; } = null!;
@@ -27,17 +23,12 @@ namespace Mbpc.Api.DTOs
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // DTOs de Etapa — el estado viaja como string al Frontend para desacoplarlo
-    // del Enum interno: el cliente no debe depender de nuestro modelo de dominio.
+    // DTOs de Etapa
     // ══════════════════════════════════════════════════════════════════════════
     public record EtapaDto(
         string? PuntoControl,
         string? Hrp,
         string? Eta,
-        /// <summary>
-        /// Estado como string ("Navegando", "Fondeado", etc.).
-        /// Se convierte desde EstadoEtapa en la capa de mapeo del servicio.
-        /// </summary>
         string Estado,
         bool EsActiva
     );
@@ -62,7 +53,7 @@ namespace Mbpc.Api.DTOs
     );
 
     // ══════════════════════════════════════════════════════════════════════════
-    // DTOs de Práctico e Inspector — EJE 1 nuevos
+    // DTOs de Práctico e Inspector
     // ══════════════════════════════════════════════════════════════════════════
     public record PracticoDto(
         string Nombre,

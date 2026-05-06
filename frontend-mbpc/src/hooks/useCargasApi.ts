@@ -1,6 +1,7 @@
 // src/hooks/useCargasApi.ts
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient, { cargaApi } from '../axiosClient';
+import { convoyKeys } from './useGestionConvoy';
 import type {
   CargaDto,
   NuevaCargaRequest,
@@ -51,7 +52,10 @@ export function useCrearCarga(viajeId: string) {
   const qc = useQueryClient();
   return useMutation<CargaDto, Error, NuevaCargaArgs>({
     mutationFn: crearCarga,
-    onSuccess: () => qc.invalidateQueries({ queryKey: cargasKeys.byViaje(viajeId) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: cargasKeys.byViaje(viajeId) });
+      qc.invalidateQueries({ queryKey: convoyKeys.all }); // Invalidación cruzada
+    },
   });
 }
 
@@ -70,7 +74,10 @@ export function useAmarrarCarga(viajeId: string) {
   const qc = useQueryClient();
   return useMutation<CargaDto, Error, AmarrarCargaParams>({
     mutationFn: amarrarCarga,
-    onSuccess: () => qc.invalidateQueries({ queryKey: cargasKeys.byViaje(viajeId) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: cargasKeys.byViaje(viajeId) });
+      qc.invalidateQueries({ queryKey: convoyKeys.all }); // Invalidación cruzada
+    },
   });
 }
 
@@ -89,7 +96,10 @@ export function useFondearCarga(viajeId: string) {
   const qc = useQueryClient();
   return useMutation<CargaDto, Error, FondearCargaParams>({
     mutationFn: fondearCarga,
-    onSuccess: () => qc.invalidateQueries({ queryKey: cargasKeys.byViaje(viajeId) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: cargasKeys.byViaje(viajeId) });
+      qc.invalidateQueries({ queryKey: convoyKeys.all }); // Invalidación cruzada
+    },
   });
 }
 
@@ -108,7 +118,10 @@ export function useCargarToneladas(viajeId: string) {
   const qc = useQueryClient();
   return useMutation<CargaDto, Error, CargarCargaParams>({
     mutationFn: cargarToneladas,
-    onSuccess: () => qc.invalidateQueries({ queryKey: cargasKeys.byViaje(viajeId) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: cargasKeys.byViaje(viajeId) });
+      qc.invalidateQueries({ queryKey: convoyKeys.all }); // Invalidación cruzada
+    },
   });
 }
 
@@ -127,6 +140,9 @@ export function useDescargarToneladas(viajeId: string) {
   const qc = useQueryClient();
   return useMutation<CargaDto, Error, DescargarCargaParams>({
     mutationFn: descargarToneladas,
-    onSuccess: () => qc.invalidateQueries({ queryKey: cargasKeys.byViaje(viajeId) }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: cargasKeys.byViaje(viajeId) });
+      qc.invalidateQueries({ queryKey: convoyKeys.all }); // Invalidación cruzada
+    },
   });
 }

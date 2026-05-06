@@ -165,8 +165,124 @@ namespace Mbpc.Api.Services
 
             _logger.LogWarning("Oracle Offline. Usando MOCK de 100 buques filtrado por: '{Query}'", query);
 
-            // 2. Cargamos tu base de datos local (Surtido: Remolcadores, Barcazas, Buques, Menores)
-            var mockDb = new List<BuqueAutocompleteDto>
+            var mockDb = ObtenerMockDb();
+
+            // 3. Filtramos la lista para que el autocompletado funcione de verdad
+            if (string.IsNullOrWhiteSpace(query)) return mockDb;
+
+            return mockDb.Where(b => 
+                (b.Nombre != null && b.Nombre.Contains(query, StringComparison.OrdinalIgnoreCase)) || 
+                (b.Matricula != null && b.Matricula.Contains(query, StringComparison.OrdinalIgnoreCase)) ||
+                (b.Omi != null && b.Omi.Contains(query, StringComparison.OrdinalIgnoreCase))
+            ).ToList();
+        }
+
+        // ── IBuqueService: ObtenerBuquePorIdAsync ────────────────────────────
+
+        /// <inheritdoc/>
+        public async Task<BuqueAutocompleteDto?> ObtenerBuquePorIdAsync(long idBuque)
+        {
+            _logger.LogInformation("ObtenerBuquePorIdAsync — Consultando buque con ID={IdBuque}.", idBuque);
+
+            try
+            {
+                if (_env.IsDevelopment())
+                {
+                    return ObtenerMockDb().FirstOrDefault(b => b.IdBuque == idBuque);
+                }
+
+                using var connection = new OracleConnection(_oracleConnectionString);
+                await connection.OpenAsync();
+
+                var rows = await connection.QueryAsync<BuqueAutocompleteDto>(
+                    "SELECT ID_BUQUE as IdBuque, NOMBRE as Nombre, MATRICULA as Matricula, OMI as Omi, TIPO as Tipo FROM BUQUES_NEW WHERE ID_BUQUE = :IdBuque AND ROWNUM = 1",
+                    new { IdBuque = idBuque });
+
+                return rows.FirstOrDefault() ?? ObtenerMockDb().FirstOrDefault(b => b.IdBuque == idBuque);
+            }
+            catch (OracleException ex)
+            {
+                if (!_env.IsDevelopment())
+                {
+                    _logger.LogWarning(ex, "ObtenerBuquePorIdAsync — Error de Oracle. Usando MOCK para ID={IdBuque}", idBuque);
+                }
+                return ObtenerMockDb().FirstOrDefault(b => b.IdBuque == idBuque);
+            }
+        }
+
+        // ── IBuqueService: ObtenerBuquesPorIdsAsync (Batch / Anti N+1) ──────
+
+        /// <inheritdoc/>
+        public async Task<Dictionary<long, BuqueAutocompleteDto>> ObtenerBuquesPorIdsAsync(IEnumerable<long> ids)
+        {
+            var idsDistintos = ids.Distinct().ToList();
+
+            if (idsDistintos.Count == 0)
+                return new Dictionary<long, BuqueAutocompleteDto>();
+
+            _logger.LogInformation(
+                "ObtenerBuquesPorIdsAsync — Resolviendo {Count} ID(s) en una sola operación.",
+                idsDistintos.Count);
+
+            if (_env.IsDevelopment())
+            {
+                var mockDb = ObtenerMockDb();
+                return mockDb
+                    .Where(b => idsDistintos.Contains(b.IdBuque))
+                    .ToDictionary(b => b.IdBuque);
+            }
+
+            try
+            {
+                using var connection = new OracleConnection(_oracleConnectionString);
+                await connection.OpenAsync();
+
+                // Oracle no expande IEnumerable automáticamente con OracleConnection+Dapper,
+                // por lo que parametrizamos manualmente cada ID.
+                var paramNames = idsDistintos.Select((_, i) => $":id{i}").ToList();
+                var sql = $"SELECT ID_BUQUE as IdBuque, NOMBRE as Nombre, MATRICULA as Matricula, " +
+                          $"OMI as Omi, TIPO as Tipo FROM BUQUES_NEW " +
+                          $"WHERE ID_BUQUE IN ({string.Join(", ", paramNames)})";
+
+                var dynParams = new DynamicParameters();
+                for (int i = 0; i < idsDistintos.Count; i++)
+                    dynParams.Add($"id{i}", idsDistintos[i]);
+
+                var rows = await connection.QueryAsync<BuqueAutocompleteDto>(sql, dynParams);
+                var resultado = rows.ToDictionary(b => b.IdBuque);
+
+                // Fallback para IDs no encontrados en Oracle → busca en MOCK
+                var idsNoEncontrados = idsDistintos.Where(id => !resultado.ContainsKey(id)).ToList();
+                if (idsNoEncontrados.Any())
+                {
+                    _logger.LogWarning(
+                        "ObtenerBuquesPorIdsAsync — {Count} ID(s) no encontrados en Oracle. Usando MOCK como fallback.",
+                        idsNoEncontrados.Count);
+
+                    var mockFallback = ObtenerMockDb();
+                    foreach (var id in idsNoEncontrados)
+                    {
+                        var mockEntry = mockFallback.FirstOrDefault(b => b.IdBuque == id);
+                        if (mockEntry != null)
+                            resultado[id] = mockEntry;
+                    }
+                }
+
+                return resultado;
+            }
+            catch (OracleException ex)
+            {
+                _logger.LogError(ex, "ObtenerBuquesPorIdsAsync — Error de Oracle. Usando MOCK como fallback.");
+                var mockDb = ObtenerMockDb();
+                return mockDb
+                    .Where(b => idsDistintos.Contains(b.IdBuque))
+                    .ToDictionary(b => b.IdBuque);
+            }
+        }
+
+        private List<BuqueAutocompleteDto> ObtenerMockDb()
+        {
+            return new List<BuqueAutocompleteDto>
             {
                 // ─── REMOLCADORES ───
                 new() { IdBuque = 1045174, Nombre = "YANI G", Matricula = "LW4793", Omi = "1045174", Tipo = "Remolcador" },
@@ -258,15 +374,6 @@ namespace Mbpc.Api.Services
                 new() { IdBuque = 3000409, Nombre = "MERCO 18", Matricula = "UY-409", Omi = "-", Tipo = "Barcaza" },
                 new() { IdBuque = 3000410, Nombre = "MERCO 19", Matricula = "UY-410", Omi = "-", Tipo = "Barcaza" }
             };
-
-            // 3. Filtramos la lista para que el autocompletado funcione de verdad
-            if (string.IsNullOrWhiteSpace(query)) return mockDb;
-
-            return mockDb.Where(b => 
-                (b.Nombre != null && b.Nombre.Contains(query, StringComparison.OrdinalIgnoreCase)) || 
-                (b.Matricula != null && b.Matricula.Contains(query, StringComparison.OrdinalIgnoreCase)) ||
-                (b.Omi != null && b.Omi.Contains(query, StringComparison.OrdinalIgnoreCase))
-            ).ToList();
         }
     }
 }

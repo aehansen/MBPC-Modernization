@@ -1,0 +1,34 @@
+nohup: ignoring input
+read failed 9: Bad file descriptor
+Usando la configuración de inicio de Mbpc.Api\Properties\launchSettings.json...
+Compilando...
+info: Microsoft.Hosting.Lifetime[14]
+      Now listening on: http://127.0.0.1:5009
+info: Microsoft.Hosting.Lifetime[0]
+      Application started. Press Ctrl+C to shut down.
+info: Microsoft.Hosting.Lifetime[0]
+      Hosting environment: Development
+info: Microsoft.Hosting.Lifetime[0]
+      Content root path: C:\proyectos\MBPC\prototipoMBPC\Mbpc.Api
+info: Mbpc.Api.Controllers.AuthController[0]
+      Generando token JWT — CosteraId: 0 | Rol: Admin
+info: Mbpc.Api.Controllers.ViajesController[0]
+      GetViajes — CosteraId: 0 | Nombre: 'TODOS' | Página: 1 | Tamaño: 10
+info: Mbpc.Api.Controllers.CargaController[0]
+      Buscando cargas para viajeId: 69f900a0b1c2d3e4f50000c6
+info: Mbpc.Api.Services.CargaManagerService[0]
+      CACHE MISS — Parámetro '69f900a0b1c2d3e4f50000c6' resuelve a MongoDB.
+info: Mbpc.Api.Services.BuqueManagerService[0]
+      ObtenerBuquesPorIdsAsync — Resolviendo 1 ID(s) en una sola operación.
+info: Mbpc.Api.Controllers.CargaController[0]
+      Buscando cargas para viajeId: 69f900a0b1c2d3e4f50000c6
+info: Mbpc.Api.Controllers.CargaController[0]
+      Buscando cargas para viajeId: 69f900a0b1c2d3e4f50000c6
+info: Mbpc.Api.Controllers.ViajesController[0]
+      GetViajes — CosteraId: 0 | Nombre: 'TODOS' | Página: 1 | Tamaño: 10
+info: Mbpc.Api.Controllers.CargaController[0]
+      Buscando cargas para viajeId: 69f900a0b1c2d3e4f50000c6
+info: Mbpc.Api.Services.CargaManagerService[0]
+      CACHE MISS — Parámetro '69f900a0b1c2d3e4f50000c6' resuelve a MongoDB.
+info: Mbpc.Api.Services.BuqueManagerService[0]
+      ObtenerBuquesPorIdsAsync — Resolviendo 1 ID(s) en una sola operación.

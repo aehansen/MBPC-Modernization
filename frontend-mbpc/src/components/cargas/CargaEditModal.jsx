@@ -29,8 +29,10 @@ export default function CargaEditModal({ carga, onClose, onSuccess }) {
     formState: { errors, isSubmitting },
   } = useForm({
     defaultValues: {
-      barcazaId: carga?.id ? Number(carga.id) : "",
-      tipo: carga?.tipo ?? "Barcaza",
+      // carga.tipoUnidad contiene "Barcaza" o "Bodega" según el backend (CargaDto.TipoUnidad)
+      tipo: carga?.tipoUnidad ?? "Barcaza",
+      // Extraemos el nombre y matrícula de la descripción (ej: "UABL 101 (PY-101)")
+      barcazaNombreDisplay: carga?.descripcionLista ? carga.descripcionLista.split(' - ')[0] : (carga?.id ?? ""),
       tonelaje: carga?.tonelaje ?? "",
     },
   });
@@ -51,11 +53,14 @@ export default function CargaEditModal({ carga, onClose, onSuccess }) {
     try {
       // El token JWT es inyectado automáticamente por el interceptor de axiosClient.
       await cargaApi.update(carga.id, {
-        // Si es bodega forzamos 0, si es barcaza mandamos el número ingresado
         viajeId: carga.viajeId,
-        barcazaId: esBodega ? 0 : Number(data.barcazaId),
+        // Enviamos el id original como numérico para no romper el constraint en Oracle (p_NUEVO_ID_BARCAZA)
+        barcazaId: Number(carga.id),
+        // 'tipo' debe ser siempre "Barcaza" o "Bodega" — valor del selector, NO el nombre de la mercadería
         tipo: data.tipo,
         tonelaje: parseFloat(data.tonelaje),
+        // 'mercaderiaId' es el ID Oracle del producto (Soja=42, Gasoil=17...)
+        // El backend resuelve el nombre legible desde Oracle en cada GET, no hace falta enviarlo.
         mercaderiaId: mercaderiaSeleccionada.oracleId,
       });
 
@@ -122,29 +127,17 @@ export default function CargaEditModal({ carga, onClose, onSuccess }) {
               {errors.tipo && <p className="mt-1 text-xs text-red-500">{errors.tipo.message}</p>}
             </div>
 
-            {/* BarcazaId — Oculto con CSS en vez de desmontarlo para resetear la validación */}
             <div className={esBodega ? "hidden" : "block"}>
-              <label htmlFor="barcazaId" className="mb-1 block text-sm font-medium text-slate-700">
-                ID de Barcaza
+              <label htmlFor="barcazaNombreDisplay" className="mb-1 block text-sm font-medium text-slate-700">
+                Barcaza Seleccionada
               </label>
               <input
-                id="barcazaId"
-                type="number"
-                step="1"
-                className={`w-full rounded-md border px-3 py-2 text-sm shadow-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 transition ${errors.barcazaId ? "border-red-400 focus:ring-red-400" : "border-slate-300"
-                  }`}
-                placeholder="Ej: 1042"
-                {...register("barcazaId", {
-                  // Validación dinámica e inteligente
-                  validate: (value, formValues) => {
-                    if (formValues.tipo === "Bodega") return true; // Si es bodega, ignorar validación
-                    if (!value) return "El ID de barcaza es requerido.";
-                    if (Number(value) < 1) return "Debe ser un entero positivo.";
-                    return true;
-                  }
-                })}
+                id="barcazaNombreDisplay"
+                type="text"
+                disabled
+                className="w-full rounded-md border px-3 py-2 text-sm shadow-sm bg-slate-100 text-slate-600 border-slate-300"
+                {...register("barcazaNombreDisplay")}
               />
-              {errors.barcazaId && <p className="mt-1 text-xs text-red-500">{errors.barcazaId.message}</p>}
             </div>
 
             {/* Mercadería / Naturaleza */}

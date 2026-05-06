@@ -5,11 +5,6 @@ import { cargaApi } from "../../axiosClient";
  * CargaDeleteModal
  *
  * Modal de confirmación para eliminar una carga del manifiesto.
- *
- * Props:
- * carga     {CargaDto}  – Carga a eliminar (id, viajeId, descripcionLista, etc.)
- * onClose   {Function}  – Callback para cerrar el modal sin cambios.
- * onSuccess {Function}  – Callback ejecutado tras una eliminación exitosa.
  */
 export default function CargaDeleteModal({ isOpen, onClose, carga, viajeId, onSuccess }) {
   const [isLoading, setIsLoading] = useState(false);
@@ -19,19 +14,18 @@ export default function CargaDeleteModal({ isOpen, onClose, carga, viajeId, onSu
     setIsLoading(true);
     setServerError(null);
     try {
-        const idViajeReal = viajeId || carga?.viajeId;
+      const idViajeReal = viajeId || carga?.viajeId;
 
-      // 2. Si sigue sin existir, frenamos todo y avisamos en la UI
       if (!idViajeReal) {
         setServerError("Falta el ID del viaje. El componente padre no está pasando el dato correctamente.");
         setIsLoading(false);
         return;
       }
 
-      // 3. Enviamos los datos reales y validados
-      await cargaApi.delete(idViajeReal, carga.id);
-        onSuccess?.();
-        onClose?.();
+      // Hito 5.8: Ruta con scoping doble (viajeId + cargaId) para evitar borrado cruzado entre viajes.
+      await cargaApi.delete(`/${idViajeReal}/eliminar/${carga.id}`);
+      onSuccess?.();
+      onClose?.();
     } catch (err) {
       const mensaje =
         err.response?.data?.mensaje ??

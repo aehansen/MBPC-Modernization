@@ -4,7 +4,7 @@ import axios from 'axios';
 // Instancia centralizada de Axios
 const apiClient = axios.create({
     // IMPORTANTE: Ajustá este puerto al puerto real donde levanta tu consola de .NET 8
-    baseURL: 'http://localhost:5009', 
+    baseURL: 'http://localhost:5000',
     headers: {
         'Content-Type': 'application/json'
     }

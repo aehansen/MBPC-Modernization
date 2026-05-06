@@ -11,3 +11,4 @@ dist/
 
 # Secrets (¡Fundamental!)
 appsettings.Development.json
+.aider*
