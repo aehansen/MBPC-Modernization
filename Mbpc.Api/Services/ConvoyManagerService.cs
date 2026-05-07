@@ -404,34 +404,32 @@ public sealed class ConvoyManagerService : IConvoyManagerService
             ex);
     }
 
+    // ─────────────────────────────────────────────────────────────────────────────
+    // ResolverBarcazasAsync
+    //
+    // Cadena de fuentes con red de seguridad garantizada:
+    //
+    //   1. Última etapa (formato canónico nuevo)   → barcazasRaw con datos
+    //   2. Propiedad raíz legacy "barcazas"        → barcazasRaw con datos
+    //   3. Oracle                                  → retorno directo (early-return)
+    //
+    // El punto crítico del fix: la decisión de ir a Oracle se toma DESPUÉS de
+    // intentar ambas fuentes Mongo, en un único bloque de control al final.
+    // Esto elimina el bug donde entrar por la rama de Etapas con barcazas vacías
+    // saltaba el fallback Oracle y continuaba con una lista vacía hacia el catálogo.
+    // ─────────────────────────────────────────────────────────────────────────────
     private async Task<List<BarcazaConvoyDto>> ResolverBarcazasAsync(
         string             viajeId,
         long               travelId,
         ViajeDetalleMongo? detalle)
     {
-        List<BarcazaMongo> barcazasRaw;
+        // ── Paso 1: intentar resolver barcazas desde MongoDB (ambas fuentes) ────
+        var barcazasRaw = ResolverBarcazasDesdeMongo(detalle, viajeId);
 
-        if (detalle?.Etapas != null && detalle.Etapas.Any())
-        {
-            var ultimaEtapa = detalle.Etapas.OrderByDescending(e => e.EtapaId).First();
-            barcazasRaw = ultimaEtapa.Barcazas
-                ?.Where(b => b is not null)
-                .ToList() ?? new List<BarcazaMongo>();
-
-            _logger.LogDebug(
-                "ResolverBarcazas: Usando la última etapa activa (EtapaId={EtapaId}) " +
-                "con {Count} barcaza(s) para ViajeId={ViajeId}.",
-                ultimaEtapa.EtapaId, barcazasRaw.Count, viajeId);
-        }
-        else if (detalle?.Barcazas != null && detalle.Barcazas.Any())
-        {
-            barcazasRaw = detalle.Barcazas.Where(b => b is not null).ToList();
-
-            _logger.LogDebug(
-                "ResolverBarcazas: Usando {Count} barcaza(s) de Mongo desde la propiedad raíz para ViajeId={ViajeId}.",
-                barcazasRaw.Count, viajeId);
-        }
-        else
+        // ── Paso 2: si MongoDB no aportó nada, activar fallback Oracle ───────────
+        // Este bloque es el único punto de decisión para Oracle, sin importar
+        // si se llegó aquí desde la rama de Etapas o desde la raíz legacy.
+        if (barcazasRaw.Count == 0)
         {
             long idViajeRelacional = detalle?.IdViaje > 0 ? detalle.IdViaje.GetValueOrDefault() : travelId;
 
@@ -467,11 +465,12 @@ public sealed class ConvoyManagerService : IConvoyManagerService
             return [];
         }
 
-        // ── Hito 5.9: Patrón Anti-N+1 ──────────────────────────────────────
-        // Resolución diferida para evitar ciclo de DI (mismo patrón que CargaManagerService)
+        // ── Paso 3: Hito 5.9 — Patrón Anti-N+1 ─────────────────────────────────
+        // Solo se ejecuta si barcazasRaw tiene datos. Oracle ya hizo early-return.
+        // Resolución diferida para evitar ciclo de DI (mismo patrón que CargaManagerService).
         var buqueService = _serviceProvider.GetRequiredService<IBuqueService>();
 
-        // Paso 1: Recolectar todos los IDs numéricos únicos de las barcazas
+        // Recolectar todos los IDs numéricos únicos de las barcazas
         var idsNumericos = barcazasRaw
             .Select(b => b.Nombre)
             .Where(nombre => !string.IsNullOrWhiteSpace(nombre) && long.TryParse(nombre, out _))
@@ -479,7 +478,7 @@ public sealed class ConvoyManagerService : IConvoyManagerService
             .Distinct()
             .ToList();
 
-        // Paso 2: Una sola llamada al catálogo → Dictionary<long, BuqueAutocompleteDto>
+        // Una sola llamada al catálogo → Dictionary<long, BuqueAutocompleteDto>
         var catalogoBarcazas = idsNumericos.Any()
             ? await buqueService.ObtenerBuquesPorIdsAsync(idsNumericos)
             : new Dictionary<long, BuqueAutocompleteDto>();
@@ -488,10 +487,63 @@ public sealed class ConvoyManagerService : IConvoyManagerService
             "ResolverBarcazas Hito 5.9 — Batch lookup resolvió {Resueltos}/{Total} ID(s) numéricos en 1 round-trip para ViajeId={ViajeId}.",
             catalogoBarcazas.Count, idsNumericos.Count, viajeId);
 
-        // Paso 3: Mapear con lookups O(1)
+        // Mapear con lookups O(1)
         return barcazasRaw
             .Select(b => MapearBarcazaDesdeMongo(b, catalogoBarcazas))
             .ToList();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // ResolverBarcazasDesdeMongo
+    //
+    // Responsabilidad única: determinar qué lista de BarcazaMongo usar desde
+    // el documento BSON, consultando las dos fuentes posibles en orden de
+    // prioridad. Nunca toca Oracle ni servicios externos.
+    //
+    // Prioridad:
+    //   1. Última etapa (Etapas[last].Barcazas)  → formato canónico nuevo
+    //   2. Propiedad raíz (detalle.Barcazas)     → formato legacy "barcazas"
+    //   3. Lista vacía                            → el llamador decide qué hacer
+    // ─────────────────────────────────────────────────────────────────────────────
+    private List<BarcazaMongo> ResolverBarcazasDesdeMongo(
+        ViajeDetalleMongo? detalle,
+        string             viajeId)
+    {
+        if (detalle?.Etapas is { Count: > 0 })
+        {
+            var ultimaEtapa   = detalle.Etapas.OrderByDescending(e => e.EtapaId).First();
+            var barcazasEtapa = ultimaEtapa.Barcazas?.Where(b => b is not null).ToList() ?? [];
+
+            if (barcazasEtapa.Count > 0)
+            {
+                _logger.LogDebug(
+                    "ResolverBarcazasDesdeMongo: Usando la última etapa activa (EtapaId={EtapaId}) " +
+                    "con {Count} barcaza(s) para ViajeId={ViajeId}.",
+                    ultimaEtapa.EtapaId, barcazasEtapa.Count, viajeId);
+
+                return barcazasEtapa;
+            }
+
+            // La etapa existe pero está vacía → intentar raíz legacy antes de
+            // dejar que el llamador active el fallback Oracle.
+            _logger.LogDebug(
+                "ResolverBarcazasDesdeMongo: Última etapa (EtapaId={EtapaId}) sin barcazas. " +
+                "Intentando propiedad raíz legacy para ViajeId={ViajeId}.",
+                ultimaEtapa.EtapaId, viajeId);
+        }
+
+        var barcazasRaiz = detalle?.Barcazas?.Where(b => b is not null).ToList() ?? [];
+
+        if (barcazasRaiz.Count > 0)
+        {
+            _logger.LogDebug(
+                "ResolverBarcazasDesdeMongo: Usando {Count} barcaza(s) desde propiedad raíz legacy para ViajeId={ViajeId}.",
+                barcazasRaiz.Count, viajeId);
+        }
+
+        // Devuelve lista vacía si ninguna fuente Mongo tiene datos.
+        // ResolverBarcazasAsync evaluará si corresponde ir a Oracle.
+        return barcazasRaiz;
     }
 
     private static BarcazaConvoyDto MapearBarcazaDesdeMongo(
@@ -499,25 +551,25 @@ public sealed class ConvoyManagerService : IConvoyManagerService
         Dictionary<long, BuqueAutocompleteDto> catalogo)
     {
         // Hito 5.9: Si el Nombre es un ID numérico, resolverlo desde el catálogo batch (lookup O(1))
-        string nombreDisplay = b.Nombre ?? "S/N";
+        string nombreDisplay    = b.Nombre ?? "S/N";
         string? matriculaDisplay = b.Matricula;
 
         if (!string.IsNullOrWhiteSpace(b.Nombre)
             && long.TryParse(b.Nombre, out long idNum)
             && catalogo.TryGetValue(idNum, out var info))
         {
-            nombreDisplay    = info.Nombre ?? b.Nombre;
+            nombreDisplay    = info.Nombre   ?? b.Nombre;
             matriculaDisplay = info.Matricula ?? b.Matricula;
         }
 
         return new BarcazaConvoyDto(
             Id:           string.IsNullOrWhiteSpace(b.Matricula) ? b.Nombre! : b.Matricula,
             Nombre:       nombreDisplay,
-            Bandera:      b.Bandera ?? "N/A",
+            Bandera:      b.Bandera    ?? "N/A",
             Matricula:    matriculaDisplay,
-            TipoCarga:    b.Carga ?? "A Definir",
-            Tonelaje:     b.Cantidad ?? 0d,
-            Unidad:       b.Unidad ?? "TON",
+            TipoCarga:    b.Carga      ?? "A Definir",
+            Tonelaje:     b.Cantidad   ?? 0d,
+            Unidad:       b.Unidad     ?? "TON",
             MuelleActual: b.MuelleActual,
             Estado:       string.IsNullOrWhiteSpace(b.MuelleActual)
                               ? EstadoBarcaza.EnTransito
@@ -546,7 +598,14 @@ public sealed class ConvoyManagerService : IConvoyManagerService
 
     private static RemolcadorConvoyDto? MapearRemolcador(ViajeDetalleMongo? detalle)
     {
-        var remolcador = detalle?.Etapas?.OrderByDescending(e => e.EtapaId).FirstOrDefault()?.Remolcador;
+        // FIX Hito 6.0: primero intentar el formato canónico nuevo (última etapa).
+        // Si es nulo, hacer fallback a la propiedad raíz legacy "remolcador".
+        var remolcador = detalle?.Etapas
+                            ?.OrderByDescending(e => e.EtapaId)
+                            .FirstOrDefault()
+                            ?.Remolcador
+                         ?? detalle?.RemolcadorLegacy;
+
         if (remolcador is null) return null;
 
         var id = remolcador.Matricula

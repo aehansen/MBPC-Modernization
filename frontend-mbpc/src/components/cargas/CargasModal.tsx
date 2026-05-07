@@ -39,7 +39,7 @@ export default function CargasModal({ viajeId, viajeNombreBuque, onClose }: Carg
 
   // Extraemos refetch para poder recargar la grilla tras editar/eliminar
   const { data: cargas = [], isLoading, refetch } = useCargas(viajeId);
-  const { mutate: crearCarga, isPending: isCreando } = useCrearCarga();
+  const { mutate: crearCarga, isPending: isCreando } = useCrearCarga(viajeId);
   const { mutate: amarrar } = useAmarrarCarga(viajeId);
   const { mutate: fondear } = useFondearCarga(viajeId);
   const { mutate: cargarTon } = useCargarToneladas(viajeId);
@@ -157,9 +157,9 @@ export default function CargasModal({ viajeId, viajeNombreBuque, onClose }: Carg
 
     crearCarga(
       {
-        nombreBuque: viajeNombreBuque,
+        viajeId: viajeId,
         body: {
-          barcazaId: payloadBarcazaId, // Enviamos el ID procesado
+          barcazaId: payloadBarcazaId,
           tipo,
           tonelaje,
           mercaderiaId: mercaderiaSeleccionada.oracleId,
@@ -177,6 +177,14 @@ export default function CargasModal({ viajeId, viajeNombreBuque, onClose }: Carg
           // Invalidamos las dos queries canónicas para refrescar ambos paneles
           queryClient.invalidateQueries({ queryKey: cargasKeys.byViaje(viajeId) });
           queryClient.invalidateQueries({ queryKey: convoyKeys.byViaje(viajeId) });
+        },
+        // ── Hito 6.3: Feedback de error al usuario ───────────────────────────
+        onError: (err: any) => {
+          const mensaje =
+            err?.response?.data?.mensaje ||
+            err?.message ||
+            'Error al procesar la carga';
+          alert(`❌ ${mensaje}`);
         },
       }
     );
@@ -348,9 +356,8 @@ export default function CargasModal({ viajeId, viajeNombreBuque, onClose }: Carg
                           : <span className="italic text-gray-400">A Definir</span>}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-900">
-                        <span className={`px-2 py-1 text-xs rounded-full font-medium ${
-                          carga.nivelRiesgo === 'Alto' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'
-                        }`}>
+                        <span className={`px-2 py-1 text-xs rounded-full font-medium ${carga.nivelRiesgo === 'Alto' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'
+                          }`}>
                           {carga.nivelRiesgo || '—'}
                         </span>
                       </td>

@@ -1,3 +1,5 @@
+// Mbpc.Api/Models/Mongo/ViajeDetalleMongo.cs
+
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
 using System;
@@ -49,9 +51,22 @@ namespace Mbpc.Api.Models.Mongo
         [BsonIgnoreIfNull]
         public List<EtapaMongo>? Etapas { get; set; }
 
-        [BsonElement("BARCAZAS")]
+        // FIX Hito 6.0: el sistema legacy persiste las barcazas en un array raíz
+        // con clave en minúscula ("barcazas"). Se actualiza el BsonElement para
+        // que el driver pueda deserializar correctamente documentos legacy.
+        // La propiedad Barcazas dentro de EtapaMongo ("BARCAZAS") se mantiene
+        // intacta para convivencia con el formato nuevo.
+        [BsonElement("barcazas")]
         [BsonIgnoreIfNull]
         public List<BarcazaMongo>? Barcazas { get; set; }
+
+        // FIX Hito 6.0: el sistema legacy persiste el remolcador en un objeto
+        // raíz con clave en minúscula ("remolcador"), fuera del array de etapas.
+        // Se agrega esta propiedad como fallback de lectura. Nunca reemplaza la
+        // fuente canónica (Etapas[last].Remolcador), solo se usa si esta es nula.
+        [BsonElement("remolcador")]
+        [BsonIgnoreIfNull]
+        public RemolcadorMongo? RemolcadorLegacy { get; set; }
 
         // ── MULTITENANT GEOGRÁFICO RESILIENTE ────────────────────────────────────
         // Se almacena como BsonValue para tolerar int, long o string en documentos
@@ -96,6 +111,8 @@ namespace Mbpc.Api.Models.Mongo
         [BsonIgnoreIfNull]
         public RemolcadorMongo? Remolcador { get; set; }
 
+        // Se mantiene tal cual: es el formato canónico nuevo ("BARCAZAS" en mayúscula
+        // dentro de cada etapa). No se toca para no romper documentos modernos.
         [BsonElement("BARCAZAS")]
         [BsonIgnoreIfNull]
         public List<BarcazaMongo>? Barcazas { get; set; }

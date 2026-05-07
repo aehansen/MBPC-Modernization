@@ -84,6 +84,10 @@ namespace Mbpc.Api.Controllers
 
         // ── PUT: modificar carga ──────────────────────────────────────────────
 
+        /// <remarks>
+        /// Hito 6.1 — el ViajeId del body sigue siendo necesario para el scoping en ModificarCargaAsync.
+        /// El endpoint POST de agregar ya usa la ruta /{viajeId}/ en lugar del nombre del buque.
+        /// </remarks>
         [HttpPut("{id}")]
         public async Task<ActionResult> ModificarCarga(string id, [FromBody] ModificarCargaDto dto)
         {
@@ -129,9 +133,9 @@ namespace Mbpc.Api.Controllers
         /// <summary>
         /// Elimina una barcaza del manifiesto del viaje.
         /// CQRS: elimina en Oracle mediante SP y remueve el nodo en MongoDB.
-        /// Fix de scoping (Hito 5.8): el viajeId es obligatorio en la ruta para que MongoDB
-        /// filtre estrictamente por documento de viaje antes de remover la barcaza,
-        /// evitando que bodegas con ID "0" sean eliminadas del viaje incorrecto.
+        /// Hito 6.1 — el viajeId es obligatorio en la ruta y DEBE ser el ObjectId de MongoDB
+        /// para que el service filtre estrictamente por documento, evitando eliminar la bodega
+        /// (ID "0") del viaje incorrecto.
         /// </summary>
         [HttpDelete("{viajeId}/eliminar/{cargaId}")]
         public async Task<ActionResult> EliminarCarga(string viajeId, string cargaId)
@@ -154,13 +158,18 @@ namespace Mbpc.Api.Controllers
 
         // ── POST: agregar carga al viaje ──────────────────────────────────────
 
-        [HttpPost("viaje/{viajeNombreBuque}")]
+        /// <summary>
+        /// Agrega una carga al manifiesto del viaje.
+        /// Hito 6.1 — la ruta ahora recibe el ObjectId del viaje (viajeId) en lugar del
+        /// nombre del buque (nombreBuque), garantizando scoping unívoco en MongoDB.
+        /// </summary>
+        [HttpPost("viaje/{viajeId}/agregar")]
         public async Task<ActionResult> AgregarCarga(
-            string viajeNombreBuque,
+            string viajeId,
             [FromBody] NuevaCargaDto nuevaCarga)
         {
-            if (string.IsNullOrWhiteSpace(viajeNombreBuque))
-                return BadRequest(new { mensaje = "El nombre del buque no puede estar vacío." });
+            if (string.IsNullOrWhiteSpace(viajeId))
+                return BadRequest(new { mensaje = "El viajeId no puede estar vacío." });
 
             if (nuevaCarga == null
                 || nuevaCarga.BarcazaId < 0
@@ -177,17 +186,17 @@ namespace Mbpc.Api.Controllers
                 return BadRequest(new { mensaje = "El tonelaje no puede ser negativo." });
 
             _logger.LogInformation(
-                "Agregar carga BarcazaId={BarcazaId} ({Tipo}, {Tonelaje}tn) al buque '{Buque}'.",
-                nuevaCarga.BarcazaId, nuevaCarga.Tipo, nuevaCarga.Tonelaje, viajeNombreBuque);
+                "Agregar carga BarcazaId={BarcazaId} ({Tipo}, {Tonelaje}tn) al viajeId='{ViajeId}'.",
+                nuevaCarga.BarcazaId, nuevaCarga.Tipo, nuevaCarga.Tonelaje, viajeId);
 
-            var exito = await _cargaService.AgregarCargaAsync(viajeNombreBuque, nuevaCarga);
+            var exito = await _cargaService.AgregarCargaAsync(viajeId, nuevaCarga);
 
             if (!exito)
-                return StatusCode(500, new { mensaje = $"Error interno al agregar la carga al buque '{viajeNombreBuque}'." });
+                return StatusCode(500, new { mensaje = $"Error interno al agregar la carga al viaje '{viajeId}'." });
 
             return Ok(new
             {
-                mensaje = $"Carga BarcazaId={nuevaCarga.BarcazaId} ({nuevaCarga.Tipo}) agregada correctamente al buque '{viajeNombreBuque}'."
+                mensaje = $"Carga BarcazaId={nuevaCarga.BarcazaId} ({nuevaCarga.Tipo}) agregada correctamente al viaje '{viajeId}'."
             });
         }
     }

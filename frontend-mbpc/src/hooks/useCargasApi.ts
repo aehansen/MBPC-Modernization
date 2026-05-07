@@ -36,13 +36,13 @@ export function useCargas(viajeId: string) {
 // ─── POST nueva carga ─────────────────────────────────────────────────────────
 
 interface NuevaCargaArgs {
-  nombreBuque: string;
+  viajeId: string;
   body: NuevaCargaRequest;
 }
 
-async function crearCarga({ nombreBuque, body }: NuevaCargaArgs): Promise<CargaDto> {
+async function crearCarga({ viajeId, body }: NuevaCargaArgs): Promise<CargaDto> {
   const { data } = await apiClient.post<CargaDto>(
-    `/carga/viaje/${nombreBuque}`,
+    `/carga/viaje/${viajeId}/agregar`,
     body
   );
   return data;
