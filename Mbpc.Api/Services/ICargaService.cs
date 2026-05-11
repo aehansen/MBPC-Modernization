@@ -1,3 +1,4 @@
+using System.Threading;
 using Mbpc.Api.DTOs;
 
 namespace Mbpc.Api.Services
@@ -5,10 +6,10 @@ namespace Mbpc.Api.Services
     public interface ICargaService
     {
         Task<IEnumerable<CargaDto>> ObtenerCargasPorViaje(string viajeId);
-        bool AmarrarBarcaza(string id, string nuevoMuelle);
-        bool FondearBarcaza(string id, string zonaFondeo);
-        bool CargarBarcaza(string id, double toneladas);
-        bool DescargarBarcaza(string id, double toneladas);
+        Task<bool> AmarrarBarcaza(string id, string nuevoMuelle, CancellationToken cancellationToken = default);
+        Task<bool> FondearBarcaza(string id, string zonaFondeo, CancellationToken cancellationToken = default);
+        Task<bool> CargarBarcaza(string id, double toneladas, CancellationToken cancellationToken = default);
+        Task<bool> DescargarBarcaza(string id, double toneladas, CancellationToken cancellationToken = default);
 
         /// <param name="viajeId">ObjectId de MongoDB del viaje (scoping seguro).</param>
         Task<bool> AgregarCargaAsync(string viajeId, NuevaCargaDto nuevaCarga);

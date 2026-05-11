@@ -88,9 +88,73 @@ namespace Mbpc.Api.Models.Mongo
             }
             set => CosteraIdRaw = value.HasValue ? (BsonValue)value.Value : BsonNull.Value;
         }
+
+        [BsonElement("pbip")]
+        [BsonIgnoreIfNull]
+        public PbipMongo? Pbip { get; set; }
+
+        [BsonElement("inspectores")]
+        [BsonIgnoreIfNull]
+        public List<InspectorMongo>? Inspectores { get; set; }
+
+        [BsonElement("practicos")]
+        [BsonIgnoreIfNull]
+        public List<PracticoMongo>? Practicos { get; set; }
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
+
+    [BsonIgnoreExtraElements]
+    public class PbipMongo
+    {
+        [BsonElement("nroInmarsat")]
+        [BsonIgnoreIfNull]
+        public string NroInmarsat { get; set; } = string.Empty;
+
+        [BsonElement("arqueoBruto")]
+        public double ArqueoBruto { get; set; }
+
+        [BsonElement("nivelProteccion")]
+        public int NivelProteccion { get; set; }
+    }
+
+    [BsonIgnoreExtraElements]
+    public class InspectorMongo
+    {
+        [BsonElement("documento")]
+        [BsonIgnoreIfNull]
+        public string Documento { get; set; } = string.Empty;
+
+        [BsonElement("nombreApellido")]
+        [BsonIgnoreIfNull]
+        public string NombreApellido { get; set; } = string.Empty;
+
+        [BsonElement("fechaEmbarque")]
+        public DateTime FechaEmbarque { get; set; }
+
+        [BsonElement("fechaDesembarque")]
+        [BsonIgnoreIfNull]
+        public DateTime? FechaDesembarque { get; set; }
+    }
+
+    [BsonIgnoreExtraElements]
+    public class PracticoMongo
+    {
+        [BsonElement("documento")]
+        [BsonIgnoreIfNull]
+        public string Documento { get; set; } = string.Empty;
+
+        [BsonElement("nombreApellido")]
+        [BsonIgnoreIfNull]
+        public string NombreApellido { get; set; } = string.Empty;
+
+        [BsonElement("fechaEmbarque")]
+        public DateTime FechaEmbarque { get; set; }
+
+        [BsonElement("fechaDesembarque")]
+        [BsonIgnoreIfNull]
+        public DateTime? FechaDesembarque { get; set; }
+    }
 
     [BsonIgnoreExtraElements]
     public class EtapaMongo

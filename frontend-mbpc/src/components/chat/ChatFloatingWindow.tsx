@@ -1,12 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// CONFIGURACIÓN DE API
-// Usamos import.meta.env para Vite.
-// Forzamos 127.0.0.1 en vez de localhost para evitar problemas de resolución IPv6 con Kestrel.
-// ─────────────────────────────────────────────────────────────────────────────
-const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:5009";
-const CHAT_ENDPOINT = `${API_BASE_URL}/api/chat`;
+import { apiClient } from "../../axiosClient";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TIPOS
@@ -134,24 +128,8 @@ export default function ChatFloatingWindow({
     };
 
     try {
-      // ── SOLUCIÓN: Obtenemos el token del localStorage (como hace apiClient)
-      const token = localStorage.getItem('mbpc_token'); // <-- Asegurate de que esta sea la key correcta que usás en tu app
-
-      const response = await fetch(CHAT_ENDPOINT, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          // ── SOLUCIÓN: Inyectamos el token en la cabecera Authorization
-          ...(token && { "Authorization": `Bearer ${token}` })
-        },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Error de servidor: ${response.status}`);
-      }
-
-      const data: ChatApiResponse = await response.json();
+      // ── Sin headers manuales. El interceptor de apiClient inyecta el JWT. ──
+      const { data } = await apiClient.post<ChatApiResponse>("/chat", requestBody);
 
       if (!data.isSuccess) {
         throw new Error(data.reply || "Error desconocido en la IA");
@@ -216,13 +194,12 @@ export default function ChatFloatingWindow({
           <div className="flex-grow overflow-y-auto p-4 space-y-4 bg-slate-50">
             {messages.map((msg) => (
               <div key={msg.id} className={`flex ${msg.sender === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[85%] rounded-2xl p-3 text-sm shadow-sm ${
-                  msg.sender === "user"
-                    ? "bg-blue-600 text-white rounded-tr-none"
-                    : msg.sender === "error"
+                <div className={`max-w-[85%] rounded-2xl p-3 text-sm shadow-sm ${msg.sender === "user"
+                  ? "bg-blue-600 text-white rounded-tr-none"
+                  : msg.sender === "error"
                     ? "bg-red-50 text-red-700 border border-red-200"
                     : "bg-white text-slate-700 border border-slate-200 rounded-tl-none"
-                }`}>
+                  }`}>
                   <p className="leading-relaxed">{msg.text}</p>
                   <span className={`text-[9px] block mt-1 opacity-70 ${msg.sender === "user" ? "text-right" : ""}`}>
                     {formatTime(msg.timestamp)}

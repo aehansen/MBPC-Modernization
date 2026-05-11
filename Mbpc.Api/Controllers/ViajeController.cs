@@ -180,7 +180,20 @@ namespace Mbpc.Api.Controllers
                 "IniciarViaje — BuqueId: '{BuqueId}' | Origen: '{Origen}' | Destino: '{Destino}' | Latitud: {Latitud} | Longitud: {Longitud} | CosteraId: {CosteraId}",
                 nuevoViaje.BuqueId, nuevoViaje.Origen, nuevoViaje.Destino, nuevoViaje.Latitud, nuevoViaje.Longitud, costeraIdClaim);
 
-            var exito = await _viajeService.IniciarViajeAsync(nuevoViaje);
+            bool exito;
+
+            try
+            {
+                exito = await _viajeService.IniciarViajeAsync(nuevoViaje);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(
+                    "IniciarViaje bloqueado por regla de dominio para BuqueId: '{BuqueId}' CosteraId: {CosteraId}. Detalle: {Msg}",
+                    nuevoViaje.BuqueId, costeraIdClaim, ex.Message);
+
+                return BadRequest(new { mensaje = ex.Message });
+            }
 
             if (!exito)
             {
@@ -227,11 +240,53 @@ namespace Mbpc.Api.Controllers
 
             _logger.LogInformation("AMARRAR VIAJE recibido para: {Id}", id);
 
-            var exito = await _viajeService.AmarrarViajeAsync(id);
+            bool exito;
+
+            try
+            {
+                exito = await _viajeService.AmarrarViajeAsync(id);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(
+                    "AmarrarViaje bloqueado por regla de dominio para Id: '{Id}'. Detalle: {Msg}",
+                    id, ex.Message);
+
+                return BadRequest(new { mensaje = ex.Message });
+            }
+
             if (!exito)
                 return UnprocessableEntity(new { mensaje = $"No se pudo amarrar el buque '{id}'. Verifique que el estado actual permita esta transición." });
 
             return Ok(new { mensaje = $"Buque '{id}' amarrado. Estado → 'Amarrado'." });
+        }
+
+        [HttpPut("{id}/finalizar")]
+        public async Task<ActionResult> FinalizarViaje(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                return BadRequest(new { mensaje = "El ID del viaje/buque es requerido." });
+
+            _logger.LogInformation("FINALIZAR VIAJE recibido para: {Id}", id);
+
+            bool exito;
+            try
+            {
+                exito = await _viajeService.FinalizarViajeAsync(id);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(
+                    "FinalizarViaje bloqueado por regla de dominio para Id: '{Id}'. Detalle: {Msg}",
+                    id, ex.Message);
+
+                return BadRequest(new { mensaje = ex.Message });
+            }
+
+            if (!exito)
+                return UnprocessableEntity(new { mensaje = $"No se pudo finalizar el viaje '{id}'. Verifique que el estado actual permita esta transición." });
+
+            return Ok(new { mensaje = $"Viaje '{id}' finalizado correctamente. Estado → 'Finalizado'." });
         }
 
         [HttpPut("{id}/fondear")]

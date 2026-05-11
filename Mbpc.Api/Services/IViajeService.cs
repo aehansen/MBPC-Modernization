@@ -88,6 +88,11 @@ namespace Mbpc.Api.Services
         Task<bool> AmarrarViajeAsync(string id);
 
         /// <summary>
+        /// Finalizar: transición final del viaje (bloqueo paranoico: barcazas/inspectores/prácticos).
+        /// </summary>
+        Task<bool> FinalizarViajeAsync(string id);
+
+        /// <summary>
         /// Fondear: Navegando/Reanudado → Fondeado.
         /// </summary>
         Task<bool> FondearViajeAsync(string id);

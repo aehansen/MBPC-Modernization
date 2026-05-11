@@ -58,8 +58,9 @@ function toIsoUtcString(localDateTimeString: string): string {
 }
 
 /**
- * Devuelve el valor mínimo para datetime-local (ahora mismo)
- * para evitar que el operador registre viajes con fechas pasadas.
+ * Devuelve el valor mínimo para datetime-local (ahora mismo).
+ * Se llama en tiempo de validación (no de render) para comparar
+ * contra el instante real del submit.
  */
 function getNowLocalMin(): string {
   const now = new Date();
@@ -131,8 +132,6 @@ export function ModalNuevoViaje({
   onSuccess,
   onError,
 }: ModalNuevoViajeProps) {
-  const nowMin = getNowLocalMin();
-
   const {
     register,
     handleSubmit,
@@ -571,7 +570,9 @@ export function ModalNuevoViaje({
                 <FieldError message={errors.proximoPuntoControl?.message} />
               </div>
 
-              {/* Fecha de Partida */}
+              {/* Fecha de Partida — FIX Hito 8.0: se eliminó min={nowMin};
+                  la validación de fecha pasada se hace vía react-hook-form
+                  para evitar el bug del desplegable de horas nativo. */}
               <div>
                 <Label htmlFor="fechaPartida" required>
                   Fecha y Hora de Partida
@@ -579,17 +580,20 @@ export function ModalNuevoViaje({
                 <input
                   id="fechaPartida"
                   type="datetime-local"
-                  min={nowMin}
                   disabled={isPending}
                   className={getInputClass(!!errors.fechaPartida)}
                   {...register("fechaPartida", {
                     required: "La fecha de partida es requerida.",
+                    validate: (value) =>
+                      new Date(value) >= new Date(getNowLocalMin()) ||
+                      "La fecha de partida no puede ser en el pasado.",
                   })}
                 />
                 <FieldError message={errors.fechaPartida?.message} />
               </div>
 
-              {/* ETA */}
+              {/* ETA — FIX Hito 8.0: se eliminó min={fechaPartidaValue || nowMin};
+                  la validación de orden temporal se mantiene vía react-hook-form. */}
               <div>
                 <Label htmlFor="eta" required>
                   ETA (Arribo Estimado)
@@ -597,7 +601,6 @@ export function ModalNuevoViaje({
                 <input
                   id="eta"
                   type="datetime-local"
-                  min={fechaPartidaValue || nowMin}
                   disabled={isPending}
                   className={getInputClass(!!errors.eta)}
                   {...register("eta", {

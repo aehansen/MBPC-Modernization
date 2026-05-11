@@ -13,10 +13,10 @@
 
 import axios from "axios";
 
-const TOKEN_KEY   = "mbpc_token";
+const TOKEN_KEY = "mbpc_token";
 const LOGIN_ROUTE = "/login";
 
-const apiClient = axios.create({
+export const apiClient = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL ?? "/api",
   timeout: 30000,
 });
@@ -49,8 +49,8 @@ export const authApi = {
 
 export const viajesApi = {
   getAll: () => apiClient.get("/viajes"),
-  getByMmsi: (mmsi) => apiClient.get(`/viajes/mmsi/${encodeURIComponent(mmsi)}`),
-  getEnPuerto: () => apiClient.get("/viajes/en-puerto"),
+  getByMmsi: (mmsi) => apiClient.get(`/viajes/${encodeURIComponent(mmsi)}`),
+  getEnPuerto: () => apiClient.get("/viajes/puerto"),
   getHistorico: () => apiClient.get("/viajes/historico"),
   iniciar: (nuevoViaje) => apiClient.post("/viajes", nuevoViaje),
   zarpar: (id) => apiClient.put(`/viajes/${id}/zarpar`),

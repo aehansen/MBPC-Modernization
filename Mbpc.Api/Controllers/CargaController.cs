@@ -1,9 +1,11 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Mbpc.Api.Services;
 using Mbpc.Api.DTOs;
 
 namespace Mbpc.Api.Controllers
 {
+    [Authorize]
     [ApiController]
     [Route("api/carga")]
     public class CargaController : ControllerBase
@@ -33,29 +35,29 @@ namespace Mbpc.Api.Controllers
         // ── PUTs de estado ────────────────────────────────────────────────────
 
         [HttpPut("{id}/amarrar")]
-        public ActionResult AmarrarBarcaza(string id, [FromQuery] string nuevoMuelle)
+        public async Task<ActionResult> AmarrarBarcaza(string id, [FromQuery] string nuevoMuelle, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(nuevoMuelle))
                 return BadRequest(new { mensaje = "El ID y el nuevo muelle son requeridos." });
 
-            var exito = _cargaService.AmarrarBarcaza(id, nuevoMuelle);
+            var exito = await _cargaService.AmarrarBarcaza(id, nuevoMuelle, cancellationToken);
             if (!exito) return NotFound(new { mensaje = $"No se encontró la unidad con ID {id}." });
             return Ok(new { mensaje = $"Unidad {id} amarrada en {nuevoMuelle}." });
         }
 
         [HttpPut("{id}/fondear")]
-        public ActionResult FondearBarcaza(string id, [FromQuery] string zonaFondeo)
+        public async Task<ActionResult> FondearBarcaza(string id, [FromQuery] string zonaFondeo, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(zonaFondeo))
                 return BadRequest(new { mensaje = "El ID y la zona de fondeo son requeridos." });
 
-            var exito = _cargaService.FondearBarcaza(id, zonaFondeo);
+            var exito = await _cargaService.FondearBarcaza(id, zonaFondeo, cancellationToken);
             if (!exito) return NotFound(new { mensaje = $"No se encontró la unidad con ID {id}." });
             return Ok(new { mensaje = $"Unidad {id} fondeada en {zonaFondeo}." });
         }
 
         [HttpPut("{id}/cargar")]
-        public ActionResult CargarBarcaza(string id, [FromQuery] double toneladas)
+        public async Task<ActionResult> CargarBarcaza(string id, [FromQuery] double toneladas, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(id))
                 return BadRequest(new { mensaje = "El ID de la embarcación es requerido." });
@@ -63,13 +65,13 @@ namespace Mbpc.Api.Controllers
             if (toneladas < 0)
                 return BadRequest(new { mensaje = "La cantidad de toneladas no puede ser negativa." });
 
-            var exito = _cargaService.CargarBarcaza(id, toneladas);
+            var exito = await _cargaService.CargarBarcaza(id, toneladas, cancellationToken);
             if (!exito) return NotFound(new { mensaje = $"No se encontró la unidad con ID {id}." });
             return Ok(new { mensaje = "Carga registrada correctamente." });
         }
 
         [HttpPut("{id}/descargar")]
-        public ActionResult DescargarBarcaza(string id, [FromQuery] double toneladas)
+        public async Task<ActionResult> DescargarBarcaza(string id, [FromQuery] double toneladas, CancellationToken cancellationToken = default)
         {
             if (string.IsNullOrWhiteSpace(id))
                 return BadRequest(new { mensaje = "El ID de la embarcación es requerido." });
@@ -77,7 +79,7 @@ namespace Mbpc.Api.Controllers
             if (toneladas < 0)
                 return BadRequest(new { mensaje = "La cantidad de toneladas no puede ser negativa." });
 
-            var exito = _cargaService.DescargarBarcaza(id, toneladas);
+            var exito = await _cargaService.DescargarBarcaza(id, toneladas, cancellationToken);
             if (!exito) return NotFound(new { mensaje = $"No se encontró la unidad con ID {id}." });
             return Ok(new { mensaje = "Descarga registrada correctamente." });
         }

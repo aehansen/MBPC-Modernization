@@ -1,4 +1,5 @@
 // Archivo: Mbpc.Api/Controllers/ChatController.cs
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Mbpc.Api.DTOs;
 using Mbpc.Api.Services;
@@ -11,7 +12,7 @@ namespace Mbpc.Api.Controllers
 {
     [ApiController]
     [Route("api/[controller]")]
-    // [Authorize] — Descomentá cuando el frontend envíe el JWT correctamente.
+    [Authorize]
     public class ChatController : ControllerBase
     {
         private readonly IChatService            _chatService;

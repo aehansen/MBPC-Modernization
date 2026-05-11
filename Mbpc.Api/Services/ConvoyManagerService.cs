@@ -100,7 +100,7 @@ public sealed class ConvoyManagerService : IConvoyManagerService
         };
     }
 
-    public Task AmarrarBarcazaAsync(
+    public async Task AmarrarBarcazaAsync(
         string                barcazaId,
         AmarrarBarcazaRequest request,
         CancellationToken     ct = default)
@@ -115,15 +115,13 @@ public sealed class ConvoyManagerService : IConvoyManagerService
             "Iniciando amarre de barcaza {BarcazaId} en muelle {Muelle}.",
             barcazaId, request.NuevoMuelle);
 
-        var exito = _cargaService.AmarrarBarcaza(barcazaId, request.NuevoMuelle);
+        var exito = await _cargaService.AmarrarBarcaza(barcazaId, request.NuevoMuelle, ct);
         if (!exito)
             throw new InvalidOperationException(
                 "El sistema legacy rechazó la operación de amarre.");
-
-        return Task.CompletedTask;
     }
 
-    public Task FondearBarcazaAsync(
+    public async Task FondearBarcazaAsync(
         string               barcazaId,
         FondearBarcazaRequest request,
         CancellationToken    ct = default)
@@ -137,12 +135,10 @@ public sealed class ConvoyManagerService : IConvoyManagerService
             "Iniciando fondeo de barcaza {BarcazaId} en zona {Zona}.",
             barcazaId, request.ZonaFondeo);
 
-        var exito = _cargaService.FondearBarcaza(barcazaId, request.ZonaFondeo);
+        var exito = await _cargaService.FondearBarcaza(barcazaId, request.ZonaFondeo, ct);
         if (!exito)
             throw new InvalidOperationException(
                 "El sistema legacy rechazó la operación de fondeo.");
-
-        return Task.CompletedTask;
     }
 
     public async Task<bool> AdjuntarBarcazasAsync(
@@ -161,93 +157,27 @@ public sealed class ConvoyManagerService : IConvoyManagerService
 
         _logger.LogInformation(
             "AdjuntarBarcazasAsync: ViajeId={ViajeId} | Barcazas=[{Ids}] | Ubicacion={Ubicacion}.",
-            viajeId,
-            string.Join(',', request.BarcazasIds),
-            request.Ubicacion);
+            viajeId, string.Join(',', request.BarcazasIds), request.Ubicacion);
 
-        var detalle = await _detallesCollection
-            .Find(Builders<ViajeDetalleMongo>.Filter.Eq(x => x.Id, viajeId))
-            .FirstOrDefaultAsync(ct);
+        // 🔥 EL ARREGLO DEL SPLIT-BRAIN: Buscamos a través del servicio de viajes unificado
+        var (detalle, travelId) = await _viajeService.GetViajeDetalleByIdAsync(viajeId, ct);
 
         if (detalle is null)
         {
-            _logger.LogWarning(
-                "AdjuntarBarcazasAsync: Documento BSON no encontrado para ViajeId={ViajeId}. " +
-                "Se inicializa un nuevo ViajeDetalleMongo hidratando el estado legacy de Oracle.",
-                viajeId);
-
-            var barcazasHidratadas = new List<BarcazaMongo>();
-            long travelIdHidratado = 0;
-
-            try
-            {
-                var (_, travelId) = await _viajeService.GetViajeDetalleByIdAsync(viajeId, ct);
-                travelIdHidratado = travelId;
-
-                if (travelId > 0)
-                {
-                    var cargasLegacy = await _cargaService.ObtenerCargasPorViaje(travelId.ToString());
-
-                    if (cargasLegacy is not null && cargasLegacy.Any())
-                    {
-                        barcazasHidratadas = cargasLegacy
-                            .Where(c => c is not null)
-                            .Select(c => new BarcazaMongo
-                            {
-                                Nombre       = c.Id,
-                                Carga        = c.NivelRiesgo ?? "General",
-                                Cantidad     = c.Tonelaje,
-                                Unidad       = "TON",
-                                MuelleActual = c.MuelleActual
-                            })
-                            .ToList();
-                    }
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "AdjuntarBarcazasAsync: Error al hidratar estado legacy desde Oracle para ViajeId={ViajeId}.",
-                    viajeId);
-            }
-
-            detalle = new ViajeDetalleMongo
-            {
-                Id      = viajeId,
-                IdViaje = travelIdHidratado,
-                Etapas  = new List<EtapaMongo>
-                {
-                    new EtapaMongo
-                    {
-                        EtapaId     = 1,
-                        FechaInicio = DateTime.UtcNow,
-                        Remolcador  = null,
-                        Barcazas    = barcazasHidratadas
-                    }
-                }
-            };
-
-            await _detallesCollection.InsertOneAsync(detalle, cancellationToken: ct);
+            // Ya no creamos un fantasma. Si no está, explotamos rápido (Fail-Fast).
+            throw new InvalidOperationException(
+                $"No se encontró el detalle operativo del viaje '{viajeId}'. No es posible adjuntar barcazas.");
         }
 
         var etapaAnterior = detalle.Etapas?.LastOrDefault()
                             ?? throw new InvalidOperationException(
-                                   $"El viaje {viajeId} no posee etapas activas. " +
-                                   "No es posible adjuntar barcazas.");
+                                   $"El viaje {viajeId} no posee etapas activas. No es posible adjuntar barcazas.");
 
         var barcazasNuevas = request.BarcazasIds
-            .Select(id => new BarcazaMongo
-            {
-                Nombre   = id,
-                Carga    = "A Definir",
-                Cantidad = 0
-            })
+            .Select(id => new BarcazaMongo { Nombre = id, Carga = "A Definir", Cantidad = 0 })
             .ToList();
 
-        var barcazasCombinadas = (etapaAnterior.Barcazas ?? [])
-            .Concat(barcazasNuevas)
-            .ToList();
+        var barcazasCombinadas = (etapaAnterior.Barcazas ?? []).Concat(barcazasNuevas).ToList();
 
         var nuevaEtapa = new EtapaMongo
         {
@@ -259,8 +189,9 @@ public sealed class ConvoyManagerService : IConvoyManagerService
 
         detalle.Etapas!.Add(nuevaEtapa);
 
+        // 🔥 IMPORTANTE: Reemplazamos usando el detalle.Id real (el MongoDb ObjectId del detalle), no el de la posición.
         await _detallesCollection.ReplaceOneAsync(
-            Builders<ViajeDetalleMongo>.Filter.Eq(x => x.Id, viajeId),
+            Builders<ViajeDetalleMongo>.Filter.Eq(x => x.Id, detalle.Id),
             detalle,
             cancellationToken: ct);
 
@@ -268,7 +199,6 @@ public sealed class ConvoyManagerService : IConvoyManagerService
             "AdjuntarBarcazasAsync: Nueva EtapaId={EtapaId} persistida en MongoDB para ViajeId={ViajeId}.",
             nuevaEtapa.EtapaId, viajeId);
 
-        // INVALIDACIÓN DE CACHÉ DE CARGAS
         _cache.Remove($"cargas_viaje_{viajeId}");
 
         if (_env.IsDevelopment())
@@ -279,15 +209,10 @@ public sealed class ConvoyManagerService : IConvoyManagerService
         try
         {
             var barcazasParam = string.Join(',', request.BarcazasIds);
-
             using var connection = new OracleConnection(_oracleConnectionString);
             await connection.ExecuteAsync(
                 "mbpc.adjuntar_barcazas",
-                new
-                {
-                    p_BARCAZAS  = barcazasParam,
-                    p_UBICACION = request.Ubicacion
-                },
+                new { p_BARCAZAS = barcazasParam, p_UBICACION = request.Ubicacion },
                 commandType: CommandType.StoredProcedure);
         }
         catch (OracleException oraEx)

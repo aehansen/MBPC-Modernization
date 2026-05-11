@@ -31,10 +31,16 @@ interface AutocompleteBarcaza {
 interface CargasModalProps {
   viajeId: string;
   viajeNombreBuque: string;
+  readOnly?: boolean;
   onClose: () => void;
 }
 
-export default function CargasModal({ viajeId, viajeNombreBuque, onClose }: CargasModalProps) {
+export default function CargasModal({
+  viajeId,
+  viajeNombreBuque,
+  readOnly = false,
+  onClose,
+}: CargasModalProps) {
   const queryClient = useQueryClient();
 
   // Extraemos refetch para poder recargar la grilla tras editar/eliminar
@@ -215,20 +221,29 @@ export default function CargasModal({ viajeId, viajeNombreBuque, onClose }: Carg
       <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col">
         {/* Header */}
         <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center bg-[#002454] text-white rounded-t-lg shrink-0">
-          <h2 className="text-lg font-bold">Cargas del viaje: {viajeNombreBuque}</h2>
+          <div className="flex flex-col">
+            <h2 className="text-lg font-bold">Cargas del viaje: {viajeNombreBuque}</h2>
+            {readOnly && (
+              <span className="mt-0.5 text-xs font-semibold text-amber-200">
+                Modo histórico (solo lectura)
+              </span>
+            )}
+          </div>
           <button onClick={onClose} className="text-white hover:text-gray-300 font-bold text-2xl leading-none">&times;</button>
         </div>
 
         {/* Content */}
         <div className="p-6 overflow-y-auto flex-1">
-          <button
-            onClick={() => setShowForm(!showForm)}
-            className="mb-4 text-[#104a8e] font-semibold flex items-center hover:underline"
-          >
-            {showForm ? '▼ Ocultar Formulario' : '▶ Agregar Nueva Carga'}
-          </button>
+          {!readOnly && (
+            <button
+              onClick={() => setShowForm(!showForm)}
+              className="mb-4 text-[#104a8e] font-semibold flex items-center hover:underline"
+            >
+              {showForm ? '▼ Ocultar Formulario' : '▶ Agregar Nueva Carga'}
+            </button>
+          )}
 
-          {showForm && (
+          {!readOnly && showForm && (
             <form onSubmit={handleCrear} className="mb-6 bg-gray-50 p-4 rounded border border-gray-200 flex flex-wrap gap-4 items-end">
               <div className="flex-1 min-w-[180px]">
                 <label className="block text-sm font-medium text-gray-700">Tipo</label>
@@ -369,19 +384,23 @@ export default function CargasModal({ viajeId, viajeNombreBuque, onClose }: Carg
                           : <span className="italic text-gray-400">—</span>}
                       </td>
                       <td className="px-4 py-3 text-sm text-center">
-                        <div className="flex justify-center items-center gap-3">
-                          <button onClick={() => handleAccion('amarrar', carga.id)} className="text-blue-600 hover:text-blue-800 text-xs font-bold transition-colors">Amarrar</button>
-                          <button onClick={() => handleAccion('fondear', carga.id)} className="text-yellow-600 hover:text-yellow-800 text-xs font-bold transition-colors">Fondear</button>
-                          <button onClick={() => handleAccion('cargar', carga.id)} className="text-green-600 hover:text-green-800 text-xs font-bold transition-colors">Cargar</button>
-                          <button onClick={() => handleAccion('descargar', carga.id)} className="text-red-600 hover:text-red-800 text-xs font-bold transition-colors">Descargar</button>
+                        {readOnly ? (
+                          <span className="text-xs font-semibold text-gray-400 italic">—</span>
+                        ) : (
+                          <div className="flex justify-center items-center gap-3">
+                            <button onClick={() => handleAccion('amarrar', carga.id)} className="text-blue-600 hover:text-blue-800 text-xs font-bold transition-colors">Amarrar</button>
+                            <button onClick={() => handleAccion('fondear', carga.id)} className="text-yellow-600 hover:text-yellow-800 text-xs font-bold transition-colors">Fondear</button>
+                            <button onClick={() => handleAccion('cargar', carga.id)} className="text-green-600 hover:text-green-800 text-xs font-bold transition-colors">Cargar</button>
+                            <button onClick={() => handleAccion('descargar', carga.id)} className="text-red-600 hover:text-red-800 text-xs font-bold transition-colors">Descargar</button>
 
-                          {/* Separador */}
-                          <div className="w-px h-4 bg-gray-300 mx-1"></div>
+                            {/* Separador */}
+                            <div className="w-px h-4 bg-gray-300 mx-1"></div>
 
-                          {/* Nuevas Acciones ABM */}
-                          <button onClick={() => abrirEditar(carga)} className="text-sky-600 hover:text-sky-800 text-xs font-bold transition-colors">Editar</button>
-                          <button onClick={() => abrirEliminar(carga)} className="text-red-600 hover:text-red-900 text-xs font-bold transition-colors">Eliminar</button>
-                        </div>
+                            {/* Nuevas Acciones ABM */}
+                            <button onClick={() => abrirEditar(carga)} className="text-sky-600 hover:text-sky-800 text-xs font-bold transition-colors">Editar</button>
+                            <button onClick={() => abrirEliminar(carga)} className="text-red-600 hover:text-red-900 text-xs font-bold transition-colors">Eliminar</button>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   ))}

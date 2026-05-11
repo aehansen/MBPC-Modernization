@@ -6,6 +6,7 @@ import CargasModal from '../cargas/CargasModal';
 import { BotonZarpar } from '../BotonZarpar';
 import { BotonAmarrar, BotonFondear, BotonReanudar } from '../BotonesAccionViaje';
 import PanelGestionConvoy from '../convoy/PanelGestionConvoy';
+import { useFinalizar } from '../../hooks/useAccionesViaje';
 
 const PAGE_SIZE = 10;
 
@@ -35,16 +36,20 @@ function EstadoBadge({ estado }: { estado: string }) {
 interface AccionesProps {
   viaje: ViajeDto;
   onActualizarPosicion: (viaje: ViajeDto) => void;
-  onVerCargas: (viaje: ViajeDto) => void;
+  onVerCargas: (viaje: ViajeDto, opts?: { readOnly?: boolean }) => void;
+  onFinalizarViaje: (viaje: ViajeDto) => void;
 }
 
 function AccionesRow({
   viaje,
   onActualizarPosicion,
   onVerCargas,
+  onFinalizarViaje,
 }: AccionesProps) {
   const btnBase =
     'px-3 py-1.5 rounded text-xs font-semibold tracking-wide transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed border';
+
+  const esFinalizado = (viaje.estadoActual ?? '').toLowerCase() === 'finalizado';
 
   return (
     <div
@@ -53,10 +58,21 @@ function AccionesRow({
       // al <tr> padre y cambie el viajeSeleccionadoId involuntariamente.
       onClick={(e) => e.stopPropagation()}
     >
-      <BotonZarpar viaje={viaje} />
-      <BotonAmarrar viaje={viaje} />
-      <BotonFondear viaje={viaje} />
-      <BotonReanudar viaje={viaje} />
+      {!esFinalizado && (
+        <>
+          <BotonZarpar viaje={viaje} />
+          <BotonAmarrar viaje={viaje} />
+          <BotonFondear viaje={viaje} />
+          <BotonReanudar viaje={viaje} />
+          <button
+            className={`${btnBase} bg-red-600 text-white border-red-700 hover:bg-red-700`}
+            onClick={() => onFinalizarViaje(viaje)}
+            title="Finalizar Viaje Definitivamente"
+          >
+            🏁 Finalizar
+          </button>
+        </>
+      )}
       <button
         className={`${btnBase} bg-[#002454] text-white border-[#002454] hover:bg-[#104a8e]`}
         onClick={() => onActualizarPosicion(viaje)}
@@ -66,10 +82,10 @@ function AccionesRow({
       </button>
       <button
         className={`${btnBase} bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100`}
-        onClick={() => onVerCargas(viaje)}
+        onClick={() => onVerCargas(viaje, { readOnly: esFinalizado })}
         title="Ver Cargas"
       >
-        📦 Cargas
+        {esFinalizado ? '📦 Ver Cargas (Histórico)' : '📦 Cargas'}
       </button>
     </div>
   );
@@ -80,6 +96,10 @@ function AccionesRow({
 interface ModalViajeState {
   isOpen: boolean;
   viaje: ViajeDto | null;
+}
+
+interface ModalCargasState extends ModalViajeState {
+  readOnly?: boolean;
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -106,18 +126,23 @@ export default function ViajesDashboard() {
 
   const { data: dataPaginada, isLoading, isError, error } = useViajes(page, PAGE_SIZE, debouncedFiltro);
 
+  const { mutate: finalizarViaje } = useFinalizar();
+
   const [modalPosicion, setModalPosicion] = useState<ModalViajeState>({
     isOpen: false,
     viaje: null,
   });
 
-  const [modalCargas, setModalCargas] = useState<ModalViajeState>({
+  const [modalCargas, setModalCargas] = useState<ModalCargasState>({
     isOpen: false,
     viaje: null,
+    readOnly: false,
   });
 
   const handleAbrirPosicion = (viaje: ViajeDto) => setModalPosicion({ isOpen: true, viaje });
-  const handleAbrirCargas = (viaje: ViajeDto) => setModalCargas({ isOpen: true, viaje });
+  const handleAbrirCargas = (viaje: ViajeDto, opts?: { readOnly?: boolean }) =>
+    setModalCargas({ isOpen: true, viaje, readOnly: opts?.readOnly ?? false });
+  const handleFinalizarViaje = (viaje: ViajeDto) => finalizarViaje({ id: viaje.id });
 
   // Los datos ya vienen filtrados desde el servidor; no se aplica ningún .filter() local.
   const filas: ViajeDto[] = dataPaginada ?? [];
@@ -222,6 +247,7 @@ export default function ViajesDashboard() {
                           viaje={viaje}
                           onActualizarPosicion={handleAbrirPosicion}
                           onVerCargas={handleAbrirCargas}
+                          onFinalizarViaje={handleFinalizarViaje}
                         />
                       </td>
                     </tr>
@@ -270,7 +296,8 @@ export default function ViajesDashboard() {
         <CargasModal
           viajeId={modalCargas.viaje.id}
           viajeNombreBuque={modalCargas.viaje.buque}
-          onClose={() => setModalCargas({ isOpen: false, viaje: null })}
+          readOnly={modalCargas.readOnly}
+          onClose={() => setModalCargas({ isOpen: false, viaje: null, readOnly: false })}
         />
       )}
 

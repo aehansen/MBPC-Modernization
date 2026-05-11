@@ -346,7 +346,7 @@ namespace Mbpc.Api.Services
 
         // ── ESCRITURA (Oracle + CQRS Mongo Load-Mutate-Save + Invalidación Caché) ──
 
-        public bool AmarrarBarcaza(string id, string nuevoMuelle)
+        public async Task<bool> AmarrarBarcaza(string id, string nuevoMuelle, CancellationToken cancellationToken = default)
         {
             _logger.LogInformation("Amarrando barcaza {Id} en muelle {Muelle}", id, nuevoMuelle);
             bool exitoOracle = false;
@@ -359,12 +359,14 @@ namespace Mbpc.Api.Services
                 parameters.Add("p_MUELLE",     nuevoMuelle);
                 parameters.Add("p_RESULTADO",  dbType: DbType.Int32, direction: ParameterDirection.Output);
 
-                connection.Execute("PKG_MBPC_CARGAS.SP_AMARRAR", parameters, commandType: CommandType.StoredProcedure);
+                await connection.ExecuteAsync(
+                    "PKG_MBPC_CARGAS.SP_AMARRAR", parameters, commandType: CommandType.StoredProcedure);
                 exitoOracle = parameters.Get<int>("p_RESULTADO") == 1;
             }
-            catch (OracleException)
+            catch (OracleException ex)
             {
                 if (!_env.IsDevelopment()) throw;
+                _logger.LogWarning(ex, "[DEV BYPASS] OracleException en AmarrarBarcaza para Id={Id}. Marcando éxito.", id);
                 exitoOracle = true;
             }
 
@@ -376,7 +378,7 @@ namespace Mbpc.Api.Services
                         d => d.Etapas,
                         etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.Nombre == id));
 
-                    var doc = _detailsCollection.Find(filtro).FirstOrDefault();
+                    var doc = await _detailsCollection.Find(filtro).FirstOrDefaultAsync(cancellationToken);
                     if (doc is not null)
                     {
                         var barcazaTarget = (doc.Etapas?.SelectMany(e => e.Barcazas ?? new List<BarcazaMongo>())
@@ -387,7 +389,7 @@ namespace Mbpc.Api.Services
                         {
                             barcazaTarget.MuelleActual = nuevoMuelle;
                             var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
-                            _detailsCollection.ReplaceOne(filtroId, doc);
+                            await _detailsCollection.ReplaceOneAsync(filtroId, doc, cancellationToken: cancellationToken);
                             InvalidarCacheViajePorBuque(doc.VesselName);
                         }
                     }
@@ -401,7 +403,7 @@ namespace Mbpc.Api.Services
             return exitoOracle;
         }
 
-        public bool FondearBarcaza(string id, string zonaFondeo)
+        public async Task<bool> FondearBarcaza(string id, string zonaFondeo, CancellationToken cancellationToken = default)
         {
             _logger.LogInformation("Fondeando barcaza {Id} en zona {Zona}", id, zonaFondeo);
             bool exitoOracle = false;
@@ -414,12 +416,14 @@ namespace Mbpc.Api.Services
                 parameters.Add("p_ZONA_FONDEO", zonaFondeo);
                 parameters.Add("p_RESULTADO",   dbType: DbType.Int32, direction: ParameterDirection.Output);
 
-                connection.Execute("PKG_MBPC_CARGAS.SP_FONDEAR", parameters, commandType: CommandType.StoredProcedure);
+                await connection.ExecuteAsync(
+                    "PKG_MBPC_CARGAS.SP_FONDEAR", parameters, commandType: CommandType.StoredProcedure);
                 exitoOracle = parameters.Get<int>("p_RESULTADO") == 1;
             }
-            catch (OracleException)
+            catch (OracleException ex)
             {
                 if (!_env.IsDevelopment()) throw;
+                _logger.LogWarning(ex, "[DEV BYPASS] OracleException en FondearBarcaza para Id={Id}. Marcando éxito.", id);
                 exitoOracle = true;
             }
 
@@ -431,7 +435,7 @@ namespace Mbpc.Api.Services
                         d => d.Etapas,
                         etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.Nombre == id));
 
-                    var doc = _detailsCollection.Find(filtro).FirstOrDefault();
+                    var doc = await _detailsCollection.Find(filtro).FirstOrDefaultAsync(cancellationToken);
                     if (doc is not null)
                     {
                         var barcazaTarget = (doc.Etapas?.SelectMany(e => e.Barcazas ?? new List<BarcazaMongo>())
@@ -442,7 +446,7 @@ namespace Mbpc.Api.Services
                         {
                             barcazaTarget.MuelleActual = zonaFondeo;
                             var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
-                            _detailsCollection.ReplaceOne(filtroId, doc);
+                            await _detailsCollection.ReplaceOneAsync(filtroId, doc, cancellationToken: cancellationToken);
                             InvalidarCacheViajePorBuque(doc.VesselName);
                         }
                     }
@@ -456,7 +460,7 @@ namespace Mbpc.Api.Services
             return exitoOracle;
         }
 
-        public bool CargarBarcaza(string id, double toneladas)
+        public async Task<bool> CargarBarcaza(string id, double toneladas, CancellationToken cancellationToken = default)
         {
             _logger.LogInformation("Registrando carga a {Toneladas}tn de embarcación {Id}", toneladas, id);
             bool exitoOracle = false;
@@ -469,12 +473,14 @@ namespace Mbpc.Api.Services
                 parameters.Add("p_TONELADAS",  toneladas);
                 parameters.Add("p_RESULTADO",  dbType: DbType.Int32, direction: ParameterDirection.Output);
 
-                connection.Execute("PKG_MBPC_CARGAS.SP_CARGAR", parameters, commandType: CommandType.StoredProcedure);
+                await connection.ExecuteAsync(
+                    "PKG_MBPC_CARGAS.SP_CARGAR", parameters, commandType: CommandType.StoredProcedure);
                 exitoOracle = parameters.Get<int>("p_RESULTADO") == 1;
             }
-            catch (OracleException)
+            catch (OracleException ex)
             {
                 if (!_env.IsDevelopment()) throw;
+                _logger.LogWarning(ex, "[DEV BYPASS] OracleException en CargarBarcaza para Id={Id}. Marcando éxito.", id);
                 exitoOracle = true;
             }
 
@@ -486,7 +492,7 @@ namespace Mbpc.Api.Services
                         d => d.Etapas,
                         etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.Nombre == id));
 
-                    var doc = _detailsCollection.Find(filtro).FirstOrDefault();
+                    var doc = await _detailsCollection.Find(filtro).FirstOrDefaultAsync(cancellationToken);
                     if (doc is not null)
                     {
                         var barcazaTarget = (doc.Etapas?.SelectMany(e => e.Barcazas ?? new List<BarcazaMongo>())
@@ -497,7 +503,7 @@ namespace Mbpc.Api.Services
                         {
                             barcazaTarget.Cantidad = toneladas;
                             var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
-                            _detailsCollection.ReplaceOne(filtroId, doc);
+                            await _detailsCollection.ReplaceOneAsync(filtroId, doc, cancellationToken: cancellationToken);
                             InvalidarCacheViajePorBuque(doc.VesselName);
                         }
                     }
@@ -511,7 +517,7 @@ namespace Mbpc.Api.Services
             return exitoOracle;
         }
 
-        public bool DescargarBarcaza(string id, double toneladas)
+        public async Task<bool> DescargarBarcaza(string id, double toneladas, CancellationToken cancellationToken = default)
         {
             _logger.LogInformation("Registrando descarga a {Toneladas}tn de embarcación {Id}", toneladas, id);
             bool exitoOracle = false;
@@ -524,12 +530,14 @@ namespace Mbpc.Api.Services
                 parameters.Add("p_TONELADAS",  toneladas);
                 parameters.Add("p_RESULTADO",  dbType: DbType.Int32, direction: ParameterDirection.Output);
 
-                connection.Execute("PKG_MBPC_CARGAS.SP_DESCARGAR", parameters, commandType: CommandType.StoredProcedure);
+                await connection.ExecuteAsync(
+                    "PKG_MBPC_CARGAS.SP_DESCARGAR", parameters, commandType: CommandType.StoredProcedure);
                 exitoOracle = parameters.Get<int>("p_RESULTADO") == 1;
             }
-            catch (OracleException)
+            catch (OracleException ex)
             {
                 if (!_env.IsDevelopment()) throw;
+                _logger.LogWarning(ex, "[DEV BYPASS] OracleException en DescargarBarcaza para Id={Id}. Marcando éxito.", id);
                 exitoOracle = true;
             }
 
@@ -541,7 +549,7 @@ namespace Mbpc.Api.Services
                         d => d.Etapas,
                         etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.Nombre == id));
 
-                    var doc = _detailsCollection.Find(filtro).FirstOrDefault();
+                    var doc = await _detailsCollection.Find(filtro).FirstOrDefaultAsync(cancellationToken);
                     if (doc is not null)
                     {
                         var barcazaTarget = (doc.Etapas?.SelectMany(e => e.Barcazas ?? new List<BarcazaMongo>())
@@ -554,7 +562,7 @@ namespace Mbpc.Api.Services
                             if (toneladas == 0) barcazaTarget.Carga = "EN LASTRE";
 
                             var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
-                            _detailsCollection.ReplaceOne(filtroId, doc);
+                            await _detailsCollection.ReplaceOneAsync(filtroId, doc, cancellationToken: cancellationToken);
                             InvalidarCacheViajePorBuque(doc.VesselName);
                         }
                     }

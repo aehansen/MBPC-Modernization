@@ -446,6 +446,27 @@ namespace Mbpc.Api.Services
 
         public async Task<bool> IniciarViajeAsync(NuevoViajeDto nuevoViaje)
         {
+            if (nuevoViaje.ETA <= nuevoViaje.FechaPartida)
+            {
+                throw new InvalidOperationException(
+                    $"Integridad temporal inválida: la ETA ({nuevoViaje.ETA:dd/MM/yyyy HH:mm}) debe ser posterior a la " +
+                    $"FechaPartida ({nuevoViaje.FechaPartida:dd/MM/yyyy HH:mm}).");
+            }
+
+            var destino = nuevoViaje.Destino ?? string.Empty;
+            bool esMalvinas =
+                destino.Contains("MALVINAS", StringComparison.OrdinalIgnoreCase) ||
+                destino.Contains("ISLAS DEL ATLANTICO SUR", StringComparison.OrdinalIgnoreCase);
+
+            if (esMalvinas &&
+                (nuevoViaje.DeclaracionMalvinas == DeclaracionMalvinasEnum.NoVaAMalvinas_NoPresentoDeclaracion_N ||
+                 nuevoViaje.DeclaracionMalvinas == DeclaracionMalvinasEnum.NoVaAMalvinas_PresentoDeclaracion_J))
+            {
+                throw new InvalidOperationException(
+                    "Destino con referencia a Malvinas/Islas del Atlántico Sur: se requiere una declaración de Malvinas válida. " +
+                    $"Valor recibido: '{nuevoViaje.DeclaracionMalvinas}'.");
+            }
+
             _logger.LogInformation(
                 "IniciarViajeAsync — Inicio para BuqueId: '{BuqueId}' | Origen: '{Origen}' | Destino: '{Destino}' | CosteraId: '{CosteraId}' | Lat: {Lat} | Lng: {Lng}",
                 nuevoViaje.BuqueId, nuevoViaje.Origen, nuevoViaje.Destino, nuevoViaje.CosteraId, nuevoViaje.Latitud, nuevoViaje.Longitud);
@@ -733,6 +754,57 @@ namespace Mbpc.Api.Services
         {
             _logger.LogInformation("Solicitud AMARRAR para viaje '{Id}'.", id);
             return await CambiarEstadoConValidacionAsync(id, EstadoEtapa.Amarrado);
+        }
+
+        public async Task<bool> FinalizarViajeAsync(string id)
+        {
+            _logger.LogInformation("Solicitud FINALIZAR para viaje '{Id}'.", id);
+
+            var (detalle, _) = await GetViajeDetalleByIdAsync(id);
+
+            if (detalle is null)
+            {
+                throw new InvalidOperationException(
+                    $"No se encontró el detalle operativo del viaje '{id}'. No es posible finalizar el viaje.");
+            }
+
+            // Idempotencia: si el viaje ya está finalizado, abortar antes de cualquier validación operativa.
+            // Se lee el mismo campo de estado que utiliza CambiarEstadoConValidacionAsync (NavegationStatusDesc).
+            var filtroEstado = BuildFiltroViaje(id);
+            var posicionActual = await _viajesCollection.Find(filtroEstado).FirstOrDefaultAsync();
+            var estadoRaw = posicionActual?.NavegationStatusDesc ?? string.Empty;
+
+            if (estadoRaw.Equals("Finalizado", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException(
+                    "El viaje ya se encuentra finalizado. No se permiten más modificaciones.");
+            }
+
+            bool tieneBarcazasRaiz    = (detalle.Barcazas?.Count ?? 0) > 0;
+            bool tieneBarcazasEtapa   = detalle.Etapas?.Any(e => (e.Barcazas?.Count ?? 0) > 0) == true;
+            bool tieneBarcazasActivas = tieneBarcazasRaiz || tieneBarcazasEtapa;
+
+            bool inspectoresABordo = detalle.Inspectores?.Any(i => i.FechaDesembarque is null) == true;
+            bool practicosABordo   = detalle.Practicos?.Any(p => p.FechaDesembarque is null) == true;
+
+            if (tieneBarcazasActivas || inspectoresABordo || practicosABordo)
+            {
+                var motivos = new List<string>();
+
+                if (tieneBarcazasActivas)
+                    motivos.Add("tiene barcazas activas asociadas");
+
+                if (inspectoresABordo)
+                    motivos.Add("hay inspectores a bordo (FechaDesembarque = null)");
+
+                if (practicosABordo)
+                    motivos.Add("hay prácticos a bordo (FechaDesembarque = null)");
+
+                throw new InvalidOperationException(
+                    $"No se puede finalizar el viaje '{id}' porque {string.Join(" y ", motivos)}.");
+            }
+
+            return await CambiarEstadoNavegacionAsync(id, "Finalizado");
         }
 
         public async Task<bool> FondearViajeAsync(string id)

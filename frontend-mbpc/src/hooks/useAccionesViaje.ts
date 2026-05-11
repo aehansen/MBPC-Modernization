@@ -8,10 +8,24 @@
 // ──────────────────────────────────────────────────────────────────────────────
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { CSSProperties } from "react";
 // @ts-expect-error - axiosClient es un archivo .js legacy en un entorno TS
 import axiosInstance from "@/axiosClient";
+import toast from "react-hot-toast";
 import type { NuevoViajeError } from "@/types/viajes.types";
 import { VIAJES_QUERY_KEY } from "@/hooks/useZarpar";
+
+const TOAST_SUCCESS_STYLE: CSSProperties = {
+  background: "#dcfce7",
+  color: "#166534",
+  border: "1px solid #86efac",
+};
+
+const TOAST_ERROR_STYLE: CSSProperties = {
+  background: "#fee2e2",
+  color: "#991b1b",
+  border: "1px solid #fecaca",
+};
 
 // ─── Constante compartida ─────────────────────────────────────────────────────
 
@@ -179,6 +193,53 @@ export function useReanudar() {
     mutationFn: reanudarFetcher,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: VIAJES_QUERY_KEY });
+    },
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// FINALIZAR
+// ══════════════════════════════════════════════════════════════════════════════
+
+export interface FinalizarRequest {
+  /** ID del viaje a finalizar */
+  id: string;
+}
+
+export interface FinalizarResponse {
+  /** Mensaje de confirmación del sistema */
+  mensaje: string;
+}
+
+async function finalizarFetcher({ id }: FinalizarRequest): Promise<FinalizarResponse> {
+  try {
+    const response = await axiosInstance.put(`${VIAJES_ENDPOINT}/${id}/finalizar`);
+
+    console.log("🔍 RESPUESTA CRUDA DEL BACKEND (finalizar):", response.data);
+
+    const data = response.data as Partial<FinalizarResponse> & Record<string, unknown>;
+
+    return {
+      mensaje: (data.mensaje as string | undefined) ?? "Viaje finalizado correctamente.",
+    };
+  } catch (error: unknown) {
+    console.error("DEBUG ERROR COMPLETO (finalizar):", error);
+    throw buildNuevoViajeError(error, "Error al finalizar el viaje.");
+  }
+}
+
+export function useFinalizar() {
+  const queryClient = useQueryClient();
+
+  return useMutation<FinalizarResponse, NuevoViajeError, FinalizarRequest>({
+    mutationFn: finalizarFetcher,
+    onSuccess: async (res) => {
+      toast.success(res.mensaje, { style: TOAST_SUCCESS_STYLE });
+      await queryClient.invalidateQueries({ queryKey: VIAJES_QUERY_KEY });
+    },
+    onError: (error) => {
+      const mensaje = error?.mensaje || "Ocurrió un error al finalizar.";
+      toast.error(`❌ ${mensaje}`, { style: TOAST_ERROR_STYLE });
     },
   });
 }
