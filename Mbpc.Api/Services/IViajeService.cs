@@ -118,5 +118,27 @@ namespace Mbpc.Api.Services
         /// si la velocidad calculada supera el límite físico permitido.
         /// </summary>
         Task<PosicionActualizadaResultDto?> ActualizarPosicionAsync(string id, ActualizarPosicionDto dto);
+
+        // ── PERSONAL EXTERNO (Hito 9.0) ──────────────────────────────────────
+
+        /// <summary>
+        /// Embarca un Inspector o Práctico en el viaje indicado.
+        /// Regla fail-fast: lanza InvalidOperationException si el DNI ya está embarcado
+        /// (FechaDesembarque == null) en cualquier otro viaje activo.
+        /// </summary>
+        Task<bool> EmbarcarPersonalAsync(string viajeId, EmbarcarPersonalDto dto);
+
+        /// <summary>
+        /// Registra el desembarque del personal externo identificado por su DNI.
+        /// Usa ArrayFilters de MongoDB para actualizar solo el subdocumento activo.
+        /// Lanza InvalidOperationException si el DNI no se encuentra activo en el viaje.
+        /// </summary>
+        Task<bool> DesembarcarPersonalAsync(string viajeId, string dni, DesembarcarPersonalDto dto);
+
+        /// <summary>
+        /// Retorna el personal externo (inspectores y prácticos) embarcado en un viaje.
+        /// Lee directamente de ViajeDetalleMongo sin caché (foto real).
+        /// </summary>
+        Task<PersonalViajeDto?> ObtenerPersonalAsync(string viajeId);
     }
 }

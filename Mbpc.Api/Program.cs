@@ -6,6 +6,7 @@ using MongoDB.Driver;
 using Mbpc.Api.Models.Config;
 using Mbpc.Api.Services;
 using Mbpc.Api.Services.Auth;
+using Oracle.ManagedDataAccess.Client;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -66,6 +67,15 @@ builder.Services.AddSingleton<IMongoClient>(sp =>
 // ── Oracle ──────────────────────────────────────────────────────────────────
 builder.Services.Configure<OracleDbSettings>(
     builder.Configuration.GetSection("OracleDbSettings"));
+
+var oracleSettings = builder.Configuration
+    .GetSection("OracleDbSettings")
+    .Get<OracleDbSettings>();
+
+if (!string.IsNullOrWhiteSpace(oracleSettings?.TnsAdminPath))
+{
+    OracleConfiguration.TnsAdmin = oracleSettings.TnsAdminPath;
+}
 
 // ── JWT ──────────────────────────────────────────────────────────────────────
 var jwtSection = builder.Configuration.GetSection("JwtSettings");

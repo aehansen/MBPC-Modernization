@@ -238,6 +238,13 @@ namespace Mbpc.Api.Models.Mongo
         [BsonIgnoreIfNull]
         public int? MercaderiaId { get; set; }
 
+        /// <summary>
+        /// Indica descarga completa registrada (dual-path con validación de finalización de viaje).
+        /// </summary>
+        [BsonElement("DESCARGADA")]
+        [BsonIgnoreIfNull]
+        public bool? Descargada { get; set; }
+
         // ── PROPIEDADES DE NEGOCIO (nunca se serializan) ─────────────────────────
 
         /// <summary>

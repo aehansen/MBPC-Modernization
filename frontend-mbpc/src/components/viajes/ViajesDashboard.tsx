@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useViajes } from '../../hooks/useViajesApi';
 import type { ViajeDto } from '../../types/viajes.types';
 import ModalActualizarPosicion from './ModalActualizarPosicion';
+import { ModalPersonalExterno } from './ModalPersonalExterno';
 import CargasModal from '../cargas/CargasModal';
 import { BotonZarpar } from '../BotonZarpar';
 import { BotonAmarrar, BotonFondear, BotonReanudar } from '../BotonesAccionViaje';
@@ -36,6 +37,7 @@ function EstadoBadge({ estado }: { estado: string }) {
 interface AccionesProps {
   viaje: ViajeDto;
   onActualizarPosicion: (viaje: ViajeDto) => void;
+  onAbrirPersonal: (viaje: ViajeDto) => void;
   onVerCargas: (viaje: ViajeDto, opts?: { readOnly?: boolean }) => void;
   onFinalizarViaje: (viaje: ViajeDto) => void;
 }
@@ -43,6 +45,7 @@ interface AccionesProps {
 function AccionesRow({
   viaje,
   onActualizarPosicion,
+  onAbrirPersonal,
   onVerCargas,
   onFinalizarViaje,
 }: AccionesProps) {
@@ -73,13 +76,39 @@ function AccionesRow({
           </button>
         </>
       )}
-      <button
-        className={`${btnBase} bg-[#002454] text-white border-[#002454] hover:bg-[#104a8e]`}
-        onClick={() => onActualizarPosicion(viaje)}
-        title="Actualizar Posición"
-      >
-        📍 Posición
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          className={`${btnBase} bg-[#002454] text-white border-[#002454] hover:bg-[#104a8e]`}
+          onClick={() => onActualizarPosicion(viaje)}
+          title="Actualizar Posición"
+        >
+          📍 Posición
+        </button>
+        <button
+          type="button"
+          onClick={() => onAbrirPersonal(viaje)}
+          className={`${btnBase} inline-flex items-center justify-center p-2 min-h-[2rem] bg-teal-50 text-teal-800 border-teal-200 hover:bg-teal-100`}
+          title="Gestionar Tripulación y Personal Externo"
+        >
+          <svg
+            className="w-5 h-5 shrink-0"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+            xmlns="http://www.w3.org/2000/svg"
+            aria-hidden="true"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z"
+            />
+          </svg>
+          <span className="sr-only">Tripulación</span>
+        </button>
+      </div>
       <button
         className={`${btnBase} bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100`}
         onClick={() => onVerCargas(viaje, { readOnly: esFinalizado })}
@@ -139,7 +168,16 @@ export default function ViajesDashboard() {
     readOnly: false,
   });
 
-  const handleAbrirPosicion = (viaje: ViajeDto) => setModalPosicion({ isOpen: true, viaje });
+  const [modalPersonal, setModalPersonal] = useState<ModalViajeState>({
+    isOpen: false,
+    viaje: null,
+  });
+
+  const handleAbrirPosicion = (viaje: ViajeDto) => {
+    console.log('Abriendo posición para:', viaje.id);
+    setModalPosicion({ isOpen: true, viaje });
+  };
+  const handleAbrirPersonal = (viaje: ViajeDto) => setModalPersonal({ isOpen: true, viaje });
   const handleAbrirCargas = (viaje: ViajeDto, opts?: { readOnly?: boolean }) =>
     setModalCargas({ isOpen: true, viaje, readOnly: opts?.readOnly ?? false });
   const handleFinalizarViaje = (viaje: ViajeDto) => finalizarViaje({ id: viaje.id });
@@ -246,6 +284,7 @@ export default function ViajesDashboard() {
                         <AccionesRow
                           viaje={viaje}
                           onActualizarPosicion={handleAbrirPosicion}
+                          onAbrirPersonal={handleAbrirPersonal}
                           onVerCargas={handleAbrirCargas}
                           onFinalizarViaje={handleFinalizarViaje}
                         />
@@ -285,9 +324,18 @@ export default function ViajesDashboard() {
       {/* Modal de Posición */}
       {modalPosicion.isOpen && modalPosicion.viaje && (
         <ModalActualizarPosicion
+          isOpen={modalPosicion.isOpen}
           viajeId={modalPosicion.viaje.id}
           nombreBuque={modalPosicion.viaje.buque}
           onClose={() => setModalPosicion({ isOpen: false, viaje: null })}
+        />
+      )}
+
+      {modalPersonal.isOpen && modalPersonal.viaje && (
+        <ModalPersonalExterno
+          isOpen={modalPersonal.isOpen}
+          viajeId={modalPersonal.viaje.id}
+          onClose={() => setModalPersonal({ isOpen: false, viaje: null })}
         />
       )}
 

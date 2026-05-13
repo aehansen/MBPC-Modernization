@@ -559,7 +559,11 @@ namespace Mbpc.Api.Services
                         if (barcazaTarget is not null)
                         {
                             barcazaTarget.Cantidad = toneladas;
-                            if (toneladas == 0) barcazaTarget.Carga = "EN LASTRE";
+                            if (toneladas == 0)
+                            {
+                                barcazaTarget.Carga = "EN LASTRE";
+                                barcazaTarget.Descargada = true;
+                            }
 
                             var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
                             await _detailsCollection.ReplaceOneAsync(filtroId, doc, cancellationToken: cancellationToken);

@@ -400,5 +400,49 @@ namespace Mbpc.Api.Controllers
                 fechaReporte         = dto.FechaReporte,
             });
         }
+
+        // ── PERSONAL EXTERNO (Hito 9.0) ──────────────────────────────────────
+
+        [HttpGet("{id}/personal")]
+        public async Task<IActionResult> ObtenerPersonal(string id)
+        {
+            var result = await _viajeService.ObtenerPersonalAsync(id);
+            if (result == null) return NotFound("Detalle de viaje no encontrado.");
+            return Ok(result);
+        }
+
+        [HttpPost("{id}/personal/embarcar")]
+        public async Task<IActionResult> EmbarcarPersonal(string id, [FromBody] EmbarcarPersonalDto dto)
+        {
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+            
+            try
+            {
+                var result = await _viajeService.EmbarcarPersonalAsync(id, dto);
+                if (!result) return NotFound("Viaje no encontrado o no está activo.");
+                return Ok(new { Mensaje = "Personal embarcado correctamente." });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { Error = ex.Message });
+            }
+        }
+
+        [HttpPut("{id}/personal/desembarcar/{dni}")]
+        public async Task<IActionResult> DesembarcarPersonal(string id, string dni, [FromBody] DesembarcarPersonalDto dto)
+        {
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+
+            try
+            {
+                var result = await _viajeService.DesembarcarPersonalAsync(id, dni, dto);
+                if (!result) return NotFound("Viaje/Personal no encontrado.");
+                return Ok(new { Mensaje = "Personal desembarcado correctamente." });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { Error = ex.Message });
+            }
+        }
     }
 }

@@ -186,3 +186,30 @@ export type NuevoViajeFormValues = Omit<NuevoViajeRequest, "fechaPartida" | "eta
   fechaPartida: string;
   eta: string;
 };
+
+// ─── Personal Externo (Hito 9.0) ──────────────────────────────────────────────
+
+export interface PersonalItemDto {
+  documento: string;
+  nombreApellido: string;
+  fechaEmbarque: string;
+  fechaDesembarque: string | null;
+  estaABordo: boolean;
+}
+
+export interface PersonalViajeDto {
+  inspectores: PersonalItemDto[];
+  practicos: PersonalItemDto[];
+}
+
+export interface EmbarcarPersonalDto {
+  dni: string;
+  nombreApellido: string;
+  tipoPersonal: "Inspector" | "Practico";
+  fechaEmbarque?: string;
+}
+
+export interface DesembarcarPersonalDto {
+  tipoPersonal: "Inspector" | "Practico";
+  fechaDesembarque?: string;
+}

@@ -416,31 +416,101 @@ namespace Mbpc.Api.Services
                 return await _oracleRetryPolicy.ExecuteAsync(async () =>
                 {
                     using var connection = new OracleConnection(_oracleConnectionString);
+
+                    var sql = new System.Text.StringBuilder(
+                        @"SELECT TO_CHAR(T.ID)                                  AS Id,
+                                COALESCE(B.NOMBRE, 
+                                        CASE WHEN INSTR(T.BUQUE_INFO, ',') > 0 
+                                            THEN TRIM(REGEXP_SUBSTR(T.BUQUE_INFO, '(.*?)(,|$)', 1, 5, NULL, 1))
+                                            ELSE T.BUQUE_INFO 
+                                        END, 
+                                        'DESCONOCIDO')                        AS Buque,
+                                COALESCE(TO_CHAR(B.NRO_OMI), 
+                                        CASE WHEN INSTR(T.BUQUE_INFO, ',') > 0 AND REGEXP_SUBSTR(T.BUQUE_INFO, '(.*?)(,|$)', 1, 4, NULL, 1) != '0'
+                                            THEN TRIM(REGEXP_SUBSTR(T.BUQUE_INFO, '(.*?)(,|$)', 1, 4, NULL, 1))
+                                            ELSE NULL 
+                                        END, 
+                                        'S/D')                                AS Omi,
+                                COALESCE(TO_CHAR(B.MATRICULA), 
+                                        CASE WHEN INSTR(T.BUQUE_INFO, ',') > 0 AND REGEXP_SUBSTR(T.BUQUE_INFO, '(.*?)(,|$)', 1, 2, NULL, 1) != '0'
+                                            THEN TRIM(REGEXP_SUBSTR(T.BUQUE_INFO, '(.*?)(,|$)', 1, 2, NULL, 1))
+                                            ELSE NULL 
+                                        END, 
+                                        'S/D')                                AS Matricula,
+                                T.ORIGEN_ID                                    AS Origen,
+                                T.DESTINO                                      AS Destino,
+                                TO_CHAR(T.FECHA_SALIDA, 'DD/MM/YYYY HH24:MI')  AS FechaPartida,
+                                TO_CHAR(T.ETA,          'DD/MM/YYYY HH24:MI')  AS Eta,
+                                CASE T.ESTADO 
+                                    WHEN 1 THEN 'Planificado'
+                                    WHEN 2 THEN 'Navegando' 
+                                    WHEN 3 THEN 'Finalizado' 
+                                    WHEN 4 THEN 'Cancelado' 
+                                    ELSE 'Otro' 
+                                END                                            AS Estado,
+                                '0'                                            AS CosteraId
+                        FROM   MBPC.TBL_VIAJE T
+                        LEFT JOIN MBPC.Z_TBL_BUQUES_UNICO B ON T.BUQUE_ID = B.ID_BUQUE
+                        WHERE  T.ESTADO IN (2, 3, 4)");
+
                     var parameters = new DynamicParameters();
-                    parameters.Add("p_Nombre",    string.IsNullOrEmpty(filtro.Nombre)    ? (object)DBNull.Value : filtro.Nombre,    DbType.String);
-                    parameters.Add("p_OMI",       string.IsNullOrEmpty(filtro.Omi)       ? (object)DBNull.Value : filtro.Omi,       DbType.String);
-                    parameters.Add("p_Matricula", string.IsNullOrEmpty(filtro.Matricula) ? (object)DBNull.Value : filtro.Matricula, DbType.String);
-                    parameters.Add("p_Origen",    string.IsNullOrEmpty(filtro.Origen)    ? (object)DBNull.Value : filtro.Origen,    DbType.String);
-                    parameters.Add("p_Destino",   string.IsNullOrEmpty(filtro.Destino)   ? (object)DBNull.Value : filtro.Destino,   DbType.String);
-                    parameters.Add("p_Desde",     filtro.Desde.HasValue ? (object)filtro.Desde.Value : DBNull.Value, DbType.Date);
-                    parameters.Add("p_Hasta",     filtro.Hasta.HasValue ? (object)filtro.Hasta.Value : DBNull.Value, DbType.Date);
+
+                    // Filtros Dinámicos
+                    if (!string.IsNullOrWhiteSpace(filtro.Nombre))
+                    {
+                        sql.Append(" AND UPPER(B.NOMBRE) LIKE UPPER(:nombre)");
+                        parameters.Add("nombre", $"%{filtro.Nombre}%", DbType.String);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(filtro.Omi))
+                    {
+                        sql.Append(" AND B.NRO_OMI LIKE :omi");
+                        parameters.Add("omi", $"%{filtro.Omi}%", DbType.String);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(filtro.Matricula))
+                    {
+                        sql.Append(" AND B.MATRICULA LIKE :matricula");
+                        parameters.Add("matricula", $"%{filtro.Matricula}%", DbType.String);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(filtro.Origen))
+                    {
+                        sql.Append(" AND UPPER(T.ORIGEN_ID) LIKE UPPER(:origen)");
+                        parameters.Add("origen", $"%{filtro.Origen}%", DbType.String);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(filtro.Destino))
+                    {
+                        sql.Append(" AND UPPER(T.DESTINO) LIKE UPPER(:destino)");
+                        parameters.Add("destino", $"%{filtro.Destino}%", DbType.String);
+                    }
+
+                    if (filtro.Desde.HasValue)
+                    {
+                        sql.Append(" AND T.FECHA_SALIDA >= :desde");
+                        parameters.Add("desde", filtro.Desde.Value.Date, DbType.Date);
+                    }
+
+                    if (filtro.Hasta.HasValue)
+                    {
+                        sql.Append(" AND T.FECHA_SALIDA < :hasta");
+                        parameters.Add("hasta", filtro.Hasta.Value.Date.AddDays(1), DbType.Date);
+                    }
+
+                    sql.Append(" ORDER BY T.FECHA_SALIDA DESC");
 
                     var resultado = await connection.QueryAsync<ViajeHistoricoDto>(
-                        "PKG_MBPC_VIAJES.SP_HISTORICO",
-                        parameters,
-                        commandType: CommandType.StoredProcedure);
+                        sql.ToString(),
+                        parameters);
 
                     return resultado.ToList();
                 });
             }
             catch (OracleException ex)
             {
-                _logger.LogWarning(
-                    "Oracle no disponible tras reintentos en GetHistoricoAsync — CosteraId: {CosteraId}. " +
-                    "Activando fallback mock. Error: {Message}",
-                    costeraId, ex.Message);
-
-                return GetHistoricoMock(filtro, costeraId);
+                _logger.LogError(ex, "Error de Oracle en GetHistoricoAsync. SQL State: {ErrorCode}", ex.Number);
+                return Enumerable.Empty<ViajeHistoricoDto>().ToList();
             }
         }
 
@@ -768,8 +838,6 @@ namespace Mbpc.Api.Services
                     $"No se encontró el detalle operativo del viaje '{id}'. No es posible finalizar el viaje.");
             }
 
-            // Idempotencia: si el viaje ya está finalizado, abortar antes de cualquier validación operativa.
-            // Se lee el mismo campo de estado que utiliza CambiarEstadoConValidacionAsync (NavegationStatusDesc).
             var filtroEstado = BuildFiltroViaje(id);
             var posicionActual = await _viajesCollection.Find(filtroEstado).FirstOrDefaultAsync();
             var estadoRaw = posicionActual?.NavegationStatusDesc ?? string.Empty;
@@ -786,6 +854,18 @@ namespace Mbpc.Api.Services
 
             bool inspectoresABordo = detalle.Inspectores?.Any(i => i.FechaDesembarque is null) == true;
             bool practicosABordo   = detalle.Practicos?.Any(p => p.FechaDesembarque is null) == true;
+
+            static bool ArenaPendiente(BarcazaMongo b) =>
+                b.Carga?.Equals("ARENA", StringComparison.OrdinalIgnoreCase) == true
+                && b.Descargada != true
+                && (b.Cantidad ?? 0) > 0;
+
+            bool tieneArenaPendiente =
+                detalle.Barcazas?.Any(ArenaPendiente) == true
+                || detalle.Etapas?.Any(e => e.Barcazas?.Any(ArenaPendiente) == true) == true;
+                
+            if (tieneArenaPendiente) 
+                throw new InvalidOperationException("Operación denegada: Existen cargas de tipo ARENA pendientes de descarga.");
 
             if (tieneBarcazasActivas || inspectoresABordo || practicosABordo)
             {
@@ -805,6 +885,92 @@ namespace Mbpc.Api.Services
             }
 
             return await CambiarEstadoNavegacionAsync(id, "Finalizado");
+        }
+
+        public async Task<PersonalViajeDto?> ObtenerPersonalAsync(string viajeId)
+        {
+            var (detalle, _) = await GetViajeDetalleByIdAsync(viajeId);
+            if (detalle == null) return null;
+
+            var dto = new PersonalViajeDto();
+
+            if (detalle.Inspectores != null)
+            {
+                dto.Inspectores = detalle.Inspectores.Select(i => new PersonalItemDto
+                {
+                    Documento = i.Documento,
+                    NombreApellido = i.NombreApellido,
+                    FechaEmbarque = i.FechaEmbarque,
+                    FechaDesembarque = i.FechaDesembarque
+                }).ToList();
+            }
+
+            if (detalle.Practicos != null)
+            {
+                dto.Practicos = detalle.Practicos.Select(p => new PersonalItemDto
+                {
+                    Documento = p.Documento,
+                    NombreApellido = p.NombreApellido,
+                    FechaEmbarque = p.FechaEmbarque,
+                    FechaDesembarque = p.FechaDesembarque
+                }).ToList();
+            }
+
+            return dto;
+        }
+
+        public async Task<bool> EmbarcarPersonalAsync(string viajeId, EmbarcarPersonalDto dto)
+        {
+            var filtroOcupado = Builders<ViajeDetalleMongo>.Filter.Or(
+                Builders<ViajeDetalleMongo>.Filter.ElemMatch(v => v.Inspectores, i => i.Documento == dto.Dni && i.FechaDesembarque == null),
+                Builders<ViajeDetalleMongo>.Filter.ElemMatch(v => v.Practicos, p => p.Documento == dto.Dni && p.FechaDesembarque == null)
+            );
+            
+            var estaOcupado = await _detallesCollection.Find(filtroOcupado).AnyAsync();
+            if (estaOcupado)
+                throw new InvalidOperationException($"El DNI {dto.Dni} ya se encuentra embarcado en otro viaje activo.");
+
+            var (detalle, _) = await GetViajeDetalleByIdAsync(viajeId);
+            if (detalle == null) return false;
+
+            var update = dto.TipoPersonal == "Inspector" 
+                ? Builders<ViajeDetalleMongo>.Update.Push(v => v.Inspectores, new InspectorMongo { Documento = dto.Dni, NombreApellido = dto.NombreApellido, FechaEmbarque = dto.FechaEmbarque })
+                : Builders<ViajeDetalleMongo>.Update.Push(v => v.Practicos, new PracticoMongo { Documento = dto.Dni, NombreApellido = dto.NombreApellido, FechaEmbarque = dto.FechaEmbarque });
+
+            var result = await _detallesCollection.UpdateOneAsync(v => v.Id == detalle.Id, update);
+            return result.ModifiedCount > 0;
+        }
+
+        public async Task<bool> DesembarcarPersonalAsync(string viajeId, string dni, DesembarcarPersonalDto dto)
+        {
+            var (detalle, _) = await GetViajeDetalleByIdAsync(viajeId);
+            if (detalle == null) return false;
+
+            UpdateDefinition<ViajeDetalleMongo> update;
+            FilterDefinition<ViajeDetalleMongo> filter;
+
+            if (dto.TipoPersonal == "Inspector")
+            {
+                filter = Builders<ViajeDetalleMongo>.Filter.And(
+                    Builders<ViajeDetalleMongo>.Filter.Eq(v => v.Id, detalle.Id),
+                    Builders<ViajeDetalleMongo>.Filter.ElemMatch(v => v.Inspectores, i => i.Documento == dni && i.FechaDesembarque == null)
+                );
+                update = Builders<ViajeDetalleMongo>.Update.Set("inspectores.$.fechaDesembarque", dto.FechaDesembarque);
+            }
+            else
+            {
+                filter = Builders<ViajeDetalleMongo>.Filter.And(
+                    Builders<ViajeDetalleMongo>.Filter.Eq(v => v.Id, detalle.Id),
+                    Builders<ViajeDetalleMongo>.Filter.ElemMatch(v => v.Practicos, p => p.Documento == dni && p.FechaDesembarque == null)
+                );
+                update = Builders<ViajeDetalleMongo>.Update.Set("practicos.$.fechaDesembarque", dto.FechaDesembarque);
+            }
+
+            var result = await _detallesCollection.UpdateOneAsync(filter, update);
+            if (result.ModifiedCount == 0)
+                throw new InvalidOperationException($"El DNI {dni} no está embarcado activamente en este viaje como {dto.TipoPersonal}.");
+
+            return true;
         }
 
         public async Task<bool> FondearViajeAsync(string id)
@@ -988,32 +1154,6 @@ namespace Mbpc.Api.Services
             throw new InvalidOperationException(
                 $"El enum DeclaracionMalvinasEnum '{nombreCompleto}' no sigue la convención de nombres '_LETRA'. " +
                 $"Segmento extraído: '{ultimoSegmento}'. Revise los nombres de los valores del enum.");
-        }
-
-        private static List<ViajeHistoricoDto> GetHistoricoMock(FiltroHistoricoDto filtro, int costeraId)
-        {
-            var todos = new List<ViajeHistoricoDto>
-            {
-                new() { Id = "H-001", Buque = "ARA Alte. Brown",      Omi = "IMO9000001", Matricula = "ARG-0001", Origen = "Puerto Rosario",     Destino = "Puerto Buenos Aires", FechaPartida = "10/01/2026 07:00", Eta = "10/01/2026 18:00", Estado = "Finalizado", CosteraId = "1" },
-                new() { Id = "H-002", Buque = "RÍO PARANÁ",           Omi = "IMO9000002", Matricula = "ARG-0002", Origen = "Puerto Corrientes",  Destino = "Puerto Buenos Aires", FechaPartida = "15/01/2026 06:30", Eta = "16/01/2026 08:00", Estado = "Finalizado", CosteraId = "1" },
-                new() { Id = "H-003", Buque = "SANTA FE FLUVIAL",     Omi = "IMO9000003", Matricula = "ARG-0003", Origen = "Puerto Santa Fe",    Destino = "Puerto La Plata",     FechaPartida = "20/01/2026 08:00", Eta = "20/01/2026 20:00", Estado = "Finalizado", CosteraId = "1" },
-                new() { Id = "H-004", Buque = "HIDROVÍA EXPRESS",     Omi = "IMO9000004", Matricula = "ARG-0004", Origen = "Puerto Concordia",   Destino = "Puerto Buenos Aires", FechaPartida = "02/02/2026 07:00", Eta = "03/02/2026 06:00", Estado = "Finalizado", CosteraId = "2" },
-                new() { Id = "H-005", Buque = "GRAN CHACO",           Omi = "IMO9000005", Matricula = "ARG-0005", Origen = "Puerto Barranqueras", Destino = "Puerto Zárate",      FechaPartida = "14/02/2026 09:00", Eta = "16/02/2026 07:00", Estado = "Finalizado", CosteraId = "2" },
-                new() { Id = "H-006", Buque = "ARA Gral. San Martín", Omi = "IMO9000006", Matricula = "ARG-0006", Origen = "Puerto Buenos Aires", Destino = "Puerto Montevideo",  FechaPartida = "01/03/2026 10:00", Eta = "01/03/2026 22:00", Estado = "Finalizado", CosteraId = "3" },
-                new() { Id = "H-007", Buque = "LITORAL I",            Omi = "IMO9000007", Matricula = "ARG-0007", Origen = "Puerto Goya",        Destino = "Puerto Rosario",      FechaPartida = "10/03/2026 07:00", Eta = "11/03/2026 09:00", Estado = "Cancelado",  CosteraId = "1" },
-            };
-
-            var query = costeraId == 0
-                ? todos.AsEnumerable()
-                : todos.Where(v => v.CosteraId == costeraId.ToString());
-
-            return query.Where(v =>
-                (string.IsNullOrWhiteSpace(filtro.Nombre)    || v.Buque.Contains(filtro.Nombre,        StringComparison.OrdinalIgnoreCase)) &&
-                (string.IsNullOrWhiteSpace(filtro.Omi)       || v.Omi.Contains(filtro.Omi,             StringComparison.OrdinalIgnoreCase)) &&
-                (string.IsNullOrWhiteSpace(filtro.Matricula) || v.Matricula.Contains(filtro.Matricula,  StringComparison.OrdinalIgnoreCase)) &&
-                (string.IsNullOrWhiteSpace(filtro.Origen)    || v.Origen.Contains(filtro.Origen,       StringComparison.OrdinalIgnoreCase)) &&
-                (string.IsNullOrWhiteSpace(filtro.Destino)   || v.Destino.Contains(filtro.Destino,     StringComparison.OrdinalIgnoreCase))
-            ).ToList();
         }
     }
 }

@@ -1,840 +1,247 @@
-// src/components/viajes/ModalNuevoViaje.tsx
-// ──────────────────────────────────────────────────────────────────────────────
-// Modal para registrar un nuevo viaje en el sistema MBPC.
-// Usa react-hook-form para manejo del formulario y validaciones,
-// Tailwind CSS para estilos, y el hook useNuevoViaje para la mutación.
-// ──────────────────────────────────────────────────────────────────────────────
+// src/components/viajes/ModalActualizarPosicion.tsx
+// Modal para reportar posición geográfica de un viaje activo (PUT /viajes/:id/posicion).
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState } from "react";
 import { useForm, type SubmitHandler } from "react-hook-form";
-import { useNuevoViaje } from "@/hooks/useNuevoViaje";
-import {
-  DeclaracionMalvinasEnum,
-  DECLARACION_MALVINAS_LABELS,
-  type NuevoViajeFormValues,
-  type NuevoViajeRequest,
-  type NuevoViajeResponse,
-  type NuevoViajeError,
-} from "@/types/viajes.types";
+import { useActualizarPosicion } from "@/hooks/useActualizarPosicion";
 
-// ─── Tipos Locales ────────────────────────────────────────────────────────────
-
-interface BuqueAutocomplete {
-  idBuque: number;
-  nombre: string;
-  matricula: string;
-  omi: string;
-  tipo: string;
-}
-
-// Extendemos los valores del formulario para incluir los campos DMS locales
-interface FormValuesExtendidos extends Omit<NuevoViajeFormValues, "posicion"> {
-  latGrados?: number;
-  latMinutos?: number;
-  latSegundos?: number;
-  latDir: "N" | "S";
-  lonGrados?: number;
-  lonMinutos?: number;
-  lonSegundos?: number;
-  lonDir: "E" | "W";
-  rioCanalKmPar?: number;
-}
-
-// ─── Props ────────────────────────────────────────────────────────────────────
-
-interface ModalNuevoViajeProps {
+export interface ModalActualizarPosicionProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess?: (response: NuevoViajeResponse) => void;
-  onError?: (error: NuevoViajeError) => void;
+  viajeId: string;
+  nombreBuque?: string;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function toIsoUtcString(localDateTimeString: string): string {
-  return new Date(localDateTimeString).toISOString();
+interface FormValues {
+  latitud: string;
+  longitud: string;
+  fechaReporteLocal: string;
 }
 
-function getNowLocalMin(): string {
-  const now = new Date();
-  const offset = now.getTimezoneOffset() * 60_000;
-  return new Date(now.getTime() - offset).toISOString().slice(0, 16);
+function getDefaultFechaLocal(): string {
+  const d = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const offset = d.getTimezoneOffset() * 60_000;
+  const local = new Date(d.getTime() - offset);
+  return local.toISOString().slice(0, 16);
 }
 
-// Conversión limpia de DMS a Decimal
-function dmsToDecimal(grados: number, minutos: number, segundos: number, direccion: string): number {
-  let decimal = Number(grados) + Number(minutos) / 60 + Number(segundos) / 3600;
-  if (direccion === "S" || direccion === "W") {
-    decimal = decimal * -1;
+function extractApiErrorMessage(error: unknown, fallback: string): string {
+  const ax = error as { response?: { data?: unknown }; message?: string };
+  const data = ax?.response?.data;
+  if (typeof data === "string" && data.trim()) return data.trim();
+  if (data && typeof data === "object") {
+    const o = data as Record<string, unknown>;
+    if (o.Error != null && String(o.Error).trim()) return String(o.Error);
+    if (o.error != null && String(o.error).trim()) return String(o.error);
+    if (o.mensaje != null && String(o.mensaje).trim()) return String(o.mensaje);
+    if (o.message != null && String(o.message).trim()) return String(o.message);
+    if (o.title != null && String(o.title).trim()) return String(o.title);
+    if (o.detail != null && String(o.detail).trim()) return String(o.detail);
   }
-  return Number(decimal.toFixed(6));
+  if (ax?.message && typeof ax.message === "string" && ax.message.trim()) {
+    return ax.message;
+  }
+  return fallback;
 }
 
-// ─── Subcomponentes internos ──────────────────────────────────────────────────
-
-interface FieldErrorProps {
-  message?: string;
+function localDateTimeToIsoUtc(local: string): string {
+  return new Date(local).toISOString();
 }
 
-function FieldError({ message }: FieldErrorProps) {
-  if (!message) return null;
-  return (
-    <p className="mt-1 text-xs text-red-400 flex items-center gap-1">
-      <span aria-hidden="true">⚠</span>
-      {message}
-    </p>
-  );
-}
-
-interface LabelProps {
-  htmlFor: string;
-  children: React.ReactNode;
-  required?: boolean;
-}
-
-function Label({ htmlFor, children, required = false }: LabelProps) {
-  return (
-    <label
-      htmlFor={htmlFor}
-      className="block text-xs font-semibold tracking-widest uppercase text-slate-400 mb-1"
-    >
-      {children}
-      {required && (
-        <span className="text-cyan-400 ml-1" aria-label="requerido">
-          *
-        </span>
-      )}
-    </label>
-  );
-}
-
-const inputClass =
-  "w-full bg-slate-800/60 border border-slate-600/50 text-slate-100 text-sm " +
-  "rounded px-3 py-2 placeholder-slate-500 " +
-  "focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/40 " +
-  "disabled:opacity-50 disabled:cursor-not-allowed " +
-  "transition-colors duration-150";
-
-const errorInputClass =
-  "w-full bg-slate-800/60 border border-red-500/60 text-slate-100 text-sm " +
-  "rounded px-3 py-2 placeholder-slate-500 " +
-  "focus:outline-none focus:border-red-400 focus:ring-1 focus:ring-red-400/40 " +
-  "disabled:opacity-50 transition-colors duration-150";
-
-function getInputClass(hasError: boolean): string {
-  return hasError ? errorInputClass : inputClass;
-}
-
-// ─── Componente principal ─────────────────────────────────────────────────────
-
-export function ModalNuevoViaje({
+export default function ModalActualizarPosicion({
   isOpen,
   onClose,
-  onSuccess,
-  onError,
-}: ModalNuevoViajeProps) {
-  const nowMin = getNowLocalMin();
+  viajeId,
+  nombreBuque,
+}: ModalActualizarPosicionProps) {
+  const { mutate, isPending, reset: resetMutation } = useActualizarPosicion(viajeId);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const {
     register,
     handleSubmit,
     reset,
-    watch,
-    setValue,
     formState: { errors },
-  } = useForm<FormValuesExtendidos>({
+  } = useForm<FormValues>({
     defaultValues: {
-      buqueId: undefined as unknown as number,
-      origen: "",
-      destino: "",
-      proximoPuntoControl: "",
-      fechaPartida: "",
-      eta: "",
-      declaracionMalvinas: DeclaracionMalvinasEnum.NoVieneDeMalvinas_L,
-      muelleSalida: "",
-      agenciaMaritima: "",
-      motivoViaje: "",
-      zoe: "",
-      latGrados: undefined,
-      latMinutos: undefined,
-      latSegundos: undefined,
-      latDir: "S",
-      lonGrados: undefined,
-      lonMinutos: undefined,
-      lonSegundos: undefined,
-      lonDir: "W",
-      rioCanalKmPar: undefined,
+      latitud: "",
+      longitud: "",
+      fechaReporteLocal: getDefaultFechaLocal(),
     },
   });
 
-  const { mutate, isPending } = useNuevoViaje();
-
-  const [buqueSearchTerm, setBuqueSearchTerm] = useState("");
-  const [buqueSuggestions, setBuqueSuggestions] = useState<BuqueAutocomplete[]>([]);
-  const [showBuqueDropdown, setShowBuqueDropdown] = useState(false);
-  const [isLoadingBuques, setIsLoadingBuques] = useState(false);
-  const buqueDropdownRef = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
-    if (!isOpen) {
-      reset();
-      setBuqueSearchTerm("");
-      setBuqueSuggestions([]);
-      setShowBuqueDropdown(false);
-    }
-  }, [isOpen, reset]);
+    if (!isOpen) return;
+    reset({
+      latitud: "",
+      longitud: "",
+      fechaReporteLocal: getDefaultFechaLocal(),
+    });
+    setSubmitError(null);
+    resetMutation();
+  }, [isOpen, viajeId, reset, resetMutation]);
 
   useEffect(() => {
     if (!isOpen) return;
-    const handleKeyDown = (e: KeyboardEvent) => {
+    const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !isPending) onClose();
     };
-    document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
   }, [isOpen, isPending, onClose]);
 
-  useEffect(() => {
-    if (!showBuqueDropdown) return;
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        buqueDropdownRef.current &&
-        !buqueDropdownRef.current.contains(event.target as Node)
-      ) {
-        setShowBuqueDropdown(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showBuqueDropdown]);
-
-  useEffect(() => {
-    const delayDebounceFn = setTimeout(async () => {
-      if (buqueSearchTerm.trim().length >= 2) {
-        setIsLoadingBuques(true);
-        try {
-          const token = localStorage.getItem("mbpc_token");
-          const res = await fetch(
-            `/api/buques/autocomplete?query=${encodeURIComponent(buqueSearchTerm)}`,
-            {
-              headers: {
-                Authorization: `Bearer ${token}`,
-              },
-            }
-          );
-          if (res.ok) {
-            const data: BuqueAutocomplete[] = await res.json();
-            setBuqueSuggestions(data);
-            setShowBuqueDropdown(true);
-          }
-        } catch (error) {
-          console.error("Error buscando buques:", error);
-        } finally {
-          setIsLoadingBuques(false);
-        }
-      } else {
-        setBuqueSuggestions([]);
-        setShowBuqueDropdown(false);
-      }
-    }, 400);
-
-    return () => clearTimeout(delayDebounceFn);
-  }, [buqueSearchTerm]);
-
-  const fechaPartidaValue = watch("fechaPartida");
-
-  const onSubmit: SubmitHandler<FormValuesExtendidos> = (formValues) => {
-    
-    // Convertir DMS a Decimal si los datos fueron completados
-    let latitudDecimal: number | undefined = undefined;
-    let longitudDecimal: number | undefined = undefined;
-
-    if (formValues.latGrados != null && formValues.latMinutos != null && formValues.latSegundos != null) {
-      latitudDecimal = dmsToDecimal(formValues.latGrados, formValues.latMinutos, formValues.latSegundos, formValues.latDir);
+  const onSubmit: SubmitHandler<FormValues> = (values) => {
+    setSubmitError(null);
+    const lat = Number(String(values.latitud).replace(",", "."));
+    const lon = Number(String(values.longitud).replace(",", "."));
+    if (Number.isNaN(lat) || Number.isNaN(lon)) {
+      setSubmitError("Latitud y longitud deben ser números válidos.");
+      return;
     }
-
-    if (formValues.lonGrados != null && formValues.lonMinutos != null && formValues.lonSegundos != null) {
-      longitudDecimal = dmsToDecimal(formValues.lonGrados, formValues.lonMinutos, formValues.lonSegundos, formValues.lonDir);
-    }
-
-    // Adaptamos el Request con las nuevas propiedades numéricas
-    const payload: NuevoViajeRequest & { latitud?: number; longitud?: number } = {
-      buqueId: Number(formValues.buqueId),
-      nombreBuque: buqueSearchTerm || undefined,
-      origen: formValues.origen,
-      destino: formValues.destino,
-      proximoPuntoControl: formValues.proximoPuntoControl,
-      fechaPartida: toIsoUtcString(formValues.fechaPartida),
-      eta: toIsoUtcString(formValues.eta),
-      declaracionMalvinas: formValues.declaracionMalvinas,
-      muelleSalida: formValues.muelleSalida || undefined,
-      agenciaMaritima: formValues.agenciaMaritima || undefined,
-      motivoViaje: formValues.motivoViaje || undefined,
-      zoe: formValues.zoe || undefined,
-      latitud: latitudDecimal,
-      longitud: longitudDecimal,
-      rioCanalKmPar:
-        formValues.rioCanalKmPar != null &&
-        formValues.rioCanalKmPar !== (undefined as unknown as number)
-          ? Number(formValues.rioCanalKmPar)
-          : undefined,
-    };
-
-    mutate(payload as NuevoViajeRequest, {
-      onSuccess: (response) => {
-        onSuccess?.(response);
-        onClose();
+    mutate(
+      {
+        latitud: lat,
+        longitud: lon,
+        fechaReporte: localDateTimeToIsoUtc(values.fechaReporteLocal),
       },
-      onError: (error) => {
-        onError?.(error);
-      },
-    });
+      {
+        onSuccess: () => {
+          onClose();
+        },
+        onError: (err) => {
+          setSubmitError(extractApiErrorMessage(err, "No se pudo actualizar la posición."));
+        },
+      }
+    );
   };
 
   if (!isOpen) return null;
+  if (!viajeId?.trim()) return null;
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="modal-nuevo-viaje-title"
+      aria-labelledby="modal-actualizar-posicion-title"
     >
       <div
-        className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm"
+        className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm z-0"
         onClick={!isPending ? onClose : undefined}
         aria-hidden="true"
       />
 
-      <div className="relative z-10 w-full max-w-3xl max-h-[92vh] flex flex-col bg-slate-900 border border-slate-700/60 rounded-lg shadow-2xl shadow-black/60">
+      <div className="relative z-10 w-full max-w-lg max-h-[92vh] flex flex-col bg-slate-900 border border-slate-700/60 rounded-lg shadow-2xl shadow-black/60">
         <div className="h-1 w-full bg-gradient-to-r from-cyan-500 via-sky-400 to-cyan-600 shrink-0 rounded-t-lg" />
 
         <div className="px-6 py-4 border-b border-slate-700/60 flex items-center justify-between shrink-0">
-          <div className="flex items-center gap-3">
-            <span className="text-2xl" aria-hidden="true">
-              ⚓
-            </span>
-            <div>
-              <h2
-                id="modal-nuevo-viaje-title"
-                className="text-base font-bold text-slate-100 leading-tight"
-              >
-                Registrar Nuevo Viaje
-              </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Completá los datos del buque y la ruta para iniciar el viaje.
+          <div>
+            <h2
+              id="modal-actualizar-posicion-title"
+              className="text-base font-bold text-slate-100 leading-tight"
+            >
+              Actualizar posición
+            </h2>
+            {nombreBuque ? (
+              <p className="text-xs text-slate-400 mt-1">
+                Viaje <span className="font-mono text-slate-300">{viajeId}</span> — {nombreBuque}
               </p>
-            </div>
+            ) : (
+              <p className="text-xs text-slate-400 mt-1 font-mono">{viajeId}</p>
+            )}
           </div>
           <button
             type="button"
             onClick={onClose}
             disabled={isPending}
             aria-label="Cerrar modal"
-            className="text-slate-500 hover:text-slate-200 disabled:opacity-40 
-                       disabled:cursor-not-allowed transition-colors duration-150 
-                       rounded p-1 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
+            className="text-slate-500 hover:text-slate-200 disabled:opacity-40 rounded p-1 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
           >
-            <svg
-              className="w-5 h-5"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              aria-hidden="true"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                d="M6 18L18 6M6 6l12 12"
-              />
-            </svg>
+            <span className="text-2xl leading-none">&times;</span>
           </button>
         </div>
 
         <form
-          id="form-nuevo-viaje"
           onSubmit={handleSubmit(onSubmit)}
+          className="overflow-y-auto flex-1 px-6 py-5 space-y-4"
           noValidate
-          className="overflow-y-auto flex-1 px-6 py-5 space-y-6 scrollbar-thin scrollbar-track-slate-800 scrollbar-thumb-slate-600"
         >
-          {/* ── SECCIÓN 1: Identificación del Buque ─────────────────── */}
-          <section>
-            <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-500 mb-3 flex items-center gap-2">
-              <span className="block w-4 h-px bg-cyan-500/50" aria-hidden="true" />
-              Identificación del Buque
-            </h3>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4">
-              <div className="sm:col-span-2 relative" ref={buqueDropdownRef}>
-                <Label htmlFor="buqueSearchTerm" required>
-                  Buque
-                </Label>
-                <input
-                  id="buqueSearchTerm"
-                  type="text"
-                  placeholder="Buscar por nombre, matrícula u OMI..."
-                  disabled={isPending}
-                  autoComplete="off"
-                  className={getInputClass(!!errors.buqueId)}
-                  value={buqueSearchTerm}
-                  onChange={(e) => {
-                    setBuqueSearchTerm(e.target.value);
-                    setValue("buqueId", undefined as unknown as number);
-                  }}
-                  onFocus={() => {
-                    if (buqueSuggestions.length > 0) setShowBuqueDropdown(true);
-                  }}
-                />
-                <input
-                  type="hidden"
-                  {...register("buqueId", {
-                    required: "Debe seleccionar un buque de la lista.",
-                  })}
-                />
-                <FieldError message={errors.buqueId?.message} />
-
-                {showBuqueDropdown && (
-                  <div className="absolute z-50 w-full mt-1 bg-slate-800 border border-slate-600 rounded-md shadow-lg max-h-60 overflow-y-auto scrollbar-thin scrollbar-track-slate-800 scrollbar-thumb-slate-600">
-                    {isLoadingBuques ? (
-                      <div className="px-4 py-3 text-sm text-slate-400">
-                        Buscando buques...
-                      </div>
-                    ) : buqueSuggestions.length > 0 ? (
-                      <ul className="py-1">
-                        {buqueSuggestions.map((buque) => (
-                          <li
-                            key={buque.idBuque}
-                            className="px-4 py-2 hover:bg-cyan-600 cursor-pointer transition-colors"
-                            onClick={() => {
-                              setValue("buqueId", buque.idBuque, {
-                                shouldValidate: true,
-                              });
-                              setBuqueSearchTerm(buque.nombre);
-                              setShowBuqueDropdown(false);
-                            }}
-                          >
-                            <div className="text-sm font-semibold text-slate-100">
-                              {buque.nombre}
-                            </div>
-                            <div className="text-xs text-slate-400 mt-0.5">
-                              OMI: {buque.omi || "N/A"} | Matrícula:{" "}
-                              {buque.matricula || "N/A"} | Tipo: {buque.tipo}
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : buqueSearchTerm.trim().length >= 2 ? (
-                      <div className="px-4 py-3 text-sm text-slate-400">
-                        No se encontraron resultados.
-                      </div>
-                    ) : null}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <Label htmlFor="agenciaMaritima">Agencia Marítima</Label>
-                <input
-                  id="agenciaMaritima"
-                  type="text"
-                  placeholder="Ej: Agencia del Plata S.A."
-                  disabled={isPending}
-                  className={getInputClass(!!errors.agenciaMaritima)}
-                  {...register("agenciaMaritima", {
-                    maxLength: {
-                      value: 200,
-                      message: "Máximo 200 caracteres.",
-                    },
-                  })}
-                />
-                <FieldError message={errors.agenciaMaritima?.message} />
-              </div>
-
-              <div>
-                <Label htmlFor="muelleSalida">Muelle de Salida</Label>
-                <input
-                  id="muelleSalida"
-                  type="text"
-                  placeholder="Ej: Muelle 5 - Puerto Nuevo"
-                  disabled={isPending}
-                  className={getInputClass(!!errors.muelleSalida)}
-                  {...register("muelleSalida", {
-                    maxLength: {
-                      value: 200,
-                      message: "Máximo 200 caracteres.",
-                    },
-                  })}
-                />
-                <FieldError message={errors.muelleSalida?.message} />
-              </div>
-
-              <div className="sm:col-span-2">
-                <Label htmlFor="motivoViaje">Motivo del Viaje</Label>
-                <input
-                  id="motivoViaje"
-                  type="text"
-                  placeholder="Ej: Transporte de carga general"
-                  disabled={isPending}
-                  className={getInputClass(!!errors.motivoViaje)}
-                  {...register("motivoViaje", {
-                    maxLength: {
-                      value: 500,
-                      message: "Máximo 500 caracteres.",
-                    },
-                  })}
-                />
-                <FieldError message={errors.motivoViaje?.message} />
-              </div>
+          {submitError && (
+            <div className="rounded-md border border-red-500/50 bg-red-900/30 px-3 py-2 text-sm text-red-200">
+              {submitError}
             </div>
-          </section>
+          )}
 
-          {/* ── SECCIÓN 2: Ruta y Tiempos ───────────────────────────── */}
-          <section>
-            <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-500 mb-3 flex items-center gap-2">
-              <span className="block w-4 h-px bg-cyan-500/50" aria-hidden="true" />
-              Ruta y Tiempos
-            </h3>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4">
-              <div>
-                <Label htmlFor="origen" required>
-                  Origen
-                </Label>
-                <input
-                  id="origen"
-                  type="text"
-                  placeholder="Ej: Buenos Aires"
-                  disabled={isPending}
-                  className={getInputClass(!!errors.origen)}
-                  {...register("origen", {
-                    required: "El origen es requerido.",
-                    minLength: { value: 2, message: "Mínimo 2 caracteres." },
-                    maxLength: {
-                      value: 200,
-                      message: "Máximo 200 caracteres.",
-                    },
-                  })}
-                />
-                <FieldError message={errors.origen?.message} />
-              </div>
-
-              <div>
-                <Label htmlFor="destino" required>
-                  Destino
-                </Label>
-                <input
-                  id="destino"
-                  type="text"
-                  placeholder="Ej: Montevideo"
-                  disabled={isPending}
-                  className={getInputClass(!!errors.destino)}
-                  {...register("destino", {
-                    required: "El destino es requerido.",
-                    minLength: { value: 2, message: "Mínimo 2 caracteres." },
-                    maxLength: {
-                      value: 200,
-                      message: "Máximo 200 caracteres.",
-                    },
-                  })}
-                />
-                <FieldError message={errors.destino?.message} />
-              </div>
-
-              <div className="sm:col-span-2">
-                <Label htmlFor="proximoPuntoControl" required>
-                  Próximo Punto de Control
-                </Label>
-                <input
-                  id="proximoPuntoControl"
-                  type="text"
-                  placeholder="Ej: Prefectura Zárate"
-                  disabled={isPending}
-                  className={getInputClass(!!errors.proximoPuntoControl)}
-                  {...register("proximoPuntoControl", {
-                    required: "El próximo punto de control es requerido.",
-                    minLength: { value: 2, message: "Mínimo 2 caracteres." },
-                    maxLength: {
-                      value: 200,
-                      message: "Máximo 200 caracteres.",
-                    },
-                  })}
-                />
-                <FieldError message={errors.proximoPuntoControl?.message} />
-              </div>
-
-              <div>
-                <Label htmlFor="fechaPartida" required>
-                  Fecha y Hora de Partida
-                </Label>
-                <input
-                  id="fechaPartida"
-                  type="datetime-local"
-                  min={nowMin}
-                  disabled={isPending}
-                  className={getInputClass(!!errors.fechaPartida)}
-                  {...register("fechaPartida", {
-                    required: "La fecha de partida es requerida.",
-                  })}
-                />
-                <FieldError message={errors.fechaPartida?.message} />
-              </div>
-
-              <div>
-                <Label htmlFor="eta" required>
-                  ETA (Arribo Estimado)
-                </Label>
-                <input
-                  id="eta"
-                  type="datetime-local"
-                  min={fechaPartidaValue || nowMin}
-                  disabled={isPending}
-                  className={getInputClass(!!errors.eta)}
-                  {...register("eta", {
-                    required: "La ETA es requerida.",
-                    validate: (value) => {
-                      if (!fechaPartidaValue) return true;
-                      return (
-                        new Date(value) > new Date(fechaPartidaValue) ||
-                        "La ETA debe ser posterior a la fecha de partida."
-                      );
-                    },
-                  })}
-                />
-                <FieldError message={errors.eta?.message} />
-              </div>
-            </div>
-          </section>
-
-          {/* ── SECCIÓN 3: Posición y Datos Geográficos ─────────── */}
-          <section>
-            <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-500 mb-3 flex items-center gap-2">
-              <span className="block w-4 h-px bg-cyan-500/50" aria-hidden="true" />
-              Posición y Datos Geográficos
-            </h3>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4">
-              
-              {/* Latitud en DMS */}
-              <div>
-                <Label htmlFor="latGrados">Latitud</Label>
-                <div className="flex gap-2">
-                  <input
-                    id="latGrados"
-                    type="number"
-                    min="0"
-                    max="90"
-                    placeholder="Grados"
-                    disabled={isPending}
-                    className={getInputClass(false)}
-                    {...register("latGrados", { valueAsNumber: true })}
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    max="59"
-                    placeholder="Min"
-                    disabled={isPending}
-                    className={getInputClass(false)}
-                    {...register("latMinutos", { valueAsNumber: true })}
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    max="59"
-                    step="0.1"
-                    placeholder="Seg"
-                    disabled={isPending}
-                    className={getInputClass(false)}
-                    {...register("latSegundos", { valueAsNumber: true })}
-                  />
-                  <select
-                    disabled={isPending}
-                    className={getInputClass(false)}
-                    {...register("latDir")}
-                  >
-                    <option value="N">N</option>
-                    <option value="S">S</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Longitud en DMS */}
-              <div>
-                <Label htmlFor="lonGrados">Longitud</Label>
-                <div className="flex gap-2">
-                  <input
-                    id="lonGrados"
-                    type="number"
-                    min="0"
-                    max="180"
-                    placeholder="Grados"
-                    disabled={isPending}
-                    className={getInputClass(false)}
-                    {...register("lonGrados", { valueAsNumber: true })}
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    max="59"
-                    placeholder="Min"
-                    disabled={isPending}
-                    className={getInputClass(false)}
-                    {...register("lonMinutos", { valueAsNumber: true })}
-                  />
-                  <input
-                    type="number"
-                    min="0"
-                    max="59"
-                    step="0.1"
-                    placeholder="Seg"
-                    disabled={isPending}
-                    className={getInputClass(false)}
-                    {...register("lonSegundos", { valueAsNumber: true })}
-                  />
-                  <select
-                    disabled={isPending}
-                    className={getInputClass(false)}
-                    {...register("lonDir")}
-                  >
-                    <option value="E">E</option>
-                    <option value="W">W</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <Label htmlFor="rioCanalKmPar">Río/Canal — Km Par</Label>
-                <input
-                  id="rioCanalKmPar"
-                  type="number"
-                  step="0.1"
-                  min="0"
-                  max="9999.9"
-                  placeholder="Ej: 274.5"
-                  disabled={isPending}
-                  className={getInputClass(!!errors.rioCanalKmPar)}
-                  {...register("rioCanalKmPar", {
-                    min: { value: 0, message: "Debe ser un valor positivo." },
-                    max: { value: 9999.9, message: "Máximo 9999.9 km." },
-                    valueAsNumber: true,
-                  })}
-                />
-                <FieldError message={errors.rioCanalKmPar?.message} />
-              </div>
-
-              <div>
-                <Label htmlFor="zoe">ZOE (Zona Operación Especial)</Label>
-                <input
-                  id="zoe"
-                  type="text"
-                  placeholder="Ej: ZR-Paraná"
-                  disabled={isPending}
-                  className={getInputClass(!!errors.zoe)}
-                  {...register("zoe", {
-                    maxLength: {
-                      value: 100,
-                      message: "Máximo 100 caracteres.",
-                    },
-                  })}
-                />
-                <FieldError message={errors.zoe?.message} />
-              </div>
-            </div>
-          </section>
-
-          {/* ── SECCIÓN 4: Declaración Jurada Malvinas ──────────── */}
-          <section>
-            <h3 className="text-xs font-bold tracking-widest uppercase text-cyan-500 mb-3 flex items-center gap-2">
-              <span className="block w-4 h-px bg-cyan-500/50" aria-hidden="true" />
-              Declaración Jurada Malvinas
-            </h3>
-
-            <div>
-              <Label htmlFor="declaracionMalvinas" required>
-                Código de Declaración
-              </Label>
-              <select
-                id="declaracionMalvinas"
-                disabled={isPending}
-                className={getInputClass(!!errors.declaracionMalvinas)}
-                {...register("declaracionMalvinas", {
-                  required: "La declaración de Malvinas es requerida.",
-                })}
-              >
-                {(
-                  Object.values(
-                    DeclaracionMalvinasEnum
-                  ) as DeclaracionMalvinasEnum[]
-                ).map((value) => (
-                  <option key={value} value={value}>
-                    {DECLARACION_MALVINAS_LABELS[value]}
-                  </option>
-                ))}
-              </select>
-              <FieldError message={errors.declaracionMalvinas?.message} />
-            </div>
-          </section>
-        </form>
-
-        <div className="px-6 py-4 border-t border-slate-700/60 bg-slate-900/80 flex items-center justify-end gap-3 shrink-0">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={isPending}
-            className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-slate-200 
-                       border border-slate-600/50 hover:border-slate-500 rounded 
-                       disabled:opacity-40 disabled:cursor-not-allowed
-                       transition-colors duration-150"
-          >
-            Cancelar
-          </button>
-
-          <button
-            type="submit"
-            form="form-nuevo-viaje"
-            disabled={isPending}
-            className="px-5 py-2 text-sm font-semibold rounded
-                       bg-cyan-600 hover:bg-cyan-500 text-white
-                       disabled:bg-cyan-900 disabled:text-cyan-600 disabled:cursor-not-allowed
-                       flex items-center gap-2 transition-colors duration-150
-                       focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
-          >
-            {isPending ? (
-              <>
-                <svg
-                  className="animate-spin w-4 h-4 text-cyan-400"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  aria-hidden="true"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  />
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"
-                  />
-                </svg>
-                <span>Guardando...</span>
-              </>
-            ) : (
-              <>
-                <span aria-hidden="true">⚓</span>
-                <span>Registrar Viaje</span>
-              </>
+          <div>
+            <label htmlFor="pos-latitud" className="block text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">
+              Latitud (decimal, ej. -34.6037)
+            </label>
+            <input
+              id="pos-latitud"
+              type="text"
+              inputMode="decimal"
+              disabled={isPending}
+              className="w-full bg-slate-800/60 border border-slate-600/50 text-slate-100 text-sm rounded px-3 py-2 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/40 disabled:opacity-50"
+              {...register("latitud", { required: "Ingrese la latitud" })}
+            />
+            {errors.latitud && (
+              <p className="mt-1 text-xs text-red-400">{errors.latitud.message}</p>
             )}
-          </button>
-        </div>
+          </div>
+
+          <div>
+            <label htmlFor="pos-longitud" className="block text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">
+              Longitud (decimal, ej. -58.3816)
+            </label>
+            <input
+              id="pos-longitud"
+              type="text"
+              inputMode="decimal"
+              disabled={isPending}
+              className="w-full bg-slate-800/60 border border-slate-600/50 text-slate-100 text-sm rounded px-3 py-2 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/40 disabled:opacity-50"
+              {...register("longitud", { required: "Ingrese la longitud" })}
+            />
+            {errors.longitud && (
+              <p className="mt-1 text-xs text-red-400">{errors.longitud.message}</p>
+            )}
+          </div>
+
+          <div>
+            <label htmlFor="pos-fecha" className="block text-xs font-semibold uppercase tracking-wide text-slate-400 mb-1">
+              Fecha y hora del reporte
+            </label>
+            <input
+              id="pos-fecha"
+              type="datetime-local"
+              disabled={isPending}
+              className="w-full bg-slate-800/60 border border-slate-600/50 text-slate-100 text-sm rounded px-3 py-2 focus:outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500/40 disabled:opacity-50"
+              {...register("fechaReporteLocal", { required: "Seleccione fecha y hora" })}
+            />
+            {errors.fechaReporteLocal && (
+              <p className="mt-1 text-xs text-red-400">{errors.fechaReporteLocal.message}</p>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={isPending}
+              className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-slate-200 border border-slate-600/50 rounded disabled:opacity-40"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={isPending}
+              className="px-5 py-2 text-sm font-semibold rounded bg-cyan-600 hover:bg-cyan-500 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isPending ? "Guardando…" : "Guardar posición"}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   );
 }
-
-export default ModalNuevoViaje;
