@@ -285,6 +285,22 @@ export function ModalNuevoViaje({
       role="dialog"
       aria-modal="true"
       aria-labelledby="modal-nuevo-viaje-title"
+      // 🔥 Atajo CTRL+S / CMD+S capturado como Evento Sintético de React.
+      // Al estar en el árbol de React, se delega en #root y no compite
+      // con los listeners nativos del window/document del navegador.
+      onKeyDown={(e) => {
+        const isS = e.key === "s" || e.key === "S" || e.nativeEvent.code === "KeyS";
+        const isModifier = e.ctrlKey || e.metaKey;
+
+        if (isModifier && isS) {
+          e.preventDefault();   // Bloquea la ventana "Guardar página" del navegador
+          e.stopPropagation();  // Evita que otros componentes del árbol reciban el atajo
+
+          if (!isPending) {
+            handleSubmit(onSubmit)();
+          }
+        }
+      }}
     >
       {/* Backdrop */}
       <div
