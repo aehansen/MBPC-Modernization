@@ -200,10 +200,12 @@ namespace Mbpc.Api.Services
             var barcazasConvoy = convoy?.Barcazas?.ToList() ?? new List<BarcazaConvoyDto>();
 
             // Hito 6.1 — Filtro por Id, no por VesselName.
-            _logger.LogDebug("Buscando en details_mbpc por Id: {ViajeId}", viajeId);
+            _logger.LogDebug("Buscando en details_mbpc resolviendo Id: {ViajeId}", viajeId);
 
-            var filtroDetalles = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, viajeId);
-            var detalleConCargas = await _detailsCollection.Find(filtroDetalles).FirstOrDefaultAsync();
+            using var scope = _serviceProvider.CreateScope();
+            var viajeService = scope.ServiceProvider.GetRequiredService<IViajeService>();
+
+            var (detalleConCargas, _) = await viajeService.GetViajeDetalleByIdAsync(viajeId);
 
             var ultimaEtapa      = detalleConCargas?.Etapas?.LastOrDefault();
             var todasLasBarcazas = (ultimaEtapa?.Barcazas ?? new List<BarcazaMongo>())
@@ -275,7 +277,9 @@ namespace Mbpc.Api.Services
 
                     string descripcion;
                     string nivelRiesgo = tipoCarga?.EsPeligrosa == true ? "Alto" : "Bajo";
-                    string cargaNombre = tipoCarga?.Nombre ?? b.Carga ?? "Sin Descripción";
+                    string cargaNombre = !string.IsNullOrWhiteSpace(b.Carga) && b.Carga != "A Definir" 
+                        ? b.Carga 
+                        : (tipoCarga?.Nombre ?? "A Definir");
 
                     if (esBodega)
                     {
@@ -769,46 +773,46 @@ namespace Mbpc.Api.Services
             {
                 try
                 {
-                    // Hito 6.1 — Siempre buscar por Id (ObjectId). El dto.ViajeId DEBE ser
-                    // el ObjectId de MongoDB; se elimina el fallback por VesselName que
-                    // causaba el bug de scoping.
-                    var filtroDoc = Builders<ViajeDetalleMongo>.Filter.Eq(x => x.Id, dto.ViajeId);
-                    var doc = await _detailsCollection.Find(filtroDoc).FirstOrDefaultAsync();
-
-                    if (doc is not null)
+                    // FIX HITO 10.5 — Resolvemos IViajeService en tiempo de ejecución para evitar dependencia circular
+                    using var scope = _serviceProvider.CreateScope();
+                    var viajeService = scope.ServiceProvider.GetRequiredService<IViajeService>();
+                    
+                    // Delegamos en el servicio de viajes unificado
+                    var (detalleEncontrado, _) = await viajeService.GetViajeDetalleByIdAsync(dto.ViajeId);
+                    
+                    if (detalleEncontrado == null)
                     {
-                        // Buscar la carga en la última etapa (scoping de etapa)
-                        var ultimaEtapa = doc.Etapas?.LastOrDefault();
-                        var barcazaTarget = ultimaEtapa?.Barcazas?.FirstOrDefault(b => b.Nombre == id);
+                        _logger.LogWarning("ModificarCargaAsync: No se encontró detalle operativo para ViajeId='{ViajeId}'.", dto.ViajeId);
+                        return false;
+                    }
 
-                        if (barcazaTarget is not null)
-                        {
-                            var tipoCarga = await _tipoCargaService.ObtenerPorIdAsync(dto.MercaderiaId);
-                            barcazaTarget.Carga        = tipoCarga?.Nombre ?? "A Definir";
-                            barcazaTarget.Cantidad     = dto.Tonelaje;
-                            barcazaTarget.MercaderiaId = dto.MercaderiaId;
+                    var doc = detalleEncontrado;
 
-                            var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
-                            await _detailsCollection.ReplaceOneAsync(filtroId, doc);
+                    // Buscar la carga en la última etapa (scoping de etapa)
+                    var ultimaEtapa = doc.Etapas?.LastOrDefault();
+                    var barcazaTarget = ultimaEtapa?.Barcazas?.FirstOrDefault(b => b.Nombre == id);
 
-                            _logger.LogInformation(
-                                "¡CQRS Exitoso! Barcaza '{BarcazaId}' modificada en MongoDB para el documento '{DocId}' (ViajeId='{ViajeId}').",
-                                id, doc.Id, dto.ViajeId);
+                    if (barcazaTarget is not null)
+                    {
+                        var tipoCarga = await _tipoCargaService.ObtenerPorIdAsync(dto.MercaderiaId);
+                        barcazaTarget.Carga        = tipoCarga?.Nombre ?? "A Definir";
+                        barcazaTarget.Cantidad     = dto.Tonelaje;
+                        barcazaTarget.MercaderiaId = dto.MercaderiaId;
 
-                            _cache.Remove($"{CacheKeyPrefixCargas}{dto.ViajeId}");
-                        }
-                        else
-                        {
-                            _logger.LogWarning(
-                                "ModificarCargaAsync: Barcaza '{BarcazaId}' no encontrada en la última etapa del documento MongoDB '{DocId}'.",
-                                id, doc.Id);
-                        }
+                        var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
+                        await _detailsCollection.ReplaceOneAsync(filtroId, doc);
+
+                        _logger.LogInformation(
+                            "¡CQRS Exitoso! Barcaza '{BarcazaId}' modificada en MongoDB para el documento '{DocId}' (ViajeId='{ViajeId}').",
+                            id, doc.Id, dto.ViajeId);
+
+                        _cache.Remove($"{CacheKeyPrefixCargas}{dto.ViajeId}");
                     }
                     else
                     {
                         _logger.LogWarning(
-                            "ModificarCargaAsync: No se encontró documento MongoDB para ViajeId='{ViajeId}'.",
-                            dto.ViajeId);
+                            "ModificarCargaAsync: Barcaza '{BarcazaId}' no encontrada en la última etapa del documento MongoDB '{DocId}'.",
+                            id, doc.Id);
                     }
                 }
                 catch (Exception mongoEx)

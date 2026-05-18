@@ -6,7 +6,6 @@ import { ModalPersonalExterno } from './ModalPersonalExterno';
 import CargasModal from '../cargas/CargasModal';
 import { BotonZarpar } from '../BotonZarpar';
 import { BotonAmarrar, BotonFondear, BotonReanudar } from '../BotonesAccionViaje';
-import PanelGestionConvoy from '../convoy/PanelGestionConvoy';
 import { useFinalizar } from '../../hooks/useAccionesViaje';
 
 const PAGE_SIZE = 10;
@@ -133,13 +132,31 @@ interface ModalCargasState extends ModalViajeState {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function ViajesDashboard() {
+interface ViajesDashboardProps {
+  /** Viaje seleccionado en la grilla (controlado por ViajesPage). */
+  selectedViajeId?: string | null;
+  /** Notifica al padre cuando el usuario selecciona una fila. */
+  onViajeSelected?: (viajeId: string | null) => void;
+}
+
+export default function ViajesDashboard({
+  selectedViajeId: selectedViajeIdProp = null,
+  onViajeSelected,
+}: ViajesDashboardProps) {
   const [page, setPage] = useState(1);
   const [filtro, setFiltro] = useState('');
   const [debouncedFiltro, setDebouncedFiltro] = useState('');
 
-  // Estado para el viaje seleccionado en la tabla (alimenta PanelGestionConvoy)
-  const [viajeSeleccionadoId, setViajeSeleccionadoId] = useState<string | null>(null);
+  const [viajeSeleccionadoIdLocal, setViajeSeleccionadoIdLocal] = useState<string | null>(null);
+  const viajeSeleccionadoId = onViajeSelected ? selectedViajeIdProp : viajeSeleccionadoIdLocal;
+
+  const setViajeSeleccionadoId = (id: string | null) => {
+    if (onViajeSelected) {
+      onViajeSelected(id);
+    } else {
+      setViajeSeleccionadoIdLocal(id);
+    }
+  };
 
   // Debounce: espera 500ms tras el último cambio del filtro antes de disparar la query.
   // Cuando el valor debounced cambia, se resetea la página a 1 para evitar que el usuario
@@ -349,28 +366,6 @@ export default function ViajesDashboard() {
         />
       )}
 
-      {/* GESTIÓN DE CONVOYES — Alimentado por la fila seleccionada en la grilla */}
-      <div className="mt-10 border-t-4 border-dashed border-gray-200 pt-8">
-        <div className="mb-4 px-2 flex items-center gap-2">
-          <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-1 rounded">
-            REAL-TIME
-          </span>
-          <h3 className="text-lg font-bold text-gray-700">
-            Gestión de Convoy (Data Orquestada)
-          </h3>
-        </div>
-
-        {viajeSeleccionadoId === null ? (
-          <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white py-14 text-center text-gray-500">
-            <span className="text-4xl">🚢</span>
-            <p className="text-sm font-medium">
-              Seleccione un buque de la lista superior para gestionar su convoy.
-            </p>
-          </div>
-        ) : (
-          <PanelGestionConvoy viajeId={viajeSeleccionadoId} />
-        )}
-      </div>
     </div>
   );
 }

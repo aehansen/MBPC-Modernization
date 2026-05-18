@@ -177,27 +177,20 @@ public sealed class ConvoyManagerService : IConvoyManagerService
             .Select(id => new BarcazaMongo { Nombre = id, Carga = "A Definir", Cantidad = 0 })
             .ToList();
 
-        var barcazasCombinadas = (etapaAnterior.Barcazas ?? []).Concat(barcazasNuevas).ToList();
+        // FIX HITO 10.5: En lugar de crear una Etapa 2, 3, etc., 
+        // simplemente agregamos las barcazas a la etapa actual (la Etapa 1 si está amarrado).
+        etapaAnterior.Barcazas ??= new List<BarcazaMongo>();
+        etapaAnterior.Barcazas.AddRange(barcazasNuevas);
 
-        var nuevaEtapa = new EtapaMongo
-        {
-            EtapaId     = etapaAnterior.EtapaId + 1,
-            FechaInicio = DateTime.UtcNow,
-            Remolcador  = etapaAnterior.Remolcador,
-            Barcazas    = barcazasCombinadas
-        };
-
-        detalle.Etapas!.Add(nuevaEtapa);
-
-        // 🔥 IMPORTANTE: Reemplazamos usando el detalle.Id real (el MongoDb ObjectId del detalle), no el de la posición.
+        // 🔥 IMPORTANTE: Reemplazamos usando el detalle.Id real (el MongoDb ObjectId del detalle).
         await _detallesCollection.ReplaceOneAsync(
             Builders<ViajeDetalleMongo>.Filter.Eq(x => x.Id, detalle.Id),
             detalle,
             cancellationToken: ct);
 
         _logger.LogInformation(
-            "AdjuntarBarcazasAsync: Nueva EtapaId={EtapaId} persistida en MongoDB para ViajeId={ViajeId}.",
-            nuevaEtapa.EtapaId, viajeId);
+            "AdjuntarBarcazasAsync: {Count} barcaza(s) adjuntadas a EtapaId={EtapaId} en MongoDB para ViajeId={ViajeId}.",
+            barcazasNuevas.Count, etapaAnterior.EtapaId, viajeId);
 
         _cache.Remove($"cargas_viaje_{viajeId}");
 

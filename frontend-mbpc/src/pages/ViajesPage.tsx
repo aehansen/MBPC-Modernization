@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import ModalAmarrarBarcaza from '../components/ModalAmarrarBarcaza';
-import MapaAIS         from "../MapaAIS.jsx";
+import MapaAIS from "../MapaAIS.jsx";
 import ViajesDashboard from "../components/viajes/ViajesDashboard";
-import ModalHistorico  from "../components/viajes/ModalHistorico";
+import ModalHistorico from "../components/viajes/ModalHistorico";
 import ModalNuevoViaje from "../components/viajes/ModalNuevoViaje";
+import ModalGestionConvoy from "@/components/convoy/ModalGestionConvoy";
 import type { NuevoViajeResponse, NuevoViajeError } from "@/types/viajes.types"; // ← import de tipos para el handler
 
 type Vista = "dashboard" | "mapa";
@@ -11,8 +11,17 @@ type Vista = "dashboard" | "mapa";
 export default function ViajesPage() {
   const [vistaActual, setVistaActual]     = useState<Vista>("dashboard");
   const [showHistorico, setShowHistorico] = useState(false);
-  const [isModalAmarrarOpen, setIsModalAmarrarOpen] = useState(false);
+  const [selectedViajeId, setSelectedViajeId] = useState<string | null>(null);
+  const [isModalConvoyOpen, setIsModalConvoyOpen] = useState(false);
   const [isModalNuevoViajeOpen, setIsModalNuevoViajeOpen] = useState(false);
+
+  const handleAbrirGestionConvoy = () => {
+    if (!selectedViajeId) {
+      alert("Seleccioná un viaje en la grilla antes de gestionar el convoy.");
+      return;
+    }
+    setIsModalConvoyOpen(true);
+  };
 
   const toggleVista = () =>
     setVistaActual((v) => (v === "mapa" ? "dashboard" : "mapa"));
@@ -50,15 +59,15 @@ export default function ViajesPage() {
           )}
         </button>
 
-        {/* ── 2. Amarrar Barcaza ─────────────────────────────────────────── */}
+        {/* ── 2. Gestionar Convoy (contextual por viajeId) ─────────────────── */}
         <button
-          onClick={() => setIsModalAmarrarOpen(true)}
+          onClick={handleAbrirGestionConvoy}
           className="flex items-center gap-1.5 px-4 py-1.5 bg-[#104a8e] hover:bg-[#1a5fa8] text-white text-xs font-semibold rounded transition border border-blue-600"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
-          Amarrar Barcaza
+          Gestionar Convoy
         </button>
 
         {/* ── 3. Nuevo Viaje ─────────────────────────────────────────────── */}
@@ -105,7 +114,10 @@ export default function ViajesPage() {
         </div>
       ) : (
         <div className="flex-grow p-6 md:p-8 space-y-8">
-          <ViajesDashboard />
+          <ViajesDashboard
+            selectedViajeId={selectedViajeId}
+            onViajeSelected={setSelectedViajeId}
+          />
         </div>
       )}
 
@@ -116,9 +128,10 @@ export default function ViajesPage() {
         <ModalHistorico onClose={() => setShowHistorico(false)} />
       )}
 
-      <ModalAmarrarBarcaza 
-        isOpen={isModalAmarrarOpen} 
-        onClose={() => setIsModalAmarrarOpen(false)} 
+      <ModalGestionConvoy
+        isOpen={isModalConvoyOpen}
+        onClose={() => setIsModalConvoyOpen(false)}
+        viajeId={selectedViajeId ?? ""}
       />
 
       <ModalNuevoViaje
