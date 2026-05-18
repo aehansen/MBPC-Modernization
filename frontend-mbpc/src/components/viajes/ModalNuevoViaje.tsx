@@ -5,9 +5,10 @@
 // Tailwind CSS para estilos, y el hook useNuevoViaje para la mutación.
 // ──────────────────────────────────────────────────────────────────────────────
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect } from "react";
 import { useForm, type SubmitHandler } from "react-hook-form";
 import { useNuevoViaje } from "@/hooks/useNuevoViaje";
+import EmbarcacionSelect from "@/components/viajes/EmbarcacionSelect";
 import {
   DeclaracionMalvinasEnum,
   DECLARACION_MALVINAS_LABELS,
@@ -16,16 +17,6 @@ import {
   type NuevoViajeResponse,
   type NuevoViajeError,
 } from "@/types/viajes.types";
-
-// ─── Tipos Locales ────────────────────────────────────────────────────────────
-
-interface BuqueAutocomplete {
-  idBuque: number;
-  nombre: string;
-  matricula: string;
-  omi: string;
-  tipo: string;
-}
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -142,6 +133,7 @@ export function ModalNuevoViaje({
   } = useForm<NuevoViajeFormValues>({
     defaultValues: {
       buqueId: undefined as unknown as number,
+      NombreBuque: "",
       origen: "",
       destino: "",
       proximoPuntoControl: "",
@@ -159,20 +151,10 @@ export function ModalNuevoViaje({
 
   const { mutate, isPending } = useNuevoViaje();
 
-  // Estados locales para el autocompletado del buque
-  const [buqueSearchTerm, setBuqueSearchTerm] = useState("");
-  const [buqueSuggestions, setBuqueSuggestions] = useState<BuqueAutocomplete[]>([]);
-  const [showBuqueDropdown, setShowBuqueDropdown] = useState(false);
-  const [isLoadingBuques, setIsLoadingBuques] = useState(false);
-  const buqueDropdownRef = useRef<HTMLDivElement>(null);
-
   // Resetear el formulario cuando el modal se cierra
   useEffect(() => {
     if (!isOpen) {
       reset();
-      setBuqueSearchTerm("");
-      setBuqueSuggestions([]);
-      setShowBuqueDropdown(false);
     }
   }, [isOpen, reset]);
 
@@ -186,68 +168,13 @@ export function ModalNuevoViaje({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen, isPending, onClose]);
 
-  // ─── FIX: Race Condition en handleClickOutside ────────────────────────────
-  // El listener de mousedown SOLO se registra cuando el dropdown está abierto.
-  // Esto evita que el evento se dispare antes de que React renderice la lista
-  // y evalúe contains() como false, cerrando el dropdown antes de que se abra.
-  useEffect(() => {
-    if (!showBuqueDropdown) return;
-
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        buqueDropdownRef.current &&
-        !buqueDropdownRef.current.contains(event.target as Node)
-      ) {
-        setShowBuqueDropdown(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [showBuqueDropdown]);
-
-  // Efecto Debounce para buscar buques con token JWT
-  useEffect(() => {
-    const delayDebounceFn = setTimeout(async () => {
-      if (buqueSearchTerm.trim().length >= 2) {
-        setIsLoadingBuques(true);
-        try {
-          // 👉 EL CAMBIO CLAVE: Usamos la llave exacta que descubriste
-          const token = localStorage.getItem("mbpc_token");
-
-          const res = await fetch(
-            `/api/buques/autocomplete?query=${encodeURIComponent(buqueSearchTerm)}`,
-            {
-              headers: {
-                Authorization: `Bearer ${token}`,
-              },
-            }
-          );
-          if (res.ok) {
-            const data: BuqueAutocomplete[] = await res.json();
-            setBuqueSuggestions(data);
-            setShowBuqueDropdown(true);
-          }
-        } catch (error) {
-          console.error("Error buscando buques:", error);
-        } finally {
-          setIsLoadingBuques(false);
-        }
-      } else {
-        setBuqueSuggestions([]);
-        setShowBuqueDropdown(false);
-      }
-    }, 400);
-
-    return () => clearTimeout(delayDebounceFn);
-  }, [buqueSearchTerm]);
-
   // Leer FechaPartida para validar que ETA sea posterior
   const fechaPartidaValue = watch("fechaPartida");
 
   const onSubmit: SubmitHandler<NuevoViajeFormValues> = (formValues) => {
     const payload: NuevoViajeRequest = {
       buqueId: Number(formValues.buqueId),
-      nombreBuque: buqueSearchTerm || undefined,
+      nombreBuque: formValues.NombreBuque || undefined,
       origen: formValues.origen,
       destino: formValues.destino,
       proximoPuntoControl: formValues.proximoPuntoControl,
@@ -286,15 +213,13 @@ export function ModalNuevoViaje({
       aria-modal="true"
       aria-labelledby="modal-nuevo-viaje-title"
       // 🔥 Atajo CTRL+S / CMD+S capturado como Evento Sintético de React.
-      // Al estar en el árbol de React, se delega en #root y no compite
-      // con los listeners nativos del window/document del navegador.
       onKeyDown={(e) => {
         const isS = e.key === "s" || e.key === "S" || e.nativeEvent.code === "KeyS";
         const isModifier = e.ctrlKey || e.metaKey;
 
         if (isModifier && isS) {
-          e.preventDefault();   // Bloquea la ventana "Guardar página" del navegador
-          e.stopPropagation();  // Evita que otros componentes del árbol reciban el atajo
+          e.preventDefault();
+          e.stopPropagation();
 
           if (!isPending) {
             handleSubmit(onSubmit)();
@@ -381,73 +306,31 @@ export function ModalNuevoViaje({
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4">
 
-              {/* Autocomplete de Buque */}
-              <div className="sm:col-span-2 relative" ref={buqueDropdownRef}>
-                <Label htmlFor="buqueSearchTerm" required>
+              {/* ── Autocomplete de Buque (Hito 10.3) ── */}
+              <div className="sm:col-span-2">
+                <Label htmlFor="emb-busqueda" required>
                   Buque
                 </Label>
-                <input
-                  id="buqueSearchTerm"
-                  type="text"
-                  placeholder="Buscar por nombre, matrícula u OMI..."
-                  disabled={isPending}
-                  autoComplete="off"
-                  className={getInputClass(!!errors.buqueId)}
-                  value={buqueSearchTerm}
-                  onChange={(e) => {
-                    setBuqueSearchTerm(e.target.value);
-                    setValue("buqueId", undefined as unknown as number);
-                  }}
-                  onFocus={() => {
-                    if (buqueSuggestions.length > 0) setShowBuqueDropdown(true);
-                  }}
-                />
+                {/*
+                  Campo oculto registrado en RHF para que la validación de buqueId
+                  funcione correctamente. EmbarcacionSelect llama a setValue al
+                  seleccionar, lo que actualiza este campo y dispara shouldValidate.
+                */}
                 <input
                   type="hidden"
                   {...register("buqueId", {
                     required: "Debe seleccionar un buque de la lista.",
                   })}
                 />
-                <FieldError message={errors.buqueId?.message} />
-
-                {/* Dropdown flotante */}
-                {showBuqueDropdown && (
-                  <div className="absolute z-50 w-full mt-1 bg-slate-800 border border-slate-600 rounded-md shadow-lg max-h-60 overflow-y-auto scrollbar-thin scrollbar-track-slate-800 scrollbar-thumb-slate-600">
-                    {isLoadingBuques ? (
-                      <div className="px-4 py-3 text-sm text-slate-400">
-                        Buscando buques...
-                      </div>
-                    ) : buqueSuggestions.length > 0 ? (
-                      <ul className="py-1">
-                        {buqueSuggestions.map((buque) => (
-                          <li
-                            key={buque.idBuque}
-                            className="px-4 py-2 hover:bg-cyan-600 cursor-pointer transition-colors"
-                            onClick={() => {
-                              setValue("buqueId", buque.idBuque, {
-                                shouldValidate: true,
-                              });
-                              setBuqueSearchTerm(buque.nombre);
-                              setShowBuqueDropdown(false);
-                            }}
-                          >
-                            <div className="text-sm font-semibold text-slate-100">
-                              {buque.nombre}
-                            </div>
-                            <div className="text-xs text-slate-400 mt-0.5">
-                              OMI: {buque.omi || "N/A"} | Matrícula:{" "}
-                              {buque.matricula || "N/A"} | Tipo: {buque.tipo}
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
-                    ) : buqueSearchTerm.trim().length >= 2 ? (
-                      <div className="px-4 py-3 text-sm text-slate-400">
-                        No se encontraron resultados.
-                      </div>
-                    ) : null}
-                  </div>
-                )}
+                <EmbarcacionSelect
+                  onSelect={(b) => {
+                    setValue("buqueId", b.idBuque, { shouldValidate: true });
+                    setValue("NombreBuque", b.nombre);
+                  }}
+                  error={errors.buqueId?.message}
+                  disabled={isPending}
+                  allowedTipos={["buque", "remolcador"]}
+                />
               </div>
 
               {/* Agencia Marítima */}

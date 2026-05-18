@@ -81,9 +81,10 @@ namespace Mbpc.Api.Services
                 return resultado;
             }
             catch (OracleException ex)
-            {
-                return ManejarExcepcionOracle(ex, nameof(BuscarBuquesDisponiblesAsync), query);
-            }
+{
+    // Soporta Buque Motor y Embarcación Menor
+    return ManejarExcepcionOracle(ex, nameof(BuscarBuquesDisponiblesAsync), query, "Buque|Embarcación");
+}
         }
 
         // ── IBuqueService: BuscarBarcazasDisponiblesAsync (solo query, alta de viaje) ─
@@ -273,9 +274,10 @@ namespace Mbpc.Api.Services
 
             if (!string.IsNullOrWhiteSpace(filtroTipoMock))
             {
+                var filtros = filtroTipoMock.Split('|');
                 resultado = resultado.Where(b =>
                     b.Tipo != null &&
-                    b.Tipo.Contains(filtroTipoMock, StringComparison.OrdinalIgnoreCase));
+                    filtros.Any(f => b.Tipo.Contains(f, StringComparison.OrdinalIgnoreCase)));
             }
 
             return resultado.ToList();
