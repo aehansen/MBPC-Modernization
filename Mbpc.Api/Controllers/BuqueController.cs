@@ -25,6 +25,20 @@ public class BuqueController : ControllerBase
         return Ok(resultados);
     }
 
+    [HttpGet("autocomplete/barcazas")]
+    public async Task<IActionResult> AutocompleteBarcazas([FromQuery] string? query)
+    {
+        var resultados = await _buqueService.BuscarBarcazasDisponiblesAsync(query ?? string.Empty);
+        return Ok(resultados);
+    }
+
+    [HttpGet("autocomplete/remolcadores")]
+    public async Task<IActionResult> AutocompleteRemolcadores([FromQuery] string? query)
+    {
+        var resultados = await _buqueService.BuscarRemolcadoresDisponiblesAsync(query ?? string.Empty);
+        return Ok(resultados);
+    }
+
     [HttpGet("barcazas/autocomplete")]
     public async Task<IActionResult> BarcazasAutocomplete([FromQuery] string etapaId, [FromQuery] string? query)
     {

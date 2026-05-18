@@ -26,6 +26,21 @@ namespace Mbpc.Api.Services
         Task<IEnumerable<BuqueAutocompleteDto>> BuscarBuquesDisponiblesAsync(string query);
 
         /// <summary>
+        /// Busca barcazas en el padrón cuyo nombre, matrícula u OMI coincidan parcialmente con
+        /// <paramref name="query"/> (autocompletado para alta de viaje u otros flujos sin etapa).
+        /// Invoca el SP Oracle <c>mbpc.autocomplete_barcazas</c> con <c>vEtapaId</c> en <c>DBNull</c>
+        /// (sin etapa en contexto de alta de viaje) y <c>vQuery</c> + cursor de salida, misma firma que el flujo por etapa.
+        /// </summary>
+        Task<IEnumerable<BuqueAutocompleteDto>> BuscarBarcazasDisponiblesAsync(string query);
+
+        /// <summary>
+        /// Busca remolcadores en el padrón cuyo nombre, matrícula u OMI coincidan parcialmente con
+        /// <paramref name="query"/>.
+        /// Invoca el SP Oracle <c>mbpc.autocomplete_remolcadores</c>.
+        /// </summary>
+        Task<IEnumerable<BuqueAutocompleteDto>> BuscarRemolcadoresDisponiblesAsync(string query);
+
+        /// <summary>
         /// Busca barcazas disponibles para ser asignadas a la etapa indicada,
         /// filtradas por <paramref name="query"/> (nombre o matrícula parcial).
         /// Invoca el SP Oracle <c>mbpc.autocomplete_barcazas</c>.

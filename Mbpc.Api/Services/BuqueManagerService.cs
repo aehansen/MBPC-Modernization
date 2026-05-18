@@ -86,7 +86,96 @@ namespace Mbpc.Api.Services
             }
         }
 
-        // ── IBuqueService: BuscarBarcazasDisponiblesAsync ────────────────────
+        // ── IBuqueService: BuscarBarcazasDisponiblesAsync (solo query, alta de viaje) ─
+
+        /// <inheritdoc/>
+        public async Task<IEnumerable<BuqueAutocompleteDto>> BuscarBarcazasDisponiblesAsync(string query)
+        {
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                _logger.LogDebug("BuscarBarcazasDisponiblesAsync(query): query vacío, retornando lista vacía.");
+                return Enumerable.Empty<BuqueAutocompleteDto>();
+            }
+
+            _logger.LogInformation(
+                "BuscarBarcazasDisponiblesAsync(query) — Consultando SP mbpc.autocomplete_barcazas con vEtapaId=NULL, query='{Query}'.",
+                query);
+
+            try
+            {
+                using var connection = new OracleConnection(_oracleConnectionString);
+                await connection.OpenAsync();
+
+                var spParams = new OracleDynamicParameters();
+                // Misma firma que el SP legacy: vEtapaId + vQuery + vCursor. Sin etapa (alta de viaje)
+                // enviamos DBNull para que Oracle no falle por PLS-00306 y el SP ignore el filtro de etapa.
+                spParams.Add("vEtapaId", DBNull.Value, OracleDbType.Varchar2, ParameterDirection.Input);
+                spParams.Add("vQuery", query, OracleDbType.Varchar2, ParameterDirection.Input);
+                spParams.Add("vCursor", OracleDbType.RefCursor, ParameterDirection.Output);
+
+                var rows = await connection.QueryAsync<BuqueAutocompleteDto>(
+                    "mbpc.autocomplete_barcazas",
+                    spParams,
+                    commandType: CommandType.StoredProcedure);
+
+                var resultado = rows.ToList();
+
+                _logger.LogInformation(
+                    "BuscarBarcazasDisponiblesAsync(query) — {Count} barcaza(s) encontrada(s) para query='{Query}'.",
+                    resultado.Count, query);
+
+                return resultado;
+            }
+            catch (OracleException ex)
+            {
+                return ManejarExcepcionOracle(ex, nameof(BuscarBarcazasDisponiblesAsync), query, "Barcaza");
+            }
+        }
+
+        // ── IBuqueService: BuscarRemolcadoresDisponiblesAsync ─────────────────────
+
+        /// <inheritdoc/>
+        public async Task<IEnumerable<BuqueAutocompleteDto>> BuscarRemolcadoresDisponiblesAsync(string query)
+        {
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                _logger.LogDebug("BuscarRemolcadoresDisponiblesAsync: query vacío, retornando lista vacía.");
+                return Enumerable.Empty<BuqueAutocompleteDto>();
+            }
+
+            _logger.LogInformation(
+                "BuscarRemolcadoresDisponiblesAsync — Consultando SP mbpc.autocomplete_remolcadores con query='{Query}'.",
+                query);
+
+            try
+            {
+                using var connection = new OracleConnection(_oracleConnectionString);
+                await connection.OpenAsync();
+
+                var spParams = new OracleDynamicParameters();
+                spParams.Add("vQuery", query, OracleDbType.Varchar2, ParameterDirection.Input);
+                spParams.Add("vCursor", OracleDbType.RefCursor, ParameterDirection.Output);
+
+                var rows = await connection.QueryAsync<BuqueAutocompleteDto>(
+                    "mbpc.autocomplete_remolcadores",
+                    spParams,
+                    commandType: CommandType.StoredProcedure);
+
+                var resultado = rows.ToList();
+
+                _logger.LogInformation(
+                    "BuscarRemolcadoresDisponiblesAsync — {Count} remolcador(es) encontrado(s) para query='{Query}'.",
+                    resultado.Count, query);
+
+                return resultado;
+            }
+            catch (OracleException ex)
+            {
+                return ManejarExcepcionOracle(ex, nameof(BuscarRemolcadoresDisponiblesAsync), query, "Remolcador");
+            }
+        }
+
+        // ── IBuqueService: BuscarBarcazasDisponiblesAsync (etapa + query) ─────────
 
         /// <inheritdoc/>
         public async Task<IEnumerable<BuqueAutocompleteDto>> BuscarBarcazasDisponiblesAsync(
@@ -142,7 +231,7 @@ namespace Mbpc.Api.Services
 
         // ── Helper Privado: Resiliencia en Desarrollo ────────────────────────
 
-/// <summary>
+        /// <summary>
         /// Centraliza el manejo de OracleException para los métodos de lectura.
         /// En desarrollo, loguea una advertencia y retorna la lista mockeada 
         /// con datos reales de Mongo, filtrada según la búsqueda.
@@ -150,7 +239,8 @@ namespace Mbpc.Api.Services
         private IEnumerable<BuqueAutocompleteDto> ManejarExcepcionOracle(
             OracleException ex,
             string metodo,
-            string contexto)
+            string contexto,
+            string? filtroTipoMock = null)
         {
             if (!_env.IsDevelopment())
             {
@@ -159,22 +249,36 @@ namespace Mbpc.Api.Services
             }
 
             // 1. Extraemos el texto que escribiste en el frontend
-            string query = contexto.Contains("query=") 
-                ? contexto.Split("query=")[1].Trim() 
+            string query = contexto.Contains("query=")
+                ? contexto.Split("query=")[1].Trim()
                 : contexto.Trim();
 
             _logger.LogWarning("Oracle Offline. Usando MOCK de 100 buques filtrado por: '{Query}'", query);
 
             var mockDb = ObtenerMockDb();
 
-            // 3. Filtramos la lista para que el autocompletado funcione de verdad
-            if (string.IsNullOrWhiteSpace(query)) return mockDb;
+            IEnumerable<BuqueAutocompleteDto> resultado;
 
-            return mockDb.Where(b => 
-                (b.Nombre != null && b.Nombre.Contains(query, StringComparison.OrdinalIgnoreCase)) || 
-                (b.Matricula != null && b.Matricula.Contains(query, StringComparison.OrdinalIgnoreCase)) ||
-                (b.Omi != null && b.Omi.Contains(query, StringComparison.OrdinalIgnoreCase))
-            ).ToList();
+            if (string.IsNullOrWhiteSpace(query))
+            {
+                resultado = mockDb;
+            }
+            else
+            {
+                resultado = mockDb.Where(b =>
+                    (b.Nombre != null && b.Nombre.Contains(query, StringComparison.OrdinalIgnoreCase)) ||
+                    (b.Matricula != null && b.Matricula.Contains(query, StringComparison.OrdinalIgnoreCase)) ||
+                    (b.Omi != null && b.Omi.Contains(query, StringComparison.OrdinalIgnoreCase)));
+            }
+
+            if (!string.IsNullOrWhiteSpace(filtroTipoMock))
+            {
+                resultado = resultado.Where(b =>
+                    b.Tipo != null &&
+                    b.Tipo.Contains(filtroTipoMock, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return resultado.ToList();
         }
 
         // ── IBuqueService: ObtenerBuquePorIdAsync ────────────────────────────
