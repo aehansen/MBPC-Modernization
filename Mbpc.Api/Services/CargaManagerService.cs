@@ -920,23 +920,65 @@ namespace Mbpc.Api.Services
         {
             try
             {
-                // SincronizarAmarre necesita el VesselName para la lógica de convoy existente;
-                // se conserva ResolverVesselNameAsync pero se persiste usando Id (no VesselName).
-                string nombreBuque = await ResolverVesselNameAsync(viajeId);
-                var filtro = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, viajeId);
-                var doc = await _detailsCollection.Find(filtro).FirstOrDefaultAsync();
+                using var scope = _serviceProvider.CreateScope();
+                var viajeService = scope.ServiceProvider.GetRequiredService<IViajeService>();
+                var (doc, _)     = await viajeService.GetViajeDetalleByIdAsync(viajeId);
 
-                if (doc is null) return false;
+                if (doc is null)
+                {
+                    var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, viajeId);
+                    doc = await _detailsCollection.Find(filtroId).FirstOrDefaultAsync();
+                }
+
+                if (doc is null)
+                {
+                    _logger.LogWarning(
+                        "SincronizarAmarreConvoyAsync: No se encontró documento MongoDB para ViajeId='{ViajeId}'. " +
+                        "No se actualiza el estado de las barcazas.", viajeId);
+                    return false;
+                }
 
                 var ultimaEtapa = doc.Etapas?.LastOrDefault();
-                if (ultimaEtapa?.Barcazas == null || !ultimaEtapa.Barcazas.Any()) return true;
+                if (ultimaEtapa?.Barcazas == null || !ultimaEtapa.Barcazas.Any())
+                {
+                    _logger.LogDebug(
+                        "SincronizarAmarreConvoyAsync: El viaje '{ViajeId}' no tiene barcazas en la etapa activa. " +
+                        "No hay nada que sincronizar.", viajeId);
+                    return true;
+                }
+
+                var muelleDestino = doc.Destination;
+                if (string.IsNullOrWhiteSpace(muelleDestino))
+                {
+                    FilterDefinition<ViajePosicionMongo> filtroPos;
+                    if (viajeId.Length == 24 && ObjectId.TryParse(viajeId, out var objectId))
+                        filtroPos = Builders<ViajePosicionMongo>.Filter.Eq("_id", objectId);
+                    else
+                    {
+                        var vesselName = await ResolverVesselNameAsync(viajeId);
+                        filtroPos = Builders<ViajePosicionMongo>.Filter.Eq(v => v.VesselName, vesselName);
+                    }
+
+                    var posicion = await _viajesCollection.Find(filtroPos).FirstOrDefaultAsync();
+                    muelleDestino = posicion?.Destination ?? doc.Origin;
+                }
+
+                if (string.IsNullOrWhiteSpace(muelleDestino))
+                {
+                    _logger.LogWarning(
+                        "SincronizarAmarreConvoyAsync: No se pudo determinar muelle destino para el viaje '{ViajeId}'. " +
+                        "Las barcazas sin MuelleActual no se actualizan.", viajeId);
+                    return true;
+                }
 
                 bool modificado = false;
                 foreach (var barcaza in ultimaEtapa.Barcazas)
                 {
-                    if (barcaza.MuelleActual != "Amarre de Convoy")
+                    // Al amarrar el remolcador, las barcazas en tránsito pasan a Amarrada:
+                    // se asigna el muelle de destino si aún no tienen uno.
+                    if (string.IsNullOrWhiteSpace(barcaza.MuelleActual))
                     {
-                        barcaza.MuelleActual = "Amarre de Convoy";
+                        barcaza.MuelleActual = muelleDestino;
                         modificado = true;
                     }
                 }
@@ -945,15 +987,86 @@ namespace Mbpc.Api.Services
                 {
                     var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
                     await _detailsCollection.ReplaceOneAsync(filtroId, doc);
+
                     _cache.Remove($"{CacheKeyPrefixCargas}{viajeId}");
-                    InvalidarCacheViajePorBuque(nombreBuque);
+                    InvalidarCacheViajePorBuque(doc.VesselName);
+
+                    _logger.LogInformation(
+                        "SincronizarAmarreConvoyAsync: Barcazas del viaje '{ViajeId}' actualizadas a Amarrada (MuelleActual → '{Muelle}').",
+                        viajeId, muelleDestino);
                 }
 
                 return true;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error al sincronizar amarre en cascada para el viaje {ViajeId}", viajeId);
+                _logger.LogError(ex,
+                    "Error al sincronizar amarre en cascada para el viaje '{ViajeId}'.", viajeId);
+                return false;
+            }
+        }
+
+        public async Task<bool> SincronizarZarpeConvoyAsync(string viajeId)
+        {
+            try
+            {
+                var viajeService = _serviceProvider.GetRequiredService<IViajeService>();
+                var (doc, _)     = await viajeService.GetViajeDetalleByIdAsync(viajeId);
+
+                if (doc is null)
+                {
+                    var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, viajeId);
+                    doc = await _detailsCollection.Find(filtroId).FirstOrDefaultAsync();
+                }
+
+                if (doc is null)
+                {
+                    _logger.LogWarning(
+                        "SincronizarZarpeConvoyAsync: No se encontró documento MongoDB para ViajeId='{ViajeId}'. " +
+                        "No se actualiza el estado de las barcazas.", viajeId);
+                    return false;
+                }
+
+                var ultimaEtapa = doc.Etapas?.LastOrDefault();
+                if (ultimaEtapa?.Barcazas == null || !ultimaEtapa.Barcazas.Any())
+                {
+                    _logger.LogDebug(
+                        "SincronizarZarpeConvoyAsync: El viaje '{ViajeId}' no tiene barcazas en la etapa activa. " +
+                        "No hay nada que sincronizar.", viajeId);
+                    return true;
+                }
+
+                bool modificado = false;
+                foreach (var barcaza in ultimaEtapa.Barcazas)
+                {
+                    // Al zarpar, las barcazas pasan a EnTransito:
+                    // se limpia el muelle actual (ya no están amarradas).
+                    if (!string.IsNullOrEmpty(barcaza.MuelleActual))
+                    {
+                        barcaza.MuelleActual = null;
+                        modificado = true;
+                    }
+                }
+
+                if (modificado)
+                {
+                    var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
+                    await _detailsCollection.ReplaceOneAsync(filtroId, doc);
+
+                    _cache.Remove($"{CacheKeyPrefixCargas}{viajeId}");
+                    InvalidarCacheViajePorBuque(doc.VesselName);
+
+                    _logger.LogInformation(
+                        "SincronizarZarpeConvoyAsync: Barcazas del viaje '{ViajeId}' actualizadas a EnTransito (MuelleActual → null).",
+                        viajeId);
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Error al sincronizar zarpe en cascada para el viaje '{ViajeId}'.", viajeId);
                 return false;
             }
         }

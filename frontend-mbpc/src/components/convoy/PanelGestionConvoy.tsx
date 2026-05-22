@@ -2,15 +2,12 @@
 // Hito 10.4 — Orquestador principal de convoyes
 
 import { isAxiosError } from 'axios';
-import {
-  useFondearBarcaza,
-  useAdjuntarBarcazas,
-  useSepararConvoy,
-} from '@/hooks/useGestionConvoy';
+import { useAdjuntarBarcazas } from '@/hooks/useGestionConvoy';
 import type { DotNetProblemDetails } from '@/hooks/useGestionConvoy';
 import type { ConvoyDto, EstadoBarcaza } from '@/types/convoy.types';
-import { useState, useRef, useEffect } from 'react';
+import { useState } from 'react';
 import EmbarcacionSelect from "@/components/viajes/EmbarcacionSelect";
+import { ModalSepararBarcaza } from '@/components/convoy/ModalSepararBarcaza';
 
 // ============================================================================
 // DTOs
@@ -49,36 +46,16 @@ export interface PanelGestionConvoyProps {
 // Modal State Types
 // ============================================================================
 
-type AccionModal = 'fondear';
-
-interface EstadoModal {
-  abierto: boolean;
-  accion: AccionModal | null;
-  barcazaId: string | null;
-  barcazaNombre: string;
-  destino: string;
-}
-
 interface EstadoModalSeparar {
   abierto: boolean;
   barcazaId: string;
   barcazaNombre: string;
-  ubicacion: string;
 }
-
-const MODAL_INICIAL: EstadoModal = {
-  abierto: false,
-  accion: null,
-  barcazaId: null,
-  barcazaNombre: '',
-  destino: '',
-};
 
 const MODAL_SEPARAR_INICIAL: EstadoModalSeparar = {
   abierto: false,
   barcazaId: '',
   barcazaNombre: '',
-  ubicacion: '',
 };
 
 // ============================================================================
@@ -139,23 +116,7 @@ function AlertaError({ mensaje, onDismiss }: { mensaje: string; onDismiss: () =>
   );
 }
 
-/* dead code removed in 10.4 — fetch lives in ModalGestionConvoy */
-function _SkeletonHeaderUnused() {
-  return (
-    <div className="bg-slate-800/70 p-5 rounded-xl flex justify-between items-center mb-6 shadow-md animate-pulse border border-slate-700/50">
-      <div className="space-y-2">
-        <div className="h-5 w-48 bg-slate-600/50 rounded-md" />
-        <div className="h-3 w-24 bg-slate-700/50 rounded-md" />
-      </div>
-      <div className="text-right space-y-2">
-        <div className="h-3 w-20 bg-slate-700/50 rounded-md ml-auto" />
-        <div className="h-7 w-28 bg-slate-600/50 rounded-md ml-auto" />
-      </div>
-    </div>
-  );
-}
-
-function SkeletonBarcaza() {
+export function SkeletonBarcaza() {
   return (
     <div className="bg-slate-800/50 rounded-xl border border-slate-700/50 p-5 space-y-3 animate-pulse">
       <div className="flex justify-between items-start">
@@ -177,7 +138,7 @@ function SkeletonBarcaza() {
   );
 }
 
-function ErrorFetchConvoy({ mensaje, onRetry }: { mensaje: string; onRetry: () => void }) {
+export function ErrorFetchConvoy({ mensaje, onRetry }: { mensaje: string; onRetry: () => void }) {
   return (
     <div className="flex flex-col items-center justify-center py-16 gap-4">
       <div className="w-14 h-14 rounded-full bg-red-950/50 border border-red-500/30 flex items-center justify-center">
@@ -251,181 +212,6 @@ function BorradorRow({ embarcacion, onEliminar }: BorradorItem) {
 }
 
 // ============================================================================
-// Modales de Interacción
-// ============================================================================
-
-interface ModalDestinoProps {
-  estado: EstadoModal;
-  isPending: boolean;
-  onChange: (destino: string) => void;
-  onConfirmar: () => void;
-  onCancelar: () => void;
-}
-
-function ModalDestino({ estado, isPending, onChange, onConfirmar, onCancelar }: ModalDestinoProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (estado.abierto) {
-      const t = setTimeout(() => inputRef.current?.focus(), 50);
-      return () => clearTimeout(t);
-    }
-  }, [estado.abierto]);
-
-  useEffect(() => {
-    if (!estado.abierto) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onCancelar();
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [estado.abierto, onCancelar]);
-
-  if (!estado.abierto) return null;
-
-  return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      onClick={(e) => { if (e.target === e.currentTarget) onCancelar(); }}
-    >
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-[3px]" aria-hidden="true" />
-      <div className="relative bg-slate-900 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-700 overflow-hidden">
-        <div className="bg-slate-800 px-6 py-4 flex items-center gap-3 border-b border-slate-700">
-          <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center flex-shrink-0">
-            <svg className="w-5 h-5 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12H3l9-9 9 9h-2M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" />
-            </svg>
-          </div>
-          <div className="min-w-0">
-            <h2 className="font-bold text-base text-slate-100 leading-tight">Fondear Barcaza</h2>
-            {estado.barcazaNombre && (
-              <p className="text-slate-400 text-xs mt-0.5 truncate">{estado.barcazaNombre}</p>
-            )}
-          </div>
-        </div>
-        <div className="px-6 py-5 space-y-4">
-          <div>
-            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-              Zona de fondeo
-            </label>
-            <input
-              ref={inputRef}
-              type="text"
-              value={estado.destino}
-              onChange={(e) => onChange(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && estado.destino.trim() && !isPending) onConfirmar();
-              }}
-              placeholder="Ej: Zona Beta"
-              disabled={isPending}
-              className="w-full border border-slate-600 bg-slate-800 rounded-lg px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500 disabled:opacity-50 transition-colors"
-            />
-          </div>
-          <div className="flex gap-2.5 pt-1">
-            <button
-              onClick={onCancelar}
-              disabled={isPending}
-              className="flex-1 border border-slate-600 text-slate-300 py-2.5 rounded-lg text-sm font-semibold hover:bg-slate-800 disabled:opacity-40 transition-colors"
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={onConfirmar}
-              disabled={isPending || !estado.destino.trim()}
-              className="flex-1 bg-amber-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-amber-500 disabled:opacity-40 flex items-center justify-center gap-1.5 transition-colors"
-            >
-              {isPending ? 'Procesando…' : 'Fondear'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-interface ModalSepararProps {
-  estado: EstadoModalSeparar;
-  isPending: boolean;
-  setEstado: React.Dispatch<React.SetStateAction<EstadoModalSeparar>>;
-  onConfirmar: () => void;
-  onCancelar: () => void;
-}
-
-function ModalSeparar({ estado, isPending, setEstado, onConfirmar, onCancelar }: ModalSepararProps) {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (estado.abierto) {
-      const t = setTimeout(() => inputRef.current?.focus(), 50);
-      return () => clearTimeout(t);
-    }
-  }, [estado.abierto]);
-
-  if (!estado.abierto) return null;
-
-  return (
-    <div
-      role="dialog"
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      onClick={(e) => { if (e.target === e.currentTarget) onCancelar(); }}
-    >
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-[3px]" aria-hidden="true" />
-      <div className="relative bg-slate-900 rounded-2xl shadow-2xl w-full max-w-sm border border-slate-700 overflow-hidden">
-        <div className="bg-red-950/60 border-b border-red-900/60 px-6 py-4 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center flex-shrink-0">
-            <svg className="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </div>
-          <div className="min-w-0">
-            <h2 className="font-bold text-base text-slate-100 leading-tight">Liberar Barcaza</h2>
-            <p className="text-red-400 text-xs mt-0.5 truncate">{estado.barcazaNombre}</p>
-          </div>
-        </div>
-        <div className="px-6 py-5 space-y-4">
-          <p className="text-sm text-slate-400">
-            Estás a punto de liberar <strong className="text-slate-200">{estado.barcazaNombre}</strong> del convoy.
-            ¿Dónde quedará ubicada?
-          </p>
-          <div>
-            <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-              Ubicación final
-            </label>
-            <input
-              ref={inputRef}
-              type="text"
-              value={estado.ubicacion}
-              onChange={(e) => setEstado({ ...estado, ubicacion: e.target.value })}
-              placeholder="Ej: Muelle Principal"
-              disabled={isPending}
-              className="w-full border border-slate-600 bg-slate-800 rounded-lg px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-red-500/40 focus:border-red-500 disabled:opacity-50"
-            />
-          </div>
-          <div className="flex gap-2.5 pt-1">
-            <button
-              onClick={onCancelar}
-              disabled={isPending}
-              className="flex-1 border border-slate-600 text-slate-300 py-2.5 rounded-lg text-sm font-semibold hover:bg-slate-800 disabled:opacity-40 transition-colors"
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={onConfirmar}
-              disabled={isPending || !estado.ubicacion.trim()}
-              className="flex-1 bg-red-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-red-500 disabled:opacity-40 transition-colors"
-            >
-              {isPending ? 'Liberando…' : 'Liberar Barcaza'}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ============================================================================
 // Componente Principal
 // ============================================================================
 
@@ -435,19 +221,19 @@ export default function PanelGestionConvoy({
   onRefreshConvoy,
 }: PanelGestionConvoyProps) {
   const [errorMutacion, setErrorMutacion] = useState<string | null>(null);
-  const [pendingBarcazaId, setPendingBarcazaId] = useState<string | null>(null);
 
   // ─── Estado del Borrador (Hito 10.4) ──────────────────────────────────────
   const [borradorEmbarcaciones, setBorradorEmbarcaciones] = useState<EmbarcacionBorrador[]>([]);
 
   // ─── Estado de los Modales ─────────────────────────────────────────────────
-  const [modal, setModal] = useState<EstadoModal>(MODAL_INICIAL);
   const [modalSeparar, setModalSeparar] = useState<EstadoModalSeparar>(MODAL_SEPARAR_INICIAL);
 
   // ─── Mutaciones ────────────────────────────────────────────────────────────
-  const mutFondear = useFondearBarcaza();
   const mutAdjuntar = useAdjuntarBarcazas();
-  const mutSeparar = useSepararConvoy();
+
+  // ─── Reglas de Negocio Visuales ────────────────────────────────────────────
+  const estadoRemolcador = convoy.remolcador?.estado ?? 'Operativo';
+  const convoyPuedeLiberar = estadoRemolcador.startsWith('Amarrad') || estadoRemolcador.startsWith('Fondead');
 
   // ─── Lógica del Borrador ───────────────────────────────────────────────────
 
@@ -498,67 +284,13 @@ export default function PanelGestionConvoy({
 
   // ─── Apertura de Modales ───────────────────────────────────────────────────
 
-  function abrirModalFondear(barcazaId: string, barcazaNombre: string): void {
-    setErrorMutacion(null);
-    setModal({ abierto: true, accion: 'fondear', barcazaId, barcazaNombre, destino: '' });
-  }
-
   function abrirModalSeparar(barcazaId: string, barcazaNombre: string): void {
-    setErrorMutacion(null);
-    setModalSeparar({ abierto: true, barcazaId, barcazaNombre, ubicacion: '' });
-  }
-
-  function cerrarModales(): void {
-    setModal(MODAL_INICIAL);
-    setModalSeparar(MODAL_SEPARAR_INICIAL);
-  }
-
-  function actualizarDestino(destino: string): void {
-    setModal((prev) => ({ ...prev, destino }));
-  }
-
-  // ─── Confirmación desde el Modal ──────────────────────────────────────────
-
-  function handleConfirmarDestino(): void {
-    if (!modal.barcazaId || !modal.destino.trim() || !modal.accion) return;
-    const { barcazaId, destino } = modal;
-    setPendingBarcazaId(barcazaId);
-    cerrarModales();
-
-    mutFondear.mutate(
-      {
-        barcazaId,
-        viajeId,
-        payload: { zonaFondeo: destino.trim() },
-      },
-      {
-        onSuccess: onRefreshConvoy,
-        onError: (err: unknown) => setErrorMutacion(resolverMensajeError(err as Error)),
-        onSettled: () => setPendingBarcazaId(null),
-      },
-    );
-  }
-
-  function handleConfirmarSeparar(): void {
-    if (!modalSeparar.barcazaId || !modalSeparar.ubicacion.trim()) return;
-    const { barcazaId, ubicacion } = modalSeparar;
-    setPendingBarcazaId(barcazaId);
-    cerrarModales();
-
-    mutSeparar.mutate(
-      { viajeId, payload: { barcazasIds: [barcazaId], ubicacion: ubicacion.trim() } },
-      {
-        onSuccess: onRefreshConvoy,
-        onError: (err: unknown) => setErrorMutacion(resolverMensajeError(err as Error)),
-        onSettled: () => setPendingBarcazaId(null),
-      },
-    );
+    setModalSeparar({ abierto: true, barcazaId, barcazaNombre });
   }
 
   // ─── Derivados ─────────────────────────────────────────────────────────────
 
   const tonelajeTotal = convoy.barcazas.reduce((acc, b) => acc + b.tonelaje, 0);
-  const modalFondearIsPending = modal.abierto && mutFondear.isPending;
   const rawTractorName = convoy.remolcador?.nombre ?? convoy.nombreBuque ?? 'Remolcador Desconocido';
   const tractorVisual = esNumerico(rawTractorName) ? `Remolcador ${rawTractorName}` : rawTractorName;
   const hayBorrador = borradorEmbarcaciones.length > 0;
@@ -569,21 +301,6 @@ export default function PanelGestionConvoy({
 
   return (
     <>
-      <ModalDestino
-        estado={modal}
-        isPending={modalFondearIsPending}
-        onChange={actualizarDestino}
-        onConfirmar={handleConfirmarDestino}
-        onCancelar={cerrarModales}
-      />
-      <ModalSeparar
-        estado={modalSeparar}
-        isPending={mutSeparar.isPending}
-        setEstado={setModalSeparar}
-        onConfirmar={handleConfirmarSeparar}
-        onCancelar={cerrarModales}
-      />
-
       <div className="bg-slate-900 rounded-xl border border-slate-700/60 overflow-hidden font-sans shadow-lg">
         <div className="p-6 space-y-6">
 
@@ -731,7 +448,6 @@ export default function PanelGestionConvoy({
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
                 {convoy.barcazas.map((b) => {
                   const estadoCfg = ESTADO_CONFIG[b.estado] ?? ESTADO_CONFIG.EnTransito;
-                  const isPending = pendingBarcazaId === b.id && (mutSeparar.isPending || mutFondear.isPending);
                   const barcazaVisual = esNumerico(b.nombre)
                     ? (b.matricula ? b.matricula : `BZA-${b.nombre}`)
                     : b.nombre;
@@ -774,22 +490,14 @@ export default function PanelGestionConvoy({
                         </div>
                       </div>
 
-                      <div className="flex gap-2 pt-2 border-t border-slate-700/50">
-                        <button
-                          onClick={() => abrirModalFondear(b.id, barcazaVisual)}
-                          disabled={isPending || b.estado === 'Fondeada'}
-                          className="flex-1 border border-slate-600 text-slate-300 py-1.5 rounded-lg text-xs font-semibold
-                                         hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-                        >
-                          Fondear
-                        </button>
+                      <div className="pt-3 border-t border-slate-700/50">
                         <button
                           onClick={() => abrirModalSeparar(b.id, barcazaVisual)}
-                          disabled={isPending || b.estado !== 'Amarrada'}
-                          className="flex-1 bg-slate-700 text-slate-200 py-1.5 rounded-lg text-xs font-semibold
-                                         hover:bg-slate-600 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                          disabled={!convoyPuedeLiberar}
+                          title={!convoyPuedeLiberar ? "El convoy debe estar Amarrado o Fondeado para liberar" : "Liberar barcaza"}
+                          className="w-full bg-slate-700 text-slate-200 py-2 rounded-lg text-xs font-semibold hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
                         >
-                          {isPending && mutSeparar.isPending ? 'Liberando…' : 'Liberar'}
+                          Liberar del Convoy
                         </button>
                       </div>
                     </div>
@@ -800,6 +508,17 @@ export default function PanelGestionConvoy({
           </section>
         </div>
       </div>
+      <ModalSepararBarcaza
+        isOpen={modalSeparar.abierto}
+        viajeId={viajeId}
+        barcazaId={modalSeparar.barcazaId}
+        barcazaNombre={modalSeparar.barcazaNombre}
+        onClose={() => setModalSeparar(MODAL_SEPARAR_INICIAL)}
+        onSuccess={() => {
+          setModalSeparar(MODAL_SEPARAR_INICIAL);
+          onRefreshConvoy();
+        }}
+      />
     </>
   );
 }

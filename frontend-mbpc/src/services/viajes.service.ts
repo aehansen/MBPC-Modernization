@@ -15,6 +15,12 @@ export interface GetViajesParams {
   tamanio: number;
 }
 
+export interface ActualizarPosicionDto {
+  latitud: number;
+  longitud: number;
+  fechaReporte: string; // ISO 8601 string, e.g. "2024-07-01T14:30:00"
+}
+
 const viajesService = {
   getViajes: async (params: GetViajesParams): Promise<ViajeDto[]> => {
     const { data } = await api.get<ViajeDto[]>('/api/viajes', {
@@ -23,7 +29,7 @@ const viajesService = {
         tamanio: params.tamanio,
       },
     });
-    return data; // Retornamos el array directamente
+    return data;
   },
 
   getViajePosicion: async (mmsi: string): Promise<ViajePosicionMongo> => {
@@ -59,7 +65,14 @@ const viajesService = {
   reanudar: async (id: string): Promise<AccionViajeResponse> => {
     const { data } = await api.put<AccionViajeResponse>(`/api/viajes/${id}/reanudar`);
     return data;
-  }
+  },
+
+  actualizarPosicion: async (
+    id: string,
+    dto: ActualizarPosicionDto,
+  ): Promise<void> => {
+    await api.put(`/api/viajes/${id}/posicion`, dto);
+  },
 };
 
 export default viajesService;

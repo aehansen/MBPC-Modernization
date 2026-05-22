@@ -725,14 +725,22 @@ namespace Mbpc.Api.Services
             string id,
             ActualizarPosicionDto dto)
         {
-            var filtroId = Builders<ViajePosicionMongo>.Filter.Eq(p => p.Id, id);
+            _logger.LogInformation(
+                "ActualizarPosicionAsync — Id: '{Id}' | Lat: {Lat} | Lng: {Lng} | FechaReporte: {Fecha}",
+                id, dto.Latitud, dto.Longitud, dto.FechaReporte);
+
+            var filtroId = BuildFiltroViaje(id);
 
             var posicionActual = await _viajesCollection
                 .Find(filtroId)
                 .FirstOrDefaultAsync();
 
             if (posicionActual is null)
+            {
+                _logger.LogWarning(
+                    "ActualizarPosicionAsync: No se encontró posición en last_mbpc para Id '{Id}'.", id);
                 return null;
+            }
 
             double distanciaKm = CalcularHaversineKm(
                 posicionActual.Latitude,  posicionActual.Longitude,
@@ -752,6 +760,11 @@ namespace Mbpc.Api.Services
 
             if (velocidadKn > MAX_VELOCIDAD_KNOTS)
             {
+                _logger.LogWarning(
+                    "ActualizarPosicionAsync: Cinemática inválida para Id '{Id}'. Velocidad: {Vel:F1} kn, " +
+                    "Distancia: {Dist:F2} NM, Δt: {Seg:F0} s.",
+                    id, velocidadKn, distanciaNM, segundosTranscurridos);
+
                 throw new InvalidOperationException(
                     $"Cinemática inválida: velocidad calculada de {velocidadKn:F1} kn supera el límite de " +
                     $"{MAX_VELOCIDAD_KNOTS} kn. " +
@@ -777,10 +790,20 @@ namespace Mbpc.Api.Services
 
             var updateResult = await _viajesCollection.UpdateOneAsync(filtroId, update);
 
+            if (updateResult.MatchedCount == 0)
+            {
+                _logger.LogWarning(
+                    "ActualizarPosicionAsync: UpdateOne no encontró documento para Id '{Id}'.", id);
+                return null;
+            }
+
             if (updateResult.ModifiedCount == 0)
             {
                 _logger.LogWarning(
                     "ActualizarPosicionAsync: UpdateOne no modificó ningún documento para Id '{Id}'.", id);
+                throw new InvalidOperationException(
+                    "Cinemática inválida: la posición no pudo persistirse en la base de datos. " +
+                    "Verifique el identificador del viaje y las coordenadas enviadas.");
             }
 
             var tracklogEntry = new ViajeTracklogMongo
@@ -1081,7 +1104,15 @@ namespace Mbpc.Api.Services
 
                 if (nuevoEstado.Equals(EstadoEtapa.Amarrado.ToString(), StringComparison.OrdinalIgnoreCase))
                 {
+                    _logger.LogInformation(
+                        "CambiarEstadoNavegacionAsync: Disparando sincronización de amarre para convoy del viaje '{Id}'.", id);
                     await _cargaService.SincronizarAmarreConvoyAsync(id);
+                }
+                else if (nuevoEstado.Equals(EstadoEtapa.Navegando.ToString(), StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogInformation(
+                        "CambiarEstadoNavegacionAsync: Disparando sincronización de zarpe (EnTransito) para convoy del viaje '{Id}'.", id);
+                    await _cargaService.SincronizarZarpeConvoyAsync(id);
                 }
 
                 try

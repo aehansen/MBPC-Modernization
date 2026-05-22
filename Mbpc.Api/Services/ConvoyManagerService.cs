@@ -31,7 +31,8 @@ public sealed class ConvoyManagerService : IConvoyManagerService
     private readonly ILogger<ConvoyManagerService> _logger;
     private readonly IMemoryCache                  _cache;
 
-    private readonly IMongoCollection<ViajeDetalleMongo> _detallesCollection;
+    private readonly IMongoCollection<ViajeDetalleMongo>  _detallesCollection;
+    private readonly IMongoCollection<ViajePosicionMongo> _viajesCollection;   // BUG 2 FIX
     private readonly string _oracleConnectionString;
 
     public ConvoyManagerService(
@@ -58,6 +59,7 @@ public sealed class ConvoyManagerService : IConvoyManagerService
 
         var database = mongoClient.GetDatabase(mongoSettings.Value.DatabaseName);
         _detallesCollection = database.GetCollection<ViajeDetalleMongo>(mongoSettings.Value.DetailsMbpcCollectionName);
+        _viajesCollection   = database.GetCollection<ViajePosicionMongo>(mongoSettings.Value.LastMbpcCollectionName); // BUG 2 FIX
 
         _oracleConnectionString = oracleSettings.Value.ConnectionString
                                   ?? throw new ArgumentException("Oracle connection string cannot be null.");
@@ -89,7 +91,55 @@ public sealed class ConvoyManagerService : IConvoyManagerService
         }
 
         var barcazas   = await ResolverBarcazasAsync(viajeId, travelId, detalle);
-        var remolcador = MapearRemolcador(detalle);
+
+        string? estadoNavegacion = null;
+        try
+        {
+            // 1. Alineación exacta con ViajeManagerService.BuildFiltroViaje
+            FilterDefinition<ViajePosicionMongo> filtroPosicion;
+            if (viajeId.Length == 24 && MongoDB.Bson.ObjectId.TryParse(viajeId, out var objectId))
+            {
+                filtroPosicion = Builders<ViajePosicionMongo>.Filter.Eq("_id", objectId);
+            }
+            else
+            {
+                filtroPosicion = Builders<ViajePosicionMongo>.Filter.Eq(v => v.VesselName, viajeId);
+            }
+
+            var posicion = await _viajesCollection.Find(filtroPosicion).FirstOrDefaultAsync(ct);
+
+            // 2. Fallback robusto por si el viajeId pertenecía a la colección de detalles
+            if (posicion == null && !string.IsNullOrWhiteSpace(detalle?.VesselName))
+            {
+                _logger.LogInformation(
+                    "ObtenerConvoy: No se halló posición por ID. Buscando por VesselName='{VesselName}'",
+                    detalle.VesselName);
+                filtroPosicion = Builders<ViajePosicionMongo>.Filter.Eq(v => v.VesselName, detalle.VesselName);
+                posicion = await _viajesCollection.Find(filtroPosicion).FirstOrDefaultAsync(ct);
+            }
+
+            if (posicion != null)
+            {
+                estadoNavegacion = posicion.NavegationStatusDesc;
+                _logger.LogInformation(
+                    "ObtenerConvoy: Estado resuelto exitosamente a '{Estado}' para ViajeId={ViajeId}.",
+                    estadoNavegacion, viajeId);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "ObtenerConvoy: 'posicion' es NULL tras agotar búsquedas para ViajeId={ViajeId}.",
+                    viajeId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "ObtenerConvoy: Excepción al intentar resolver estado de navegación para ViajeId={ViajeId}.",
+                viajeId);
+        }
+
+        var remolcador = MapearRemolcador(detalle, estadoNavegacion);
 
         return new ConvoyDto
         {
@@ -230,9 +280,7 @@ public sealed class ConvoyManagerService : IConvoyManagerService
         if (string.IsNullOrWhiteSpace(request.Ubicacion))
             throw new ValidationException("La ubicación es requerida para separar barcazas.");
 
-        var detalle = await _detallesCollection
-            .Find(Builders<ViajeDetalleMongo>.Filter.Eq(x => x.Id, viajeId))
-            .FirstOrDefaultAsync(ct);
+        var (detalle, travelId) = await _viajeService.GetViajeDetalleByIdAsync(viajeId, ct);
 
         if (detalle is null)
             throw new InvalidOperationException(
@@ -262,7 +310,7 @@ public sealed class ConvoyManagerService : IConvoyManagerService
         detalle.Etapas!.Add(nuevaEtapa);
 
         await _detallesCollection.ReplaceOneAsync(
-            Builders<ViajeDetalleMongo>.Filter.Eq(x => x.Id, viajeId),
+            Builders<ViajeDetalleMongo>.Filter.Eq(x => x.Id, detalle.Id),
             detalle,
             cancellationToken: ct);
 
@@ -295,6 +343,8 @@ public sealed class ConvoyManagerService : IConvoyManagerService
 
         return true;
     }
+
+
 
     private bool ManejarErrorOracle(OracleException ex, string operacion, string viajeId)
     {
@@ -514,17 +564,32 @@ public sealed class ConvoyManagerService : IConvoyManagerService
                               : EstadoBarcaza.Amarrada
         );
 
-    private static RemolcadorConvoyDto? MapearRemolcador(ViajeDetalleMongo? detalle)
+    private static RemolcadorConvoyDto? MapearRemolcador(ViajeDetalleMongo? detalle, string? estadoNavegacion = null)
     {
-        // FIX Hito 6.0: primero intentar el formato canónico nuevo (última etapa).
-        // Si es nulo, hacer fallback a la propiedad raíz legacy "remolcador".
         var remolcador = detalle?.Etapas
                             ?.OrderByDescending(e => e.EtapaId)
                             .FirstOrDefault()
                             ?.Remolcador
                          ?? detalle?.RemolcadorLegacy;
 
-        if (remolcador is null) return null;
+        // Bug Fix: Resolver el estado primero con el valor real
+        var estadoRemolcador = !string.IsNullOrWhiteSpace(estadoNavegacion)
+            ? estadoNavegacion
+            : "Operativo";
+
+        // Si no hay un sub-objeto remolcador, el buque principal ES la cabeza del convoy.
+        // Retornamos el DTO usando VesselName para no perder el estado hacia el frontend.
+        if (remolcador is null)
+        {
+            if (detalle is null) return null;
+
+            return new RemolcadorConvoyDto(
+                Id:          detalle.VesselName ?? "SIN_ID",
+                Nombre:      detalle.VesselName ?? "Desconocido",
+                Estado:      estadoRemolcador,
+                FechaSalida: null
+            );
+        }
 
         var id = remolcador.Matricula
               ?? remolcador.Nombre
@@ -533,7 +598,7 @@ public sealed class ConvoyManagerService : IConvoyManagerService
         return new RemolcadorConvoyDto(
             Id:          id,
             Nombre:      remolcador.Nombre ?? "Desconocido",
-            Estado:      "Operativo",
+            Estado:      estadoRemolcador,
             FechaSalida: null
         );
     }

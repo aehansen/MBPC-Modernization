@@ -22,5 +22,6 @@ namespace Mbpc.Api.Services
         Task<bool> EliminarCargaAsync(string viajeId, string cargaId);
 
         Task<bool> SincronizarAmarreConvoyAsync(string viajeId);
+        Task<bool> SincronizarZarpeConvoyAsync(string viajeId);
     }
 }

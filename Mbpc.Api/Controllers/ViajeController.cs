@@ -367,16 +367,16 @@ namespace Mbpc.Api.Controllers
             {
                 resultado = await _viajeService.ActualizarPosicionAsync(id, dto);
             }
-            catch (InvalidOperationException ex) when (ex.Message.StartsWith("Cinemática inválida"))
+            catch (InvalidOperationException ex)
             {
                 _logger.LogWarning(
                     "ActualizarPosicion bloqueada por cinemática inválida para Id: '{Id}'. Detalle: {Msg}",
                     id, ex.Message);
 
-                return BadRequest(new { mensaje = ex.Message });
+                return BadRequest("El salto de posición es inválido o excede la velocidad máxima permitida.");
             }
 
-            if (resultado == null)
+            if (resultado is null)
             {
                 _logger.LogError(
                     "ActualizarPosicionAsync retornó null para Id: '{Id}' CosteraId: {CosteraId}.",
