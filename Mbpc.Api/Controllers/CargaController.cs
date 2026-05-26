@@ -139,7 +139,7 @@ namespace Mbpc.Api.Controllers
         /// para que el service filtre estrictamente por documento, evitando eliminar la bodega
         /// (ID "0") del viaje incorrecto.
         /// </summary>
-        [HttpDelete("{viajeId}/eliminar/{cargaId}")]
+        [HttpDelete("{viajeId}/{cargaId}")]
         public async Task<ActionResult> EliminarCarga(string viajeId, string cargaId)
         {
             if (string.IsNullOrWhiteSpace(viajeId))

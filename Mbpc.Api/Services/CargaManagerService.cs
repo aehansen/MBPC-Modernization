@@ -272,9 +272,6 @@ namespace Mbpc.Api.Services
                     var tipoCarga = tiposCarga[index];
                     bool esBodega = b.Nombre == "0";
 
-                    var nombreCrudo = barcazasConvoy.FirstOrDefault(bc => bc.Id == b.Nombre)?.Nombre ?? b.Nombre;
-                    var nombreReal  = ResolverNombreDisplay(nombreCrudo, b.Matricula);
-
                     string descripcion;
                     string nivelRiesgo = tipoCarga?.EsPeligrosa == true ? "Alto" : "Bajo";
                     string cargaNombre = !string.IsNullOrWhiteSpace(b.Carga) && b.Carga != "A Definir" 
@@ -285,13 +282,20 @@ namespace Mbpc.Api.Services
                     {
                         descripcion = $"Bodega - {cargaNombre} ({b.Cantidad} {b.Unidad})";
                     }
-                    else if (long.TryParse(nombreCrudo, out _))
-                    {
-                        descripcion = $"Barcaza Mat. {b.Matricula ?? "S/N"} - {cargaNombre} ({b.Cantidad} {b.Unidad})";
-                    }
                     else
                     {
-                        descripcion = $"{nombreReal} - {cargaNombre} ({b.Cantidad} {b.Unidad})";
+                        var etiquetaBarcaza = string.IsNullOrWhiteSpace(b.Matricula) ? b.Nombre : b.Matricula;
+
+                        if (long.TryParse(etiquetaBarcaza, out long barcazaIdNum)
+                            && catalogoBarcazas.TryGetValue(barcazaIdNum, out var barcazaInfo))
+                        {
+                            etiquetaBarcaza = !string.IsNullOrWhiteSpace(barcazaInfo.Matricula)
+                                ? barcazaInfo.Matricula
+                                : barcazaInfo.Nombre;
+                        }
+
+                        descripcion =
+                            $"[Barcaza] {etiquetaBarcaza} - {cargaNombre} ({b.Cantidad} {b.Unidad})";
                     }
 
                     return new CargaDto
@@ -589,17 +593,21 @@ namespace Mbpc.Api.Services
             _logger.LogInformation(
                 "Agregando carga BarcazaId={BarcazaId} al viajeId='{ViajeId}'.", nuevaCarga.BarcazaId, viajeId);
 
-            // ── Fase 0: Buscar el documento MongoDB por Id ────────────────────────────
-            var filtroDoc = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, viajeId);
+            // ── Fase 0: Resolver detalle vía dominio (cruza posición ↔ details por TravelId/VesselName) ──
+            using var scope = _serviceProvider.CreateScope();
+            var viajeService = scope.ServiceProvider.GetRequiredService<IViajeService>();
+
             ViajeDetalleMongo? doc;
+            long travelId;
+
             try
             {
-                doc = await _detailsCollection.Find(filtroDoc).FirstOrDefaultAsync();
+                (doc, travelId) = await viajeService.GetViajeDetalleByIdAsync(viajeId);
             }
             catch (Exception mongoEx)
             {
                 _logger.LogError(mongoEx,
-                    "Error al consultar MongoDB antes de agregar carga al viaje '{ViajeId}'.", viajeId);
+                    "Error al consultar detalle operativo antes de agregar carga al viaje '{ViajeId}'.", viajeId);
                 return false;
             }
 
@@ -612,10 +620,6 @@ namespace Mbpc.Api.Services
 
                 try
                 {
-                    // 1) Resolver el IdViaje relacional desde el servicio de dominio.
-                    var viajeService = _serviceProvider.GetRequiredService<IViajeService>();
-                    var (detalleViaje, travelId) = await viajeService.GetViajeDetalleByIdAsync(viajeId);
-
                     if (travelId <= 0)
                     {
                         _logger.LogError(
@@ -624,14 +628,19 @@ namespace Mbpc.Api.Services
                         return false;
                     }
 
-                    // 2) Obtener cargas actuales de Oracle para seed inicial
+                    FilterDefinition<ViajePosicionMongo> filtroPosicion =
+                        viajeId.Length == 24 && ObjectId.TryParse(viajeId, out var objectId)
+                            ? Builders<ViajePosicionMongo>.Filter.Eq("_id", objectId)
+                            : Builders<ViajePosicionMongo>.Filter.Eq(v => v.VesselName, viajeId);
+
+                    var posicion = await _viajesCollection.Find(filtroPosicion).FirstOrDefaultAsync();
+
                     var cargasOracle = (await ObtenerCargasPorViaje(travelId.ToString())).ToList();
 
                     _logger.LogInformation(
                         "AgregarCargaAsync: Hidratación — {Count} carga(s) encontrada(s) en Oracle " +
                         "para TravelId={TravelId}.", cargasOracle.Count, travelId);
 
-                    // 3) Mapear las cargas de Oracle a BarcazaMongo
                     var barcazasHidratadas = cargasOracle
                         .Select(c => new BarcazaMongo
                         {
@@ -644,12 +653,10 @@ namespace Mbpc.Api.Services
                         })
                         .ToList();
 
-                    // 4) Construir el documento base y persistirlo.
                     doc = new ViajeDetalleMongo
                     {
-                        Id         = viajeId, // <--- ¡ESTA ES LA LÍNEA MÁGICA QUE FALTABA!
                         IdViaje    = travelId,
-                        VesselName = detalleViaje?.VesselName,
+                        VesselName = posicion?.VesselName,
                         Etapas = new List<EtapaMongo>
                         {
                             new EtapaMongo
@@ -664,7 +671,8 @@ namespace Mbpc.Api.Services
 
                     _logger.LogInformation(
                         "AgregarCargaAsync: Documento hidratado insertado en MongoDB con Id='{DocId}' " +
-                        "para ViajeId='{ViajeId}'.", doc.Id, viajeId);
+                        "(posición ViajeId='{ViajeId}', TravelId={TravelId}).",
+                        doc.Id, viajeId, travelId);
                 }
                 catch (Exception hydrationEx)
                 {
@@ -824,6 +832,69 @@ namespace Mbpc.Api.Services
             return exitoOracle;
         }
 
+        private async Task<bool> EliminarCargaDesdeMongoDb(string viajeId, string cargaId)
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var viajeService = scope.ServiceProvider.GetRequiredService<IViajeService>();
+
+            ViajeDetalleMongo? doc;
+            try
+            {
+                (doc, _) = await viajeService.GetViajeDetalleByIdAsync(viajeId);
+            }
+            catch (Exception mongoEx)
+            {
+                _logger.LogError(
+                    mongoEx,
+                    "EliminarCargaDesdeMongoDb: Error al consultar MongoDB para ViajeId='{ViajeId}', CargaId='{CargaId}'.",
+                    viajeId, cargaId);
+                return false;
+            }
+
+            if (doc is null)
+            {
+                _logger.LogWarning(
+                    "EliminarCargaDesdeMongoDb: No se encontró documento con carga '{CargaId}' en viaje '{ViajeId}'.",
+                    cargaId, viajeId);
+                return false;
+            }
+
+            var ultimaEtapa = doc.Etapas?.LastOrDefault();
+            if (ultimaEtapa?.Barcazas is null)
+            {
+                _logger.LogWarning(
+                    "EliminarCargaDesdeMongoDb: El documento '{DocId}' no tiene barcazas en la última etapa.",
+                    doc.Id);
+                return false;
+            }
+
+            int removidos = ultimaEtapa.Barcazas.RemoveAll(b => b.Nombre == cargaId);
+            if (removidos == 0)
+            {
+                _logger.LogWarning(
+                    "EliminarCargaDesdeMongoDb: La carga '{CargaId}' no estaba en la última etapa del documento '{DocId}'.",
+                    cargaId, doc.Id);
+                return false;
+            }
+
+            var filtroPersistir = Builders<ViajeDetalleMongo>.Filter.Eq(x => x.Id, doc.Id);
+            var replaceResult   = await _detailsCollection.ReplaceOneAsync(filtroPersistir, doc);
+
+            if (replaceResult.ModifiedCount == 0 && replaceResult.MatchedCount == 0)
+            {
+                _logger.LogWarning(
+                    "EliminarCargaDesdeMongoDb: ReplaceOne no persistió la eliminación de '{CargaId}' en '{DocId}'.",
+                    cargaId, doc.Id);
+                return false;
+            }
+
+            _logger.LogInformation(
+                "EliminarCargaDesdeMongoDb: Carga '{CargaId}' eliminada del documento '{DocId}' (ViajeId='{ViajeId}').",
+                cargaId, doc.Id, viajeId);
+
+            return true;
+        }
+
         public async Task<bool> EliminarCargaAsync(string viajeId, string cargaId)
         {
             _logger.LogInformation("Eliminando carga '{CargaId}' del viaje '{ViajeId}'.", cargaId, viajeId);
@@ -831,22 +902,24 @@ namespace Mbpc.Api.Services
             if (string.IsNullOrWhiteSpace(viajeId) || string.IsNullOrWhiteSpace(cargaId))
                 return false;
 
-            // ── FASE 1: Consultar MongoDB por Id (scoping seguro) ──
-            // Hito 6.1 — Se elimina el fallback por VesselName.
-            var filtroDoc = Builders<ViajeDetalleMongo>.Filter.Eq(x => x.Id, viajeId);
+            using var scope = _serviceProvider.CreateScope();
+            var viajeService = scope.ServiceProvider.GetRequiredService<IViajeService>();
 
             ViajeDetalleMongo? doc;
             try
             {
-                doc = await _detailsCollection.Find(filtroDoc).FirstOrDefaultAsync();
+                (doc, _) = await viajeService.GetViajeDetalleByIdAsync(viajeId);
             }
             catch (Exception mongoEx)
             {
-                _logger.LogError(mongoEx, "Error al consultar MongoDB antes de eliminar la carga '{CargaId}' del viaje '{ViajeId}'.", cargaId, viajeId);
+                _logger.LogError(
+                    mongoEx,
+                    "EliminarCargaAsync: Error al consultar MongoDB antes de eliminar la carga '{CargaId}' del viaje '{ViajeId}'.",
+                    cargaId, viajeId);
                 return false;
             }
 
-            if (doc == null)
+            if (doc is null)
             {
                 _logger.LogWarning(
                     "EliminarCargaAsync: No se encontró documento MongoDB para ViajeId='{ViajeId}'. Abortando eliminación.",
@@ -856,7 +929,6 @@ namespace Mbpc.Api.Services
 
             long idViajeOracle = doc.IdViaje ?? 0L;
 
-            // ── FASE 2: Llamar a Oracle con scoping doble (p_ID_VIAJE + p_ID_BARCAZA) ──
             bool exitoOracle = false;
 
             try
@@ -867,7 +939,10 @@ namespace Mbpc.Api.Services
                 parameters.Add("p_ID_BARCAZA", cargaId);
                 parameters.Add("p_RESULTADO",  dbType: DbType.Int32, direction: ParameterDirection.Output);
 
-                await connection.ExecuteAsync("PKG_MBPC_CARGAS.SP_ELIMINAR_CARGA", parameters, commandType: CommandType.StoredProcedure);
+                await connection.ExecuteAsync(
+                    "PKG_MBPC_CARGAS.SP_ELIMINAR_CARGA",
+                    parameters,
+                    commandType: CommandType.StoredProcedure);
                 exitoOracle = parameters.Get<int>("p_RESULTADO") == 1;
             }
             catch (OracleException)
@@ -876,26 +951,15 @@ namespace Mbpc.Api.Services
                 exitoOracle = true;
             }
 
-            if (!exitoOracle) return false;
+            if (!exitoOracle)
+                return false;
 
-            // ── FASE 3: Mutar el documento en MongoDB — solo la última etapa (scoping de etapa) ──
             try
             {
-                var ultimaEtapa = doc.Etapas?.LastOrDefault();
+                var exitoMongo = await EliminarCargaDesdeMongoDb(viajeId, cargaId);
 
-                if (ultimaEtapa?.Barcazas == null)
+                if (exitoMongo)
                 {
-                    _logger.LogWarning(
-                        "EliminarCargaAsync: El documento '{DocId}' no tiene etapas con barcazas.",
-                        doc.Id);
-                    return false;
-                }
-
-                int removidos = ultimaEtapa.Barcazas.RemoveAll(b => b.Nombre == cargaId);
-
-                if (removidos > 0)
-                {
-                    await _detailsCollection.ReplaceOneAsync(filtroDoc, doc);
                     _logger.LogInformation(
                         "¡CQRS Exitoso! Carga '{CargaId}' eliminada (IdViaje Oracle={IdViaje}) del documento MongoDB '{DocId}' (ViajeId='{ViajeId}').",
                         cargaId, idViajeOracle, doc.Id, viajeId);
@@ -905,13 +969,16 @@ namespace Mbpc.Api.Services
                 }
 
                 _logger.LogWarning(
-                    "EliminarCargaAsync: Oracle reportó éxito pero la carga '{CargaId}' no fue encontrada en la última etapa del documento MongoDB '{DocId}'.",
-                    cargaId, doc.Id);
+                    "EliminarCargaAsync: Oracle reportó éxito pero MongoDB no eliminó la carga '{CargaId}' del viaje '{ViajeId}'.",
+                    cargaId, viajeId);
                 return false;
             }
             catch (Exception mongoEx)
             {
-                _logger.LogError(mongoEx, "Error al sincronizar eliminación en MongoDB para carga {CargaId}", cargaId);
+                _logger.LogError(
+                    mongoEx,
+                    "Error al sincronizar eliminación en MongoDB para carga '{CargaId}' del viaje '{ViajeId}'.",
+                    cargaId, viajeId);
                 return false;
             }
         }

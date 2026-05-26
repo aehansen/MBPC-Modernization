@@ -139,7 +139,9 @@ namespace Mbpc.Api.Services
 
             foreach (var p in posicionesMongo)
             {
-                var buqueNombre = p.VesselName ?? "DESCONOCIDO";
+                var buqueNombre = !string.IsNullOrWhiteSpace(p.VesselName)
+                    ? p.VesselName
+                    : p.TravelId.ToString();
 
                 // Si VesselName es un ID numérico, consultar el catálogo de buques para obtener el nombre real.
                 if (long.TryParse(buqueNombre, out long buqueId))
@@ -159,7 +161,9 @@ namespace Mbpc.Api.Services
                 {
                     Id                    = p.Id,
                     Buque                 = buqueNombre,
-                    NombreBuque           = p.VesselName ?? p.TravelId.ToString(),
+                    NombreBuque           = !string.IsNullOrWhiteSpace(p.VesselName)
+                        ? p.VesselName
+                        : p.TravelId.ToString(),
                     Ruta                  = $"{p.Origin ?? "Sin Origen"} ➔ {p.Destination ?? "Sin Destino"} | Pos: {Math.Round(p.Latitude, 4)}, {Math.Round(p.Longitude, 4)}",
                     FechaInicioFormateada = p.MsgTime.ToString("dd/MM/yyyy HH:mm"),
                     EstadoActual          = p.NavegationStatusDesc ?? "N/A"
