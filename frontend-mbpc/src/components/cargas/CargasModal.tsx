@@ -419,6 +419,7 @@ export default function CargasModal({
       {/* ── Modales Inyectados ── */}
       {modalAbierto === 'editar' && cargaSeleccionada && (
         <CargaEditModal
+          isOpen={true}
           carga={cargaSeleccionada}
           onClose={cerrarModalAbm}
           onSuccess={handleSuccessAbm}
@@ -427,7 +428,9 @@ export default function CargasModal({
 
       {modalAbierto === 'eliminar' && cargaSeleccionada && (
         <CargaDeleteModal
+          isOpen={true}
           carga={cargaSeleccionada}
+          viajeId={viajeId}
           onClose={cerrarModalAbm}
           onSuccess={handleSuccessAbm}
         />

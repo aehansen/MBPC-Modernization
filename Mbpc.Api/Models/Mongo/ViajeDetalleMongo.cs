@@ -100,6 +100,66 @@ namespace Mbpc.Api.Models.Mongo
         [BsonElement("practicos")]
         [BsonIgnoreIfNull]
         public List<PracticoMongo>? Practicos { get; set; }
+
+        [BsonElement("NotasBitacora")]
+        [BsonIgnoreIfNull]
+        public List<NotaBitacoraMongo>? NotasBitacora { get; set; }
+
+        [BsonElement("Agencias")]
+        [BsonIgnoreIfNull]
+        public List<AgenciaMongo>? Agencias { get; set; }
+
+        [BsonElement("DatosPbip")]
+        [BsonIgnoreIfNull]
+        public DatosPbipMongo? DatosPbip { get; set; }
+    }
+
+    [BsonIgnoreExtraElements]
+    public class AgenciaMongo
+    {
+        [BsonElement("rol")]
+        public string Rol { get; set; } = string.Empty;
+
+        [BsonElement("nombre")]
+        public string Nombre { get; set; } = string.Empty;
+
+        [BsonElement("contacto")]
+        public string Contacto { get; set; } = string.Empty;
+    }
+
+    [BsonIgnoreExtraElements]
+    public class DatosPbipMongo
+    {
+        [BsonElement("contactoOcpm")]
+        public string ContactoOcpm { get; set; } = string.Empty;
+
+        [BsonElement("nroInmarsat")]
+        public string NroInmarsat { get; set; } = string.Empty;
+
+        [BsonElement("arqueoBruto")]
+        public double ArqueoBruto { get; set; }
+
+        [BsonElement("nivelProteccion")]
+        public int NivelProteccion { get; set; }
+    }
+
+    [BsonIgnoreExtraElements]
+    public class NotaBitacoraMongo
+    {
+        [BsonElement("id")]
+        public string Id { get; set; } = string.Empty;
+
+        [BsonElement("texto")]
+        public string Texto { get; set; } = string.Empty;
+
+        [BsonElement("usuario")]
+        public string Usuario { get; set; } = string.Empty;
+
+        [BsonElement("fechaHora")]
+        public DateTime FechaHora { get; set; }
+
+        [BsonElement("categoria")]
+        public string Categoria { get; set; } = string.Empty;
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

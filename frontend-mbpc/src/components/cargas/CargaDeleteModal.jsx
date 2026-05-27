@@ -10,27 +10,38 @@ export default function CargaDeleteModal({ isOpen, onClose, carga, viajeId, onSu
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState(null);
 
+  if (!isOpen) return null;
+
   const handleConfirm = async () => {
     setIsLoading(true);
     setServerError(null);
+
     try {
       const idViajeReal = viajeId || carga?.viajeId;
 
       if (!idViajeReal) {
-        setServerError("Falta el ID del viaje. El componente padre no está pasando el dato correctamente.");
+        setServerError(
+          "Falta el ID del viaje. El componente padre no está pasando el dato correctamente.",
+        );
         setIsLoading(false);
         return;
       }
 
-      // Hito 5.8: Ruta con scoping doble (viajeId + cargaId) para evitar borrado cruzado entre viajes.
-      await cargaApi.delete(`/${idViajeReal}/eliminar/${carga.id}`);
+      if (carga?.id === undefined || carga?.id === null || carga?.id === "") {
+        setServerError("Falta el ID de la carga a eliminar.");
+        setIsLoading(false);
+        return;
+      }
+
+      // Hito 5.8: scoping doble (viajeId + cargaId) para no borrar bodegas "0" de otro viaje.
+      await cargaApi.delete(idViajeReal, String(carga.id));
+
       onSuccess?.();
       onClose?.();
     } catch (err) {
-      const mensaje =
-        err.response?.data?.mensaje ??
-        "No se pudo eliminar la carga. Intentá nuevamente.";
-      setServerError(mensaje);
+      const msg =
+        err.response?.data?.mensaje || err.response?.data || err.message;
+      setServerError(typeof msg === "string" ? msg : "No se pudo eliminar la carga. Intentá nuevamente.");
     } finally {
       setIsLoading(false);
     }
@@ -67,7 +78,7 @@ export default function CargaDeleteModal({ isOpen, onClose, carga, viajeId, onSu
           <p className="text-sm text-slate-600 mb-4">
             ¿Estás seguro que deseás eliminar la carga{" "}
             <strong className="text-slate-800">
-              {carga.descripcionLista || `ID: ${carga.id}`}
+              {carga?.descripcionLista || `ID: ${carga?.id}`}
             </strong>{" "}
             del manifiesto?
             <br />

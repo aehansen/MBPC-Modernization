@@ -18,6 +18,7 @@ using Mbpc.Api.Models;
 using Mbpc.Api.Models.Config;
 using Mbpc.Api.Models.Mongo;
 using Mbpc.Api.Services;
+using Mbpc.Api.Services.Auth;
 
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -64,7 +65,9 @@ public sealed class ViajeManagerServiceTests : IDisposable
     private readonly Mock<ILogger<ViajeManagerService>>              _loggerMock             = new();
     private readonly Mock<IWebHostEnvironment>                       _envMock                = new(MockBehavior.Strict);
     private readonly Mock<IDistributedCache>                         _cacheMock              = new(MockBehavior.Strict);
-    private readonly Mock<IHttpContextAccessor>                      _httpContextAccessorMock = new(MockBehavior.Strict);
+    private readonly Mock<ICosteraUserContext>                       _costeraUserContextMock = new(MockBehavior.Strict);
+    private readonly Mock<ICargaService>                             _cargaServiceMock       = new(MockBehavior.Strict);
+    private readonly Mock<IBuqueService>                             _buqueServiceMock       = new(MockBehavior.Strict);
 
     // ── Configuración compartida ─────────────────────────────────────────────
 
@@ -98,15 +101,9 @@ public sealed class ViajeManagerServiceTests : IDisposable
             .Setup(d => d.GetCollection<ViajeDetalleMongo>(DetailsMbpcCollection, null))
             .Returns(_detallesCollectionMock.Object);
 
-        // HttpContext: usuario con Claim CosteraId = "1"
-        var claims    = new[] { new Claim("CosteraId", "1") };
-        var identity  = new ClaimsIdentity(claims, "TestAuth");
-        var principal = new ClaimsPrincipal(identity);
-        var context   = new DefaultHttpContext { User = principal };
-
-        _httpContextAccessorMock
-            .Setup(a => a.HttpContext)
-            .Returns(context);
+        _costeraUserContextMock
+            .Setup(c => c.GetCurrentCosteraId())
+            .Returns(1);
     }
 
     // ── Helpers privados ──────────────────────────────────────────────────────
@@ -133,7 +130,9 @@ public sealed class ViajeManagerServiceTests : IDisposable
             _loggerMock.Object,
             _envMock.Object,
             _cacheMock.Object,
-            _httpContextAccessorMock.Object);
+            _costeraUserContextMock.Object,
+            _cargaServiceMock.Object,
+            _buqueServiceMock.Object);
     }
 
     /// <summary>DTO mínimo válido para crear un viaje en los tests.</summary>
@@ -147,7 +146,8 @@ public sealed class ViajeManagerServiceTests : IDisposable
         FechaPartida          = DateTime.UtcNow.AddHours(1),
         ETA                   = DateTime.UtcNow.AddHours(8),
         ZOE                   = "ZN-01",
-        Posicion              = "-34.60,-58.38",
+        Latitud               = -34.60m,
+        Longitud              = -58.38m,
         RioCanalKmPar         = 100m,
         DeclaracionMalvinas   = DeclaracionMalvinasEnum.NoVieneDeMalvinas_L,
         CosteraId             = "1"

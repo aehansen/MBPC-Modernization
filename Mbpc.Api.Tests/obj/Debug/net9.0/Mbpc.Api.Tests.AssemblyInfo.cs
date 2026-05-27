@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Mbpc.Api.Tests")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+8942ce0057224d08b8cba93aeb9146f4ff4f6fde")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+1db915f10360836f6e5cfa057492f44069a445ad")]
 [assembly: System.Reflection.AssemblyProductAttribute("Mbpc.Api.Tests")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Mbpc.Api.Tests")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

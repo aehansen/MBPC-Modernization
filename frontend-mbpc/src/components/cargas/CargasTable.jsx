@@ -254,6 +254,7 @@ export default function CargasTable({ viajeId }) {
       {/* ── Modal de Edición ── */}
       {modalAbierto === "editar" && cargaSeleccionada && (
         <CargaEditModal
+          isOpen={true}
           carga={cargaSeleccionada}
           onClose={cerrarModal}
           onSuccess={handleSuccess}
@@ -263,7 +264,9 @@ export default function CargasTable({ viajeId }) {
       {/* ── Modal de Eliminación ── */}
       {modalAbierto === "eliminar" && cargaSeleccionada && (
         <CargaDeleteModal
+          isOpen={true}
           carga={cargaSeleccionada}
+          viajeId={viajeId}
           onClose={cerrarModal}
           onSuccess={handleSuccess}
         />
