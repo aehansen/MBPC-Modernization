@@ -39,7 +39,16 @@ namespace Mbpc.Api.Services
             var filtro = Builders<ViajeDetalleMongo>.Filter.Eq(v => v.Id, viajeId);
             var documento = await _detailsCollection.Find(filtro).FirstOrDefaultAsync(ct);
 
-            if (documento == null) return null;
+            if (documento == null)
+            {
+                _logger.LogInformation("No se encontró documento para el viaje {ViajeId} en details_mbpc. Devolviendo DTO vacío listo para usar (Evitando Documento Fantasma).", viajeId);
+                return new ViajeComplementosDto(
+                    ViajeId: viajeId,
+                    NotasBitacora: new(),
+                    Agencias: new(),
+                    DatosPbip: null
+                );
+            }
 
             // Mapeo seguro hacia el DTO consolidado respetando tipado fuerte
             return new ViajeComplementosDto(
@@ -57,34 +66,29 @@ namespace Mbpc.Api.Services
                           ?? _httpContextAccessor.HttpContext?.User?.FindFirstValue("username") 
                           ?? "Operador_PNA";
 
-            var nuevaNota = new NotaBitacoraMongo // Asumiendo tu clase del Paso 1
+            var nuevaNota = new NotaBitacoraMongo
             {
                 Id = Guid.NewGuid().ToString(),
-                Texto = dto.Texto.Trim(),
+                Texto = dto?.Texto?.Trim() ?? string.Empty,
                 Usuario = usuario,
                 FechaHora = DateTime.UtcNow,
-                Categoria = dto.Categoria
+                Categoria = dto?.Categoria?.Trim() ?? "Operacional"
             };
 
-            _logger.LogInformation("Inyectando nota de bitácora auditada para viaje {ViajeId} por usuario {Usuario}.", viajeId, usuario);
+            _logger.LogInformation("Inyectando nota de bitácora auditada para viaje {ViajeId} por usuario {Usuario} (Con soporte Upsert).", viajeId, usuario);
 
             var filtro = Builders<ViajeDetalleMongo>.Filter.Eq(v => v.Id, viajeId);
             var update = Builders<ViajeDetalleMongo>.Update.Push("NotasBitacora", nuevaNota); // Atómico sin Split-Brain
 
-            var resultado = await _detailsCollection.UpdateOneAsync(filtro, update, cancellationToken: ct);
-
-            if (resultado.MatchedCount == 0)
-            {
-                _logger.LogError("Fallo de scoping: No se encontró el documento del viaje {ViajeId} para agregar la nota.", viajeId);
-                throw new KeyNotFoundException($"No se encontró el detalle del viaje con ID {viajeId}");
-            }
+            // IsUpsert = true garantiza la creación del documento raíz si no existía previamente
+            await _detailsCollection.UpdateOneAsync(filtro, update, new UpdateOptions { IsUpsert = true }, cancellationToken: ct);
 
             return new NotaBitacoraDto(nuevaNota.Id, nuevaNota.Texto, nuevaNota.Usuario, nuevaNota.FechaHora, nuevaNota.Categoria);
         }
 
         public async Task ActualizarAgenciasAsync(string viajeId, List<AsignarAgenciaDto> dtos, CancellationToken ct = default)
         {
-            _logger.LogInformation("Actualizando listado de agencias marítimas para el viaje {ViajeId}.", viajeId);
+            _logger.LogInformation("Actualizando listado de agencias marítimas para el viaje {ViajeId} (Con soporte Upsert).", viajeId);
 
             var listaMongo = dtos.Select(dto => new AgenciaMongo 
             { 
@@ -96,12 +100,13 @@ namespace Mbpc.Api.Services
             var filtro = Builders<ViajeDetalleMongo>.Filter.Eq(v => v.Id, viajeId);
             var update = Builders<ViajeDetalleMongo>.Update.Set("Agencias", listaMongo);
 
-            await _detailsCollection.UpdateOneAsync(filtro, update, cancellationToken: ct);
+            // IsUpsert = true garantiza la creación del documento raíz si no existía previamente
+            await _detailsCollection.UpdateOneAsync(filtro, update, new UpdateOptions { IsUpsert = true }, cancellationToken: ct);
         }
 
         public async Task ActualizarDatosPbipAsync(string viajeId, ActualizarDatosPbipDto dto, CancellationToken ct = default)
         {
-            _logger.LogInformation("Actualizando datos de protección marítima PBIP para el viaje {ViajeId}.", viajeId);
+            _logger.LogInformation("Actualizando datos de protección marítima PBIP para el viaje {ViajeId} (Con soporte Upsert).", viajeId);
 
             var datosMongo = new DatosPbipMongo
             {
@@ -114,7 +119,8 @@ namespace Mbpc.Api.Services
             var filtro = Builders<ViajeDetalleMongo>.Filter.Eq(v => v.Id, viajeId);
             var update = Builders<ViajeDetalleMongo>.Update.Set("DatosPbip", datosMongo);
 
-            await _detailsCollection.UpdateOneAsync(filtro, update, cancellationToken: ct);
+            // IsUpsert = true garantiza la creación del documento raíz si no existía previamente
+            await _detailsCollection.UpdateOneAsync(filtro, update, new UpdateOptions { IsUpsert = true }, cancellationToken: ct);
         }
     }
 }

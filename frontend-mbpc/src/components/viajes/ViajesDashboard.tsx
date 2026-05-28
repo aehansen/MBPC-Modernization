@@ -3,6 +3,7 @@ import { useViajes } from '../../hooks/useViajesApi';
 import type { ViajeDto } from '../../types/viajes.types';
 import ModalActualizarPosicion from './ModalActualizarPosicion';
 import { ModalPersonalExterno } from './ModalPersonalExterno';
+import ModalComplementosViaje from './ModalComplementosViaje';
 import CargasModal from '../cargas/CargasModal';
 import { BotonZarpar } from '../BotonZarpar';
 import { BotonAmarrar, BotonFondear, BotonReanudar } from '../BotonesAccionViaje';
@@ -37,6 +38,7 @@ interface AccionesProps {
   viaje: ViajeDto;
   onActualizarPosicion: (viaje: ViajeDto) => void;
   onAbrirPersonal: (viaje: ViajeDto) => void;
+  onAbrirComplementos: (viaje: ViajeDto) => void;
   onVerCargas: (viaje: ViajeDto, opts?: { readOnly?: boolean }) => void;
   onFinalizarViaje: (viaje: ViajeDto) => void;
 }
@@ -45,6 +47,7 @@ function AccionesRow({
   viaje,
   onActualizarPosicion,
   onAbrirPersonal,
+  onAbrirComplementos,
   onVerCargas,
   onFinalizarViaje,
 }: AccionesProps) {
@@ -114,6 +117,13 @@ function AccionesRow({
         title="Ver Cargas"
       >
         {esFinalizado ? '📦 Ver Cargas (Histórico)' : '📦 Cargas'}
+      </button>
+      <button
+        className={`${btnBase} bg-amber-600 text-white border-amber-700 hover:bg-amber-700`}
+        onClick={() => onAbrirComplementos(viaje)}
+        title="Bitácora / PBIP"
+      >
+        📋 Trazabilidad
       </button>
     </div>
   );
@@ -189,12 +199,17 @@ export default function ViajesDashboard({
     isOpen: false,
     viaje: null,
   });
+  const [modalComplementos, setModalComplementos] = useState<ModalViajeState>({
+    isOpen: false,
+    viaje: null,
+  });
 
   const handleAbrirPosicion = (viaje: ViajeDto) => {
     console.log('Abriendo posición para:', viaje.id);
     setModalPosicion({ isOpen: true, viaje });
   };
   const handleAbrirPersonal = (viaje: ViajeDto) => setModalPersonal({ isOpen: true, viaje });
+  const handleAbrirComplementos = (viaje: ViajeDto) => setModalComplementos({ isOpen: true, viaje });
   const handleAbrirCargas = (viaje: ViajeDto, opts?: { readOnly?: boolean }) =>
     setModalCargas({ isOpen: true, viaje, readOnly: opts?.readOnly ?? false });
   const handleFinalizarViaje = (viaje: ViajeDto) => finalizarViaje({ id: viaje.id });
@@ -302,6 +317,7 @@ export default function ViajesDashboard({
                           viaje={viaje}
                           onActualizarPosicion={handleAbrirPosicion}
                           onAbrirPersonal={handleAbrirPersonal}
+                          onAbrirComplementos={handleAbrirComplementos}
                           onVerCargas={handleAbrirCargas}
                           onFinalizarViaje={handleFinalizarViaje}
                         />
@@ -363,6 +379,13 @@ export default function ViajesDashboard({
           viajeNombreBuque={modalCargas.viaje.buque}
           readOnly={modalCargas.readOnly}
           onClose={() => setModalCargas({ isOpen: false, viaje: null, readOnly: false })}
+        />
+      )}
+      {modalComplementos.isOpen && modalComplementos.viaje && (
+        <ModalComplementosViaje
+          isOpen={modalComplementos.isOpen}
+          viajeId={modalComplementos.viaje.id}
+          onClose={() => setModalComplementos({ isOpen: false, viaje: null })}
         />
       )}
 

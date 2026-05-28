@@ -27,6 +27,7 @@ builder.Services.AddMemoryCache();
 builder.Services.AddScoped<ITipoCargaService, TipoCargaManagerService>();
 builder.Services.AddScoped<IChatService, ChatManagerService>();
 builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddScoped<IViajeComplementoService, ViajeComplementoManagerService>();
 builder.Services.AddSwaggerGen(options =>
 {
     options.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
