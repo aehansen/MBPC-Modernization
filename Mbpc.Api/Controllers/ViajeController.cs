@@ -401,6 +401,44 @@ namespace Mbpc.Api.Controllers
             });
         }
 
+        [HttpPut("{id}/transferir")]
+        public async Task<ActionResult> TransferirJurisdiccion(string id, [FromBody] TransferirJurisdiccionDto dto)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var costeraIdClaim = User.FindFirstValue("CosteraId");
+            if (string.IsNullOrWhiteSpace(costeraIdClaim))
+            {
+                _logger.LogWarning(
+                    "TransferirJurisdiccion rechazado: token sin Claim 'CosteraId'. Usuario: {User}",
+                    User.Identity?.Name ?? "desconocido");
+                return Forbid();
+            }
+
+            if (string.IsNullOrWhiteSpace(id))
+                return BadRequest(new { mensaje = "El ID del viaje es requerido." });
+
+            try
+            {
+                var exito = await _viajeService.TransferirJurisdiccionAsync(id, dto);
+                if (!exito)
+                {
+                    return UnprocessableEntity(new { mensaje = $"No se pudo transferir la jurisdicción del viaje '{id}'." });
+                }
+                return Ok(new { mensaje = $"Jurisdicción del viaje '{id}' transferida exitosamente a la Costera {dto.NuevaCosteraId}." });
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(
+                    "TransferirJurisdiccion bloqueado por regla de dominio para Id: '{Id}'. Detalle: {Msg}",
+                    id, ex.Message);
+                return BadRequest(new { mensaje = ex.Message });
+            }
+        }
+
         // ── PERSONAL EXTERNO (Hito 9.0) ──────────────────────────────────────
 
         [HttpGet("{id}/personal")]

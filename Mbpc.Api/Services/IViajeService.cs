@@ -140,5 +140,10 @@ namespace Mbpc.Api.Services
         /// Lee directamente de ViajeDetalleMongo sin caché (foto real).
         /// </summary>
         Task<PersonalViajeDto?> ObtenerPersonalAsync(string viajeId);
+
+        /// <summary>
+        /// Transfiere la jurisdicción de un viaje a otra dependencia (Costera).
+        /// </summary>
+        Task<bool> TransferirJurisdiccionAsync(string id, TransferirJurisdiccionDto dto);
     }
 }

@@ -1094,10 +1094,25 @@ namespace Mbpc.Api.Services
 
         private static FilterDefinition<ViajePosicionMongo> BuildFiltroViaje(string id)
         {
-            if (id.Length == 24 && ObjectId.TryParse(id, out var objectId))
-                return Builders<ViajePosicionMongo>.Filter.Eq("_id", objectId);
+            var filters = new List<FilterDefinition<ViajePosicionMongo>>();
 
-            return Builders<ViajePosicionMongo>.Filter.Eq(v => v.VesselName, id);
+            // 1. Si es un ObjectId válido de Mongo (24 caracteres hexadecimales)
+            if (id.Length == 24 && ObjectId.TryParse(id, out var objectId))
+            {
+                filters.Add(Builders<ViajePosicionMongo>.Filter.Eq("_id", objectId));
+            }
+
+            // 2. Si es numérico, asumimos que nos mandaron el TravelId de Oracle
+            if (long.TryParse(id, out var travelId))
+            {
+                filters.Add(Builders<ViajePosicionMongo>.Filter.Eq("TravelId", travelId));
+            }
+
+            // 3. Por defecto, siempre buscamos también por el nombre del buque
+            filters.Add(Builders<ViajePosicionMongo>.Filter.Eq("VesselName", id));
+
+            // Retornamos un OR: encuentra el viaje si coincide cualquiera de las 3 opciones
+            return Builders<ViajePosicionMongo>.Filter.Or(filters);
         }
 
         private async Task<bool> CambiarEstadoNavegacionAsync(string id, string nuevoEstado)
@@ -1192,6 +1207,114 @@ namespace Mbpc.Api.Services
         }
 
         private static double ToRadians(double grados) => grados * Math.PI / 180.0;
+
+        public async Task<bool> TransferirJurisdiccionAsync(string id, TransferirJurisdiccionDto dto)
+        {
+            var costeraId = _costeraUserContext.GetCurrentCosteraId();
+            var filtroViaje = BuildFiltroViaje(id);
+            
+            var filtroCostera = Builders<ViajePosicionMongo>.Filter.Eq("CosteraId", costeraId);
+            var filtro = Builders<ViajePosicionMongo>.Filter.And(filtroViaje, filtroCostera);
+            var viaje = await _viajesCollection.Find(filtro).FirstOrDefaultAsync();
+            
+            if (viaje == null)
+            {
+                throw new InvalidOperationException($"No se encontró el viaje '{id}' para la jurisdicción actual (Costera {costeraId}).");
+            }
+
+            // Validación de fecha del evento (usando DateTime.UtcNow como referencia)
+            ValidarFechaEvento(DateTime.UtcNow, viaje.MsgTime);
+
+            // Asegurar Transaccionalidad con Oracle (Clonando el doCall legacy)
+            bool exitoOracle = false;
+            try
+            {
+                using var connection = new OracleConnection(_oracleConnectionString);
+                await connection.OpenAsync(); // Necesario abrirla a mano al no usar Dapper acá
+                
+                using var cmd = connection.CreateCommand();
+                cmd.CommandText = "mbpc.pasar_barco";
+                cmd.CommandType = CommandType.StoredProcedure;
+
+                // 1. Replicando los parámetros de la interfaz (Atento a los Varchar2 de legacy)
+                cmd.Parameters.Add(new OracleParameter("vViajeId", OracleDbType.Varchar2, viaje.TravelId.ToString(), ParameterDirection.Input));
+                cmd.Parameters.Add(new OracleParameter("vZonaId", OracleDbType.Varchar2, dto.NuevaCosteraId.ToString(), ParameterDirection.Input));
+                cmd.Parameters.Add(new OracleParameter("vEta", OracleDbType.Varchar2, DateTime.UtcNow.ToString("dd/MM/yyyy HH:mm"), ParameterDirection.Input));
+                cmd.Parameters.Add(new OracleParameter("vLlegada", OracleDbType.Varchar2, DateTime.UtcNow.ToString("dd/MM/yyyy HH:mm"), ParameterDirection.Input));
+                cmd.Parameters.Add(new OracleParameter("vVelocidad", OracleDbType.Decimal, (decimal)(dto.Velocidad ?? 0), ParameterDirection.Input));
+                cmd.Parameters.Add(new OracleParameter("vRumbo", OracleDbType.Decimal, (decimal)(dto.Rumbo ?? 0), ParameterDirection.Input));
+                cmd.Parameters.Add(new OracleParameter("vMuelleId", OracleDbType.Varchar2, dto.MuelleLlegadaBuqueId ?? "0", ParameterDirection.Input));
+                
+                // 2. Replicando la inyección silenciosa del doCall() legacy
+                // Usamos -1000m por defecto como hacía el sistema viejo si fallaba el userId
+                cmd.Parameters.Add(new OracleParameter("usrid", OracleDbType.Decimal, -1000m, ParameterDirection.Input));
+                cmd.Parameters.Add(new OracleParameter("vCursor", OracleDbType.RefCursor, DBNull.Value, ParameterDirection.Output));
+
+                _logger.LogInformation("Ejecutando SP mbpc.pasar_barco en Oracle crudo para TravelId: {TravelId}.", viaje.TravelId);
+                
+                await cmd.ExecuteNonQueryAsync(); // No usamos ExecuteReader porque no necesitamos leer el cursor
+                
+                _logger.LogInformation("SP mbpc.pasar_barco ejecutado con éxito total en Oracle.");
+                exitoOracle = true;
+            }
+            catch (OracleException ex)
+            {
+                if (!_env.IsDevelopment())
+                {
+                    _logger.LogCritical(ex, "ERROR CRÍTICO al ejecutar SP en Oracle para el viaje '{Id}'. Se aborta la actualización en MongoDB.", id);
+                    throw;
+                }
+                
+                _logger.LogWarning("BYPASS DEV: Oracle falló con {Msg}. Simulando éxito para no bloquear Mongo.", ex.Message);
+                exitoOracle = true; 
+            }
+
+            if (!exitoOracle) return false;
+
+            // Actualización en MongoDB tras el éxito de Oracle
+            var updatePosicion = Builders<ViajePosicionMongo>.Update.Set("CosteraId", dto.NuevaCosteraId);
+            var resultPosicion = await _viajesCollection.UpdateOneAsync(filtro, updatePosicion);
+
+            var filtroDetalleBase = viaje.TravelId > 0
+                ? Builders<ViajeDetalleMongo>.Filter.Eq("IdViaje", viaje.TravelId)
+                : Builders<ViajeDetalleMongo>.Filter.Eq("VesselName", viaje.VesselName);
+            
+            var filtroDetalleCostera = Builders<ViajeDetalleMongo>.Filter.Eq("CosteraId", costeraId);
+            var filtroDetalle = Builders<ViajeDetalleMongo>.Filter.And(filtroDetalleBase, filtroDetalleCostera);
+            
+            var updateDetalle = Builders<ViajeDetalleMongo>.Update.Set("CosteraId", dto.NuevaCosteraId);
+            var resultDetalle = await _detallesCollection.UpdateOneAsync(filtroDetalle, updateDetalle);
+
+            _logger.LogInformation("Jurisdicción actualizada con éxito en MongoDB para el viaje '{Id}' a la costera {NuevaCostera}.", id, dto.NuevaCosteraId);
+
+            // Invalidación de caché
+            try
+            {
+                await _redisRetryPolicy.ExecuteAsync(async () =>
+                {
+                    await _cache.RemoveAsync(CacheKeyBarcosEnPuerto(costeraId));
+                    await _cache.RemoveAsync(CacheKeyMapaViajes(costeraId));
+                    await _cache.RemoveAsync(CacheKeyBarcosEnPuerto(dto.NuevaCosteraId));
+                    await _cache.RemoveAsync(CacheKeyMapaViajes(dto.NuevaCosteraId));
+                });
+            }
+            catch (Exception redisEx)
+            {
+                _logger.LogWarning(redisEx, "No se pudo invalidar la caché de Redis tras la transferencia de jurisdicción.");
+            }
+
+            return resultPosicion.ModifiedCount > 0 || resultDetalle.ModifiedCount > 0;
+        }
+
+        private void ValidarFechaEvento(DateTime fecha, DateTime fechaCreacionViaje)
+        {
+            if (fecha < fechaCreacionViaje || fecha > DateTime.UtcNow.AddHours(1))
+            {
+                throw new InvalidOperationException(string.Format(
+                    "La fecha ingresada no es válida. El viaje inició el {0} y la fecha ingresada es {1}. Se debe validar: FECHA_CREACION_VIAJE <= FECHA_INGRESADA <= FECHA_ACTUAL + 1h",
+                    fechaCreacionViaje.ToString("yyyy-MM-dd HH:mm:ss"), fecha.ToString("yyyy-MM-dd HH:mm:ss")));
+            }
+        }
 
         private static string MapDeclaracionMalvinas(DeclaracionMalvinasEnum declaracion)
         {
