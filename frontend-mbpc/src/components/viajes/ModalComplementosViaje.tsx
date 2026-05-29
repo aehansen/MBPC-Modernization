@@ -1,52 +1,20 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import {
   useViajeComplementos,
   useAgregarNotaBitacora,
   useActualizarDatosPbip,
+  useAsignarAgencias,
 } from "../../hooks/viajes/useViajeComplementos";
-
-// ─── TIPOS (espejo de los DTOs del backend) ──────────────────────────────────
-
-interface NotaBitacoraDto {
-  id: string;
-  texto: string;
-  usuario: string;
-  fechaHora: string;
-  categoria: string;
-}
-
-interface AgregarNotaBitacoraDto {
-  texto: string;
-  categoria: string;
-}
-
-interface AgenciaDto {
-  rol: string;
-  nombre: string;
-  contacto: string;
-}
-
-interface DatosPbipDto {
-  contactoOcpm: string;
-  nroInmarsat: string;
-  arqueoBruto: number;
-  nivelProteccion: number;
-}
-
-interface ActualizarDatosPbipDto {
-  contactoOcpm: string;
-  nroInmarsat: string;
-  arqueoBruto: number;
-  nivelProteccion: number;
-}
-
-interface ViajeComplementosDto {
-  viajeId: string;
-  notasBitacora: NotaBitacoraDto[];
-  agencias: AgenciaDto[];
-  datosPbip: DatosPbipDto | null;
-}
+import {
+  NotaBitacora,
+  AgregarNotaBitacoraDto,
+  Agencia,
+  AsignarAgenciaDto,
+  DatosPbip,
+  ActualizarDatosPbipDto,
+  ViajeComplementos,
+} from "../../types/complementos.types";
 
 // ─── PROPS ────────────────────────────────────────────────────────────────────
 
@@ -58,7 +26,6 @@ interface ModalComplementosViajeProps {
 
 // ─── SUB-COMPONENTES ──────────────────────────────────────────────────────────
 
-
 // Categorías disponibles para la bitácora
 const CATEGORIAS_BITACORA = ["Operacional", "Seguridad", "Administrativo", "Técnico", "Otro"];
 
@@ -67,14 +34,13 @@ function TabBitacora({
   notas,
 }: {
   viajeId: string;
-  notas: NotaBitacoraDto[];
+  notas: NotaBitacora[];
 }) {
   const { register, handleSubmit, reset, formState: { errors } } = useForm<AgregarNotaBitacoraDto>({
     defaultValues: { texto: "", categoria: "Operacional" },
   });
 
   const mutation = useAgregarNotaBitacora(viajeId);
-
 
   return (
     <div className="flex flex-col gap-5">
@@ -163,43 +129,278 @@ function TabBitacora({
   );
 }
 
-function TabAgencias({ agencias }: { agencias: AgenciaDto[] }) {
+function TabAgencias({
+  viajeId,
+  agencias,
+}: {
+  viajeId: string;
+  agencias: Agencia[];
+}) {
+  const [draftAgencias, setDraftAgencias] = useState<Agencia[]>(agencias);
+  const [nuevaAgencia, setNuevaAgencia] = useState<Agencia>({
+    rol: "",
+    nombre: "",
+    contacto: "",
+  });
+  // Estado que rastrea qué fila está en modo edición (null = ninguna)
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  // Buffer temporal para los cambios en edición (evita mutar draftAgencias hasta confirmar)
+  const [editBuffer, setEditBuffer] = useState<Agencia>({ rol: "", nombre: "", contacto: "" });
+
+  const mutation = useAsignarAgencias(viajeId);
+
+  // Sincronizar el draft cuando las agencias provistas por el servidor cambian
+  useEffect(() => {
+    setDraftAgencias(agencias);
+    setEditingIndex(null);
+  }, [agencias]);
+
+  const handleAgregar = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (
+      !nuevaAgencia.rol.trim() ||
+      !nuevaAgencia.nombre.trim() ||
+      !nuevaAgencia.contacto.trim()
+    ) {
+      return;
+    }
+    setDraftAgencias([...draftAgencias, { ...nuevaAgencia }]);
+    setNuevaAgencia({ rol: "", nombre: "", contacto: "" });
+  };
+
+  const handleEliminar = (index: number) => {
+    // Si se elimina la fila en edición, limpiar el estado de edición
+    if (editingIndex === index) setEditingIndex(null);
+    setDraftAgencias(draftAgencias.filter((_, i) => i !== index));
+  };
+
+  const handleIniciarEdicion = (index: number) => {
+    setEditingIndex(index);
+    setEditBuffer({ ...draftAgencias[index] });
+  };
+
+  const handleGuardarEdicion = (index: number) => {
+    if (!editBuffer.rol.trim() || !editBuffer.nombre.trim() || !editBuffer.contacto.trim()) return;
+    const updated = draftAgencias.map((ag, i) => (i === index ? { ...editBuffer } : ag));
+    setDraftAgencias(updated);
+    setEditingIndex(null);
+  };
+
+  const handleCancelarEdicion = () => {
+    setEditingIndex(null);
+    setEditBuffer({ rol: "", nombre: "", contacto: "" });
+  };
+
+  const isDirty = JSON.stringify(draftAgencias) !== JSON.stringify(agencias);
+
+  // Clase compartida para los inputs de edición inline (mismo estilo que el formulario de alta)
+  const inputClass =
+    "bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-cyan-500 w-full";
+
   return (
-    <div className="overflow-x-auto">
-      {agencias.length === 0 ? (
-        <p className="text-slate-500 text-sm italic text-center py-6">
-          Sin agencias asignadas.
-        </p>
-      ) : (
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-slate-700">
-              <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider pb-2 pr-4">
-                Rol
-              </th>
-              <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider pb-2 pr-4">
-                Agencia
-              </th>
-              <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider pb-2">
-                Contacto
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-800">
-            {agencias.map((ag, i) => (
-              <tr key={i} className="hover:bg-slate-800/40 transition-colors">
-                <td className="py-2.5 pr-4">
-                  <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-900/50 text-emerald-300 border border-emerald-800/50">
-                    {ag.rol}
-                  </span>
-                </td>
-                <td className="py-2.5 pr-4 text-slate-200 font-medium">{ag.nombre}</td>
-                <td className="py-2.5 text-slate-400">{ag.contacto}</td>
+    <div className="flex flex-col gap-6">
+      {/* Tabla Interactiva */}
+      <div className="overflow-x-auto">
+        {draftAgencias.length === 0 ? (
+          <p className="text-slate-500 text-sm italic text-center py-6">
+            Sin agencias asignadas.
+          </p>
+        ) : (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-slate-700">
+                <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider pb-2 pr-4">
+                  Rol
+                </th>
+                <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider pb-2 pr-4">
+                  Agencia
+                </th>
+                <th className="text-left text-xs font-semibold text-slate-500 uppercase tracking-wider pb-2 pr-4">
+                  Contacto
+                </th>
+                <th className="text-right text-xs font-semibold text-slate-500 uppercase tracking-wider pb-2">
+                  Acciones
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+            </thead>
+            <tbody className="divide-y divide-slate-800">
+              {draftAgencias.map((ag, i) => (
+                <tr
+                  key={i}
+                  className={`transition-colors ${
+                    editingIndex === i ? "bg-slate-800/70" : "hover:bg-slate-800/40"
+                  }`}
+                >
+                  {editingIndex === i ? (
+                    // ── Modo edición: inputs controlados ──────────────────────
+                    <>
+                      <td className="py-2 pr-3">
+                        <input
+                          type="text"
+                          value={editBuffer.rol}
+                          onChange={(e) =>
+                            setEditBuffer({ ...editBuffer, rol: e.target.value })
+                          }
+                          placeholder="Rol"
+                          className={inputClass}
+                        />
+                      </td>
+                      <td className="py-2 pr-3">
+                        <input
+                          type="text"
+                          value={editBuffer.nombre}
+                          onChange={(e) =>
+                            setEditBuffer({ ...editBuffer, nombre: e.target.value })
+                          }
+                          placeholder="Nombre de la Agencia"
+                          className={inputClass}
+                        />
+                      </td>
+                      <td className="py-2 pr-3">
+                        <input
+                          type="text"
+                          value={editBuffer.contacto}
+                          onChange={(e) =>
+                            setEditBuffer({ ...editBuffer, contacto: e.target.value })
+                          }
+                          placeholder="Contacto (Tlf / Email)"
+                          className={inputClass}
+                        />
+                      </td>
+                      <td className="py-2 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleGuardarEdicion(i)}
+                            disabled={
+                              !editBuffer.rol.trim() ||
+                              !editBuffer.nombre.trim() ||
+                              !editBuffer.contacto.trim()
+                            }
+                            className="text-emerald-400 hover:text-emerald-300 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-semibold transition-colors"
+                            title="Confirmar cambios"
+                          >
+                            ✓ Guardar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleCancelarEdicion}
+                            className="text-slate-400 hover:text-slate-200 text-xs font-semibold transition-colors"
+                            title="Cancelar edición"
+                          >
+                            ✕ Cancelar
+                          </button>
+                        </div>
+                      </td>
+                    </>
+                  ) : (
+                    // ── Modo lectura ───────────────────────────────────────────
+                    <>
+                      <td className="py-2.5 pr-4">
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-900/50 text-emerald-300 border border-emerald-800/50">
+                          {ag.rol}
+                        </span>
+                      </td>
+                      <td className="py-2.5 pr-4 text-slate-200 font-medium">{ag.nombre}</td>
+                      <td className="py-2.5 pr-4 text-slate-400">{ag.contacto}</td>
+                      <td className="py-2.5 text-right">
+                        <div className="flex items-center justify-end gap-3">
+                          <button
+                            type="button"
+                            onClick={() => handleIniciarEdicion(i)}
+                            className="text-cyan-400 hover:text-cyan-300 text-xs font-semibold transition-colors"
+                            title="Editar agencia"
+                          >
+                            ✎ Editar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleEliminar(i)}
+                            className="text-red-400 hover:text-red-300 text-xs font-semibold transition-colors"
+                            title="Eliminar agencia"
+                          >
+                            ✕ Eliminar
+                          </button>
+                        </div>
+                      </td>
+                    </>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Formulario de Alta */}
+      <form
+        onSubmit={handleAgregar}
+        className="bg-slate-800/40 border border-slate-700/50 rounded-xl p-4 flex flex-col gap-3"
+      >
+        <p className="text-xs font-semibold text-slate-400 uppercase tracking-widest">
+          Agregar Agencia Interviniente
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <input
+            type="text"
+            placeholder="Rol (Ej: Marítimo, Despachante)"
+            value={nuevaAgencia.rol}
+            onChange={(e) => setNuevaAgencia({ ...nuevaAgencia, rol: e.target.value })}
+            className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+            required
+          />
+          <input
+            type="text"
+            placeholder="Nombre de la Agencia"
+            value={nuevaAgencia.nombre}
+            onChange={(e) => setNuevaAgencia({ ...nuevaAgencia, nombre: e.target.value })}
+            className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+            required
+          />
+          <input
+            type="text"
+            placeholder="Contacto (Tlf / Email)"
+            value={nuevaAgencia.contacto}
+            onChange={(e) => setNuevaAgencia({ ...nuevaAgencia, contacto: e.target.value })}
+            className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+            required
+          />
+        </div>
+        <div className="flex justify-end">
+          <button
+            type="submit"
+            className="bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold rounded-lg px-4 py-2 transition-colors"
+          >
+            ＋ Agregar a la lista
+          </button>
+        </div>
+      </form>
+
+      {/* Persistencia al Backend */}
+      <div className="flex items-center gap-3 pt-4 border-t border-slate-700/50">
+        <button
+          type="button"
+          disabled={mutation.isPending || !isDirty}
+          onClick={() => mutation.mutate(draftAgencias)}
+          className="bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg px-5 py-2 transition-colors flex items-center gap-2"
+        >
+          {mutation.isPending ? (
+            <>
+              <SpinnerIcon /> Guardando…
+            </>
+          ) : (
+            "Guardar Cambios de Agencias"
+          )}
+        </button>
+        {mutation.isSuccess && (
+          <span className="text-emerald-400 text-xs">✓ Agencias actualizadas correctamente.</span>
+        )}
+        {mutation.isError && (
+          <span className="text-red-400 text-xs">
+            Error: {(mutation.error as Error).message}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -215,7 +416,7 @@ function TabPbip({
   datosPbip,
 }: {
   viajeId: string;
-  datosPbip: DatosPbipDto | null;
+  datosPbip: DatosPbip | null;
 }) {
   const {
     register,
@@ -231,7 +432,6 @@ function TabPbip({
   });
 
   const mutation = useActualizarDatosPbip(viajeId);
-
 
   return (
     <form onSubmit={handleSubmit((data) => mutation.mutate(data))} className="flex flex-col gap-4">
@@ -390,8 +590,7 @@ export default function ModalComplementosViaje({
     isLoading,
     isError,
     error,
-  } = useViajeComplementos(viajeId) as any;
-
+  } = useViajeComplementos(viajeId);
 
   if (!isOpen) return null;
 
@@ -479,7 +678,7 @@ export default function ModalComplementosViaje({
                 <TabBitacora viajeId={viajeId} notas={data.notasBitacora} />
               )}
               {activeTab === "agencias" && (
-                <TabAgencias agencias={data.agencias} />
+                <TabAgencias viajeId={viajeId} agencias={data.agencias} />
               )}
               {activeTab === "pbip" && (
                 <TabPbip viajeId={viajeId} datosPbip={data.datosPbip} />

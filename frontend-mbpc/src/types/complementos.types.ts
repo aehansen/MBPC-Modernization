@@ -2,11 +2,13 @@ export interface NotaBitacora {
   id: string;
   texto: string;
   usuario: string;
-  fecha: string;
+  fechaHora: string;
+  categoria: string;
 }
 
 export interface AgregarNotaBitacoraDto {
   texto: string;
+  categoria: string;
 }
 
 export interface Agencia {
@@ -36,10 +38,8 @@ export interface ActualizarDatosPbipDto {
 }
 
 export interface ViajeComplementos {
-  id: string;
-  idViaje: number;
-  vesselName?: string | null;
-  agencias: Agencia[];
-  datosPbip?: DatosPbip | null;
+  viajeId: string;
   notasBitacora: NotaBitacora[];
+  agencias: Agencia[];
+  datosPbip: DatosPbip | null;
 }

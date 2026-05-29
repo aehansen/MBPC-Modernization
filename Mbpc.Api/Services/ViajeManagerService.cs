@@ -669,6 +669,20 @@ namespace Mbpc.Api.Services
 
             try
             {
+                // ─── FASE 3: MONGODB (DETALLES Y COMPLEMENTOS) ───────────────
+                
+                // Si el usuario cargó una agencia en el modal de inicio, la inyectamos como complemento inicial
+                var agenciasIniciales = new List<AgenciaMongo>();
+                if (!string.IsNullOrWhiteSpace(nuevoViaje.AgenciaMaritima))
+                {
+                    agenciasIniciales.Add(new AgenciaMongo
+                    {
+                        Rol = "Agencia Principal",
+                        Nombre = nuevoViaje.AgenciaMaritima.Trim(),
+                        Contacto = "A definir" // Dato por defecto para cumplir con el esquema BSON
+                    });
+                }
+
                 var nuevoDocumentoDetalle = new ViajeDetalleMongo
                 {
                     IdViaje     = travelIdGenerado,
@@ -685,9 +699,10 @@ namespace Mbpc.Api.Services
                             Barcazas    = new List<BarcazaMongo>()
                         }
                     },
+                    Agencias    = agenciasIniciales.Count > 0 ? agenciasIniciales : null,
                     CosteraId   = costeraIdInt
                 };
-
+                
                 await _detallesCollection.InsertOneAsync(nuevoDocumentoDetalle);
 
                 _logger.LogInformation(

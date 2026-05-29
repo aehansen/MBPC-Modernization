@@ -32,27 +32,57 @@ namespace Mbpc.Api.Services
             _logger = logger;
         }
 
+        // Método auxiliar para resolver el TravelId real (long) de forma resiliente (Oracle long vs Mongo ObjectId)
+        private async Task<long?> ResolverTravelIdAsync(string viajeId, CancellationToken ct)
+        {
+            if (long.TryParse(viajeId, out long viajeIdLong))
+            {
+                return viajeIdLong;
+            }
+
+            // Fallback: Si no es long, asumimos que es el ObjectId (string) de MongoDB y buscamos en la colección last_mbpc
+            var database = _detailsCollection.Database;
+            var posicionesCollection = database.GetCollection<ViajePosicionMongo>("last_mbpc");
+            
+            var filtroPosicion = Builders<ViajePosicionMongo>.Filter.Eq(p => p.Id, viajeId);
+            var posicion = await posicionesCollection.Find(filtroPosicion).FirstOrDefaultAsync(ct);
+
+            if (posicion == null)
+            {
+                _logger.LogWarning("No se pudo resolver el TravelId de negocio para el ID provisto: {ViajeId}", viajeId);
+                return null;
+            }
+
+            return posicion.TravelId;
+        }
+
         public async Task<ViajeComplementosDto?> ObtenerComplementosPorViajeIdAsync(string viajeId, CancellationToken ct = default)
         {
-            _logger.LogInformation("Consultando complementos para el viaje {ViajeId} en MongoDB.", viajeId);
-            
-            var filtro = Builders<ViajeDetalleMongo>.Filter.Eq(v => v.Id, viajeId);
-            var documento = await _detailsCollection.Find(filtro).FirstOrDefaultAsync(ct);
+            _logger.LogInformation("Resolviendo complementos para el viaje: {ViajeId}", viajeId);
+
+            var targetTravelId = await ResolverTravelIdAsync(viajeId, ct);
+            if (!targetTravelId.HasValue)
+            {
+                return null;
+            }
+
+            // Consultamos los complementos por el TravelId numérico unificado
+            var filtroDetalle = Builders<ViajeDetalleMongo>.Filter.Eq(v => v.IdViaje, targetTravelId.Value);
+            var documento = await _detailsCollection.Find(filtroDetalle).FirstOrDefaultAsync(ct);
 
             if (documento == null)
             {
-                _logger.LogInformation("No se encontró documento para el viaje {ViajeId} en details_mbpc. Devolviendo DTO vacío listo para usar (Evitando Documento Fantasma).", viajeId);
+                _logger.LogInformation("Viaje {Id} sin detalles previos en details_mbpc. Retornando DTO vacío.", targetTravelId.Value);
                 return new ViajeComplementosDto(
-                    ViajeId: viajeId,
+                    ViajeId: targetTravelId.Value.ToString(),
                     NotasBitacora: new(),
                     Agencias: new(),
                     DatosPbip: null
                 );
             }
 
-            // Mapeo seguro hacia el DTO consolidado respetando tipado fuerte
             return new ViajeComplementosDto(
-                ViajeId: documento.Id,
+                ViajeId: documento.IdViaje?.ToString() ?? targetTravelId.Value.ToString(),
                 NotasBitacora: documento.NotasBitacora?.Select(n => new NotaBitacoraDto(n.Id, n.Texto, n.Usuario, n.FechaHora, n.Categoria)).ToList() ?? new(),
                 Agencias: documento.Agencias?.Select(a => new AgenciaDto(a.Rol, a.Nombre, a.Contacto)).ToList() ?? new(),
                 DatosPbip: documento.DatosPbip != null ? new DatosPbipDto(documento.DatosPbip.ContactoOcpm, documento.DatosPbip.NroInmarsat, documento.DatosPbip.ArqueoBruto, documento.DatosPbip.NivelProteccion) : null
@@ -66,6 +96,13 @@ namespace Mbpc.Api.Services
                           ?? _httpContextAccessor.HttpContext?.User?.FindFirstValue("username") 
                           ?? "Operador_PNA";
 
+            var targetTravelId = await ResolverTravelIdAsync(viajeId, ct);
+            if (!targetTravelId.HasValue)
+            {
+                _logger.LogError("Fallo al agregar nota: No se pudo resolver el TravelId para el viaje {ViajeId}", viajeId);
+                throw new KeyNotFoundException($"No se encontró el viaje correspondiente al ID {viajeId}");
+            }
+
             var nuevaNota = new NotaBitacoraMongo
             {
                 Id = Guid.NewGuid().ToString(),
@@ -75,12 +112,12 @@ namespace Mbpc.Api.Services
                 Categoria = dto?.Categoria?.Trim() ?? "Operacional"
             };
 
-            _logger.LogInformation("Inyectando nota de bitácora auditada para viaje {ViajeId} por usuario {Usuario} (Con soporte Upsert).", viajeId, usuario);
+            _logger.LogInformation("Inyectando nota de bitácora para viaje {ViajeId} (TravelId: {TravelId}) por usuario {Usuario}.", viajeId, targetTravelId.Value, usuario);
 
-            var filtro = Builders<ViajeDetalleMongo>.Filter.Eq(v => v.Id, viajeId);
-            var update = Builders<ViajeDetalleMongo>.Update.Push("NotasBitacora", nuevaNota); // Atómico sin Split-Brain
+            var filtro = Builders<ViajeDetalleMongo>.Filter.Eq(v => v.IdViaje, targetTravelId.Value);
+            var update = Builders<ViajeDetalleMongo>.Update.Push("NotasBitacora", nuevaNota);
 
-            // IsUpsert = true garantiza la creación del documento raíz si no existía previamente
+            // IsUpsert = true garantiza la creación del documento raíz con el IdViaje unificado
             await _detailsCollection.UpdateOneAsync(filtro, update, new UpdateOptions { IsUpsert = true }, cancellationToken: ct);
 
             return new NotaBitacoraDto(nuevaNota.Id, nuevaNota.Texto, nuevaNota.Usuario, nuevaNota.FechaHora, nuevaNota.Categoria);
@@ -88,7 +125,15 @@ namespace Mbpc.Api.Services
 
         public async Task ActualizarAgenciasAsync(string viajeId, List<AsignarAgenciaDto> dtos, CancellationToken ct = default)
         {
-            _logger.LogInformation("Actualizando listado de agencias marítimas para el viaje {ViajeId} (Con soporte Upsert).", viajeId);
+            var targetTravelId = await ResolverTravelIdAsync(viajeId, ct);
+            if (!targetTravelId.HasValue)
+            {
+                _logger.LogError("Fallo al actualizar agencias: No se pudo resolver el TravelId para el viaje {ViajeId}", viajeId);
+                throw new KeyNotFoundException($"No se encontró el viaje correspondiente al ID {viajeId}");
+            }
+
+            _logger.LogInformation("Actualizando agencias para viaje {ViajeId} (TravelId: {TravelId}). Recibidos {Count} elementos.", 
+                viajeId, targetTravelId.Value, dtos.Count);
 
             var listaMongo = dtos.Select(dto => new AgenciaMongo 
             { 
@@ -97,16 +142,23 @@ namespace Mbpc.Api.Services
                 Contacto = dto.Contacto.Trim() 
             }).ToList();
 
-            var filtro = Builders<ViajeDetalleMongo>.Filter.Eq(v => v.Id, viajeId);
+            var filtro = Builders<ViajeDetalleMongo>.Filter.Eq(v => v.IdViaje, targetTravelId.Value);
             var update = Builders<ViajeDetalleMongo>.Update.Set("Agencias", listaMongo);
 
-            // IsUpsert = true garantiza la creación del documento raíz si no existía previamente
+            // IsUpsert = true garantiza la creación del documento raíz con el IdViaje unificado
             await _detailsCollection.UpdateOneAsync(filtro, update, new UpdateOptions { IsUpsert = true }, cancellationToken: ct);
         }
 
         public async Task ActualizarDatosPbipAsync(string viajeId, ActualizarDatosPbipDto dto, CancellationToken ct = default)
         {
-            _logger.LogInformation("Actualizando datos de protección marítima PBIP para el viaje {ViajeId} (Con soporte Upsert).", viajeId);
+            var targetTravelId = await ResolverTravelIdAsync(viajeId, ct);
+            if (!targetTravelId.HasValue)
+            {
+                _logger.LogError("Fallo al actualizar datos PBIP: No se pudo resolver el TravelId para el viaje {ViajeId}", viajeId);
+                throw new KeyNotFoundException($"No se encontró el viaje correspondiente al ID {viajeId}");
+            }
+
+            _logger.LogInformation("Actualizando datos PBIP para el viaje {ViajeId} (TravelId: {TravelId}).", viajeId, targetTravelId.Value);
 
             var datosMongo = new DatosPbipMongo
             {
@@ -116,10 +168,10 @@ namespace Mbpc.Api.Services
                 NivelProteccion = dto.NivelProteccion
             };
 
-            var filtro = Builders<ViajeDetalleMongo>.Filter.Eq(v => v.Id, viajeId);
+            var filtro = Builders<ViajeDetalleMongo>.Filter.Eq(v => v.IdViaje, targetTravelId.Value);
             var update = Builders<ViajeDetalleMongo>.Update.Set("DatosPbip", datosMongo);
 
-            // IsUpsert = true garantiza la creación del documento raíz si no existía previamente
+            // IsUpsert = true garantiza la creación del documento raíz con el IdViaje unificado
             await _detailsCollection.UpdateOneAsync(filtro, update, new UpdateOptions { IsUpsert = true }, cancellationToken: ct);
         }
     }
