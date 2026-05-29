@@ -25,6 +25,6 @@ namespace Mbpc.Api.Services
         /// <summary>
         /// Actualiza o hidrata el nodo embebido de información PBIP de protección marítima.
         /// </summary>
-        Task ActualizarDatosPbipAsync(string viajeId, ActualizarDatosPbipDto dto, CancellationToken ct = default);
+        Task<bool> ActualizarDatosPbipAsync(string viajeId, ActualizarDatosPbipDto dto, CancellationToken ct = default);
     }
 }

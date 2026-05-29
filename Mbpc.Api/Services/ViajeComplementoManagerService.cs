@@ -149,7 +149,7 @@ namespace Mbpc.Api.Services
             await _detailsCollection.UpdateOneAsync(filtro, update, new UpdateOptions { IsUpsert = true }, cancellationToken: ct);
         }
 
-        public async Task ActualizarDatosPbipAsync(string viajeId, ActualizarDatosPbipDto dto, CancellationToken ct = default)
+        public async Task<bool> ActualizarDatosPbipAsync(string viajeId, ActualizarDatosPbipDto dto, CancellationToken ct = default)
         {
             var targetTravelId = await ResolverTravelIdAsync(viajeId, ct);
             if (!targetTravelId.HasValue)
@@ -160,19 +160,39 @@ namespace Mbpc.Api.Services
 
             _logger.LogInformation("Actualizando datos PBIP para el viaje {ViajeId} (TravelId: {TravelId}).", viajeId, targetTravelId.Value);
 
+            var costeraIdClaim = _httpContextAccessor.HttpContext?.User?.FindFirstValue("CosteraId");
+            int costeraId = 0;
+            if (int.TryParse(costeraIdClaim, out var parsedCosteraId))
+            {
+                costeraId = parsedCosteraId;
+            }
+
             var datosMongo = new DatosPbipMongo
             {
-                ContactoOcpm = dto.ContactoOcpm.Trim(),
-                NroInmarsat = dto.NroInmarsat.Trim(),
+                ContactoOcpm = dto.ContactoOcpm?.Trim() ?? string.Empty,
+                NroInmarsat = dto.NroInmarsat?.Trim() ?? string.Empty,
                 ArqueoBruto = dto.ArqueoBruto,
                 NivelProteccion = dto.NivelProteccion
             };
 
-            var filtro = Builders<ViajeDetalleMongo>.Filter.Eq(v => v.IdViaje, targetTravelId.Value);
-            var update = Builders<ViajeDetalleMongo>.Update.Set("DatosPbip", datosMongo);
+            // ⚠️ CORRECCIÓN ARQUITECTÓNICA: Filtramos SIEMPRE por IdViaje relacional.
+            // Esto evita la creación de documentos fantasmas y mantiene todo consolidado.
+            var filtroFinal = Builders<ViajeDetalleMongo>.Filter.Eq(v => v.IdViaje, targetTravelId.Value);
 
-            // IsUpsert = true garantiza la creación del documento raíz con el IdViaje unificado
-            await _detailsCollection.UpdateOneAsync(filtro, update, new UpdateOptions { IsUpsert = true }, cancellationToken: ct);
+            var update = Builders<ViajeDetalleMongo>.Update
+                .Set(x => x.DatosPbip, datosMongo);
+
+            if (costeraId > 0)
+            {
+                update = update.SetOnInsert(x => x.CosteraId, costeraId);
+            }
+
+            var updateOptions = new UpdateOptions { IsUpsert = true };
+            var result = await _detailsCollection.UpdateOneAsync(filtroFinal, update, updateOptions, cancellationToken: ct);
+
+            // ⚠️ CORRECCIÓN 2: Agregamos result.MatchedCount > 0. Si el usuario le da "Guardar" 
+            // sin cambiar ningún dato, ModifiedCount es 0, pero MatchedCount es 1 (Es un éxito).
+            return result.ModifiedCount > 0 || result.UpsertedId != null || result.MatchedCount > 0;
         }
     }
 }

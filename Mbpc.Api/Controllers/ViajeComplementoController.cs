@@ -110,7 +110,7 @@ namespace Mbpc.Api.Controllers
         /// Actualiza o hidrata los datos de protección marítima PBIP.
         /// </summary>
         [HttpPut("pbip")]
-        [ProducesResponseType(200)]
+        [ProducesResponseType(204)] // NoContent
         [ProducesResponseType(400)]
         [ProducesResponseType(404)]
         public async Task<IActionResult> ActualizarPbip(
@@ -123,8 +123,12 @@ namespace Mbpc.Api.Controllers
 
             try
             {
-                await _service.ActualizarDatosPbipAsync(viajeId, dto, ct);
-                return Ok(new { mensaje = "Datos PBIP actualizados correctamente." });
+                var exito = await _service.ActualizarDatosPbipAsync(viajeId, dto, ct);
+                if (exito)
+                {
+                    return NoContent();
+                }
+                return NotFound(new { mensaje = $"No se encontró o no se pudo actualizar el viaje {viajeId}." });
             }
             catch (KeyNotFoundException ex)
             {
