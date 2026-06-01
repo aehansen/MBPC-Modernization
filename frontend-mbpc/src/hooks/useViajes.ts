@@ -99,3 +99,18 @@ export function useCrearViaje() {
     },
   });
 }
+
+export function useTransferirViaje(): UseMutationResult<
+  void,
+  Error,
+  { viajeId: string; nuevaCosteraId: number }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ viajeId, nuevaCosteraId }) =>
+      viajesService.transferir(viajeId, nuevaCosteraId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: viajesKeys.all });
+    },
+  });
+}

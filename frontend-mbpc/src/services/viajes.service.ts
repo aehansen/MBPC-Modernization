@@ -73,6 +73,13 @@ const viajesService = {
   ): Promise<void> => {
     await api.put(`/api/viajes/${id}/posicion`, dto);
   },
+
+  transferir: async (
+    viajeId: string,
+    nuevaCosteraId: number,
+  ): Promise<void> => {
+    await api.put(`/api/viajes/${viajeId}/transferir`, { nuevaCosteraId });
+  },
 };
 
 export default viajesService;

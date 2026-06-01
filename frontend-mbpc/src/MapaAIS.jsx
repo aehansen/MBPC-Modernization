@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import "@arcgis/core/assets/esri/themes/light/main.css";
 import apiClient from "./axiosClient";
+import { useTransferirViaje } from "./hooks/useViajes";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MapaAIS.jsx  (v2 — FeatureLayer + Clustering + Popup Institucional + Viboreo)
@@ -80,6 +81,36 @@ const FIELDS_BUQUE = [
   { name: "longitud",           alias: "Longitud",                type: "double" },
 ];
 
+// ── Polígonos de Jurisdicciones (Costeras) para Geofencing ───────────────────
+const COSTERAS_POLIGONOS = [
+  {
+    id: 1,
+    nombre: "Costera Río de la Plata Norte",
+    rings: [
+      [
+        [-58.5, -34.0],
+        [-57.8, -34.0],
+        [-57.8, -34.8],
+        [-58.5, -34.8],
+        [-58.5, -34.0]
+      ]
+    ]
+  },
+  {
+    id: 2,
+    nombre: "Costera Río de la Plata Sur",
+    rings: [
+      [
+        [-57.8, -34.0],
+        [-57.0, -34.0],
+        [-57.0, -34.8],
+        [-57.8, -34.8],
+        [-57.8, -34.0]
+      ]
+    ]
+  }
+];
+
 // ─────────────────────────────────────────────────────────────────────────────
 export default function MapaAIS() {
   const mapDiv         = useRef(null);
@@ -89,6 +120,8 @@ export default function MapaAIS() {
   const highlightLayerRef = useRef(null); // GraphicsLayer temporal (anillo de viboreo)
   const arcgisRef      = useRef(null);
   const oidCounter     = useRef(1);     // ObjectID auto-incremental para el FeatureLayer
+  const jurisdiccionPreviaRef = useRef({});
+  const { mutate: transferirViaje } = useTransferirViaje();
 
   const [buques,         setBuques]        = useState([]);
   const [filtroTexto,    setFiltroTexto]   = useState("");
@@ -113,6 +146,8 @@ export default function MapaAIS() {
         { default: SimpleLineSymbol },
         { default: Polyline         },
         { default: esriConfig       },
+        geometryEngine,
+        { default: Polygon          },
       ] = await Promise.all([
         import("@arcgis/core/Map.js"),
         import("@arcgis/core/views/MapView.js"),
@@ -124,12 +159,14 @@ export default function MapaAIS() {
         import("@arcgis/core/symbols/SimpleLineSymbol.js"),
         import("@arcgis/core/geometry/Polyline.js"),
         import("@arcgis/core/config.js"),
+        import("@arcgis/core/geometry/geometryEngine.js"),
+        import("@arcgis/core/geometry/Polygon.js"),
       ]);
 
       esriConfig.apiKey = "";
 
       arcgisRef.current = {
-        Graphic, Point, SimpleMarkerSymbol, SimpleLineSymbol, Polyline, FeatureLayer
+        Graphic, Point, SimpleMarkerSymbol, SimpleLineSymbol, Polyline, FeatureLayer, geometryEngine, Polygon
       };
 
       // ── Rutas (GraphicsLayer estático) ──
@@ -362,18 +399,41 @@ export default function MapaAIS() {
   async function renderizarFeatures(datos) {
     if (!featureLayerRef.current || !arcgisRef.current) return;
 
-    const { Graphic, Point } = arcgisRef.current;
+    const { Graphic, Point, geometryEngine, Polygon } = arcgisRef.current;
 
     // Limpiar rutas
     routeLayerRef.current?.removeAll();
 
     // Construir nuevos Graphics con atributos tipados
     const nuevosGraphics = datos.map(buque => {
+      const punto = new Point({
+        longitude: buque.longitud,
+        latitude : buque.latitud,
+        spatialReference: { wkid: 4326 }
+      });
+
+      // Detección de Geofencing para la transferencia de jurisdicción
+      if (geometryEngine && Polygon) {
+        for (const costera of COSTERAS_POLIGONOS) {
+          const poligonoArcgis = new Polygon({
+            rings: costera.rings,
+            spatialReference: { wkid: 4326 }
+          });
+
+          if (geometryEngine.intersects(poligonoArcgis, punto)) {
+            const previoId = jurisdiccionPreviaRef.current[buque.id];
+            if (previoId !== costera.id) {
+              jurisdiccionPreviaRef.current[buque.id] = costera.id;
+              console.warn(`Transferencia automática disparada para el buque ${buque.nombreBuque ?? buque.id} hacia la Costera ${costera.id}`);
+              transferirViaje({ viajeId: buque.id, nuevaCosteraId: costera.id });
+            }
+            break;
+          }
+        }
+      }
+
       return new Graphic({
-        geometry: new Point({
-          longitude: buque.longitud,
-          latitude : buque.latitud,
-        }),
+        geometry: punto,
         attributes: {
           ObjectID           : oidCounter.current++,
           id                 : buque.id,
@@ -519,6 +579,29 @@ export default function MapaAIS() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filtroTexto]);
 
+  // ── 7.5 Simulación de Geofencing ──────────────────────────────────────────
+  const simularCruce = () => {
+    if (buques.length === 0) {
+      console.warn("No hay buques disponibles para simular el cruce.");
+      return;
+    }
+    const nuevosBuques = buques.map((b, idx) => {
+      if (idx === 0) {
+        return {
+          ...b,
+          latitud: -34.5,
+          longitud: -57.5,
+          nombreBuque: `${b.nombreBuque ?? "Buque"} (SIMULADO)`,
+        };
+      }
+      return b;
+    });
+
+    console.warn(`Simulando posición para el buque ${nuevosBuques[0].nombreBuque} en latitud -34.5, longitud -57.5`);
+    setBuques(nuevosBuques);
+    renderizarFeatures(nuevosBuques);
+  };
+
   // ── 8. Render JSX ─────────────────────────────────────────────────────────
   return (
     <div style={styles.wrapper}>
@@ -619,6 +702,15 @@ export default function MapaAIS() {
 
       {/* Mapa ArcGIS */}
       <div ref={mapDiv} style={styles.mapa} />
+
+      {/* Botón de simulación de cruce temporal */}
+      <button
+        style={styles.simularBtn}
+        onClick={simularCruce}
+        title="Simular Cruce de Buque para Geofencing"
+      >
+        🐞 Simular Cruce
+      </button>
 
       {/* Botón refresh flotante */}
       <button
@@ -848,5 +940,20 @@ const styles = {
     boxShadow     : "0 2px 10px rgba(0,36,84,.35)",
     zIndex        : 20,
     transition    : "background .2s, opacity .2s",
+  },
+  simularBtn: {
+    position      : "absolute",
+    top           : 24,
+    right         : 24,
+    background    : "#ff4d4f",
+    color         : "#fff",
+    border        : "none",
+    borderRadius  : 6,
+    padding       : "8px 14px",
+    fontWeight    : "bold",
+    cursor        : "pointer",
+    boxShadow     : "0 2px 8px rgba(255,77,79,0.35)",
+    zIndex        : 25,
+    transition    : "background .2s",
   },
 };

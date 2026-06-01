@@ -284,18 +284,22 @@ namespace Mbpc.Api.Services
                     }
                     else
                     {
-                        var etiquetaBarcaza = string.IsNullOrWhiteSpace(b.Matricula) ? b.Nombre : b.Matricula;
+                        string etiquetaBarcaza = b.Nombre ?? string.Empty;
 
-                        if (long.TryParse(etiquetaBarcaza, out long barcazaIdNum)
-                            && catalogoBarcazas.TryGetValue(barcazaIdNum, out var barcazaInfo))
+                        // Hito 5.8: Intentamos buscar por b.Nombre (ID numérico de la barcaza en base de datos)
+                        if (long.TryParse(b.Nombre, out long barcazaIdNum) && catalogoBarcazas.TryGetValue(barcazaIdNum, out var barcazaInfo))
                         {
                             etiquetaBarcaza = !string.IsNullOrWhiteSpace(barcazaInfo.Matricula)
                                 ? barcazaInfo.Matricula
-                                : barcazaInfo.Nombre;
+                                : (!string.IsNullOrWhiteSpace(barcazaInfo.Nombre) ? barcazaInfo.Nombre : b.Nombre ?? string.Empty);
+                        }
+                        else
+                        {
+                            // Fallback a matricula o nombre crudo si no hay coincidencia
+                            etiquetaBarcaza = !string.IsNullOrWhiteSpace(b.Matricula) ? b.Matricula : (b.Nombre ?? string.Empty);
                         }
 
-                        descripcion =
-                            $"[Barcaza] {etiquetaBarcaza} - {cargaNombre} ({b.Cantidad} {b.Unidad})";
+                        descripcion = $"{etiquetaBarcaza} - {cargaNombre} ({b.Cantidad} {b.Unidad})";
                     }
 
                     return new CargaDto
@@ -859,37 +863,27 @@ namespace Mbpc.Api.Services
                 return false;
             }
 
-            var ultimaEtapa = doc.Etapas?.LastOrDefault();
-            if (ultimaEtapa?.Barcazas is null)
+            // Hito 5.8: Scoping estricto por ViajeId utilizando el ID resuelto del documento detalle.
+            var filtroStrict = Builders<ViajeDetalleMongo>.Filter.Eq(x => x.Id, doc.Id);
+
+            // Operación atómica de PullFilter sobre el array de barcazas de las etapas
+            var update = Builders<ViajeDetalleMongo>.Update.PullFilter(
+                "ETAPAS.$[].BARCAZAS",
+                Builders<BarcazaMongo>.Filter.Eq(b => b.Nombre, cargaId)
+            );
+
+            var updateResult = await _detailsCollection.UpdateOneAsync(filtroStrict, update);
+
+            if (updateResult.ModifiedCount == 0)
             {
                 _logger.LogWarning(
-                    "EliminarCargaDesdeMongoDb: El documento '{DocId}' no tiene barcazas en la última etapa.",
-                    doc.Id);
-                return false;
-            }
-
-            int removidos = ultimaEtapa.Barcazas.RemoveAll(b => b.Nombre == cargaId);
-            if (removidos == 0)
-            {
-                _logger.LogWarning(
-                    "EliminarCargaDesdeMongoDb: La carga '{CargaId}' no estaba en la última etapa del documento '{DocId}'.",
-                    cargaId, doc.Id);
-                return false;
-            }
-
-            var filtroPersistir = Builders<ViajeDetalleMongo>.Filter.Eq(x => x.Id, doc.Id);
-            var replaceResult   = await _detailsCollection.ReplaceOneAsync(filtroPersistir, doc);
-
-            if (replaceResult.ModifiedCount == 0 && replaceResult.MatchedCount == 0)
-            {
-                _logger.LogWarning(
-                    "EliminarCargaDesdeMongoDb: ReplaceOne no persistió la eliminación de '{CargaId}' en '{DocId}'.",
+                    "EliminarCargaDesdeMongoDb: UpdateOneAsync no modificó ningún documento para eliminar la carga '{CargaId}' del documento '{DocId}'.",
                     cargaId, doc.Id);
                 return false;
             }
 
             _logger.LogInformation(
-                "EliminarCargaDesdeMongoDb: Carga '{CargaId}' eliminada del documento '{DocId}' (ViajeId='{ViajeId}').",
+                "EliminarCargaDesdeMongoDb: Carga '{CargaId}' eliminada atómicamente del documento '{DocId}' (ViajeId='{ViajeId}').",
                 cargaId, doc.Id, viajeId);
 
             return true;
