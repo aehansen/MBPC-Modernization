@@ -53,14 +53,6 @@ namespace Mbpc.Api.Services
             _cache            = cache;
             _tipoCargaService = tipoCargaService;
             _serviceProvider  = serviceProvider;
-            if (!BsonClassMap.IsClassMapRegistered(typeof(ViajeDetalleMongo)))
-            BsonClassMap.RegisterClassMap<ViajeDetalleMongo>(cm => { cm.AutoMap(); cm.SetIgnoreExtraElements(true); });
-
-        if (!BsonClassMap.IsClassMapRegistered(typeof(EtapaMongo)))
-            BsonClassMap.RegisterClassMap<EtapaMongo>(cm => { cm.AutoMap(); cm.SetIgnoreExtraElements(true); });
-
-        if (!BsonClassMap.IsClassMapRegistered(typeof(BarcazaMongo)))
-            BsonClassMap.RegisterClassMap<BarcazaMongo>(cm => { cm.AutoMap(); cm.SetIgnoreExtraElements(true); });
         }
 
         // ── LECTURA (Oracle Fallback + MongoDB + Caché) ──────────────────────
@@ -196,17 +188,16 @@ namespace Mbpc.Api.Services
         {
             var convoyService = _serviceProvider.GetRequiredService<IConvoyManagerService>();
             var buqueService  = _serviceProvider.GetRequiredService<IBuqueService>();
+
             var convoy        = await convoyService.ObtenerConvoyPorViajeIdAsync(viajeId);
             var barcazasConvoy = convoy?.Barcazas?.ToList() ?? new List<BarcazaConvoyDto>();
 
-            // Hito 6.1 — Filtro por Id, no por VesselName.
             _logger.LogDebug("Buscando en details_mbpc resolviendo Id: {ViajeId}", viajeId);
 
             using var scope = _serviceProvider.CreateScope();
             var viajeService = scope.ServiceProvider.GetRequiredService<IViajeService>();
 
             var (detalleConCargas, _) = await viajeService.GetViajeDetalleByIdAsync(viajeId);
-
             var ultimaEtapa      = detalleConCargas?.Etapas?.LastOrDefault();
             var todasLasBarcazas = (ultimaEtapa?.Barcazas ?? new List<BarcazaMongo>())
                 .Where(b => b is not null)
@@ -218,16 +209,16 @@ namespace Mbpc.Api.Services
                 return Enumerable.Empty<CargaDto>();
             }
 
-            // Paso 1: Recolectar TODOS los IDs numéricos únicos de ambas fuentes
+            // Paso 1: Recolectar TODOS los IDs numéricos únicos de ambas fuentes (Bug Fix - Nullable resuelto)
             var barcazasSinDetalle = barcazasConvoy
                 .Where(bc => !todasLasBarcazas.Any(b => b.Nombre == bc.Id))
                 .ToList();
 
             var idsNumericos = todasLasBarcazas
-                .Select(b => barcazasConvoy.FirstOrDefault(bc => bc.Id == b.Nombre)?.Nombre ?? b.Nombre)
-                .Concat(barcazasSinDetalle.Select(bc => bc.Nombre ?? bc.Id))
-                .Where(nombre => !string.IsNullOrEmpty(nombre) && long.TryParse(nombre, out _))
-                .Select(nombre => long.Parse(nombre!))
+                .Select(b => b.Nombre)
+                .Concat(barcazasSinDetalle.Select(bc => bc.Id))
+                .Where(id => !string.IsNullOrWhiteSpace(id) && long.TryParse(id, out _))
+                .Select(id => long.Parse(id!)) // <-- Corrección CS8622 aplicada aquí
                 .Distinct()
                 .ToList();
 
@@ -239,23 +230,6 @@ namespace Mbpc.Api.Services
             _logger.LogDebug(
                 "Hito 5.9 — Batch lookup resolvió {Resueltos}/{Total} ID(s) numéricos en 1 round-trip.",
                 catalogoBarcazas.Count, idsNumericos.Count);
-
-            // Helper local: resuelve nombre display a partir del raw string
-            string ResolverNombreDisplay(string? rawNombre, string? matriculaFallback)
-            {
-                if (string.IsNullOrWhiteSpace(rawNombre)) return "S/N";
-
-                if (long.TryParse(rawNombre, out long id) && catalogoBarcazas.TryGetValue(id, out var info))
-                {
-                    var mat = !string.IsNullOrWhiteSpace(info.Matricula) ? info.Matricula : "S/N";
-                    return $"{info.Nombre} ({mat})";
-                }
-
-                if (long.TryParse(rawNombre, out _))
-                    return !string.IsNullOrWhiteSpace(matriculaFallback) ? matriculaFallback : $"BZA-{rawNombre}";
-
-                return rawNombre;
-            }
 
             // Paso 3: Construir DTOs
             var tareasTipoCarga = todasLasBarcazas
@@ -271,35 +245,36 @@ namespace Mbpc.Api.Services
                 {
                     var tipoCarga = tiposCarga[index];
                     bool esBodega = b.Nombre == "0";
-
                     string descripcion;
                     string nivelRiesgo = tipoCarga?.EsPeligrosa == true ? "Alto" : "Bajo";
+
                     string cargaNombre = !string.IsNullOrWhiteSpace(b.Carga) && b.Carga != "A Definir" 
                         ? b.Carga 
                         : (tipoCarga?.Nombre ?? "A Definir");
+                    
+                    string unidadMasa = !string.IsNullOrWhiteSpace(b.Unidad) ? b.Unidad.Trim() : "t";
 
                     if (esBodega)
                     {
-                        descripcion = $"Bodega - {cargaNombre} ({b.Cantidad} {b.Unidad})";
+                        descripcion = "Bodega";
                     }
                     else
                     {
-                        string etiquetaBarcaza = b.Nombre ?? string.Empty;
+                        string etiquetaBarcaza;
 
-                        // Hito 5.8: Intentamos buscar por b.Nombre (ID numérico de la barcaza en base de datos)
                         if (long.TryParse(b.Nombre, out long barcazaIdNum) && catalogoBarcazas.TryGetValue(barcazaIdNum, out var barcazaInfo))
                         {
-                            etiquetaBarcaza = !string.IsNullOrWhiteSpace(barcazaInfo.Matricula)
-                                ? barcazaInfo.Matricula
-                                : (!string.IsNullOrWhiteSpace(barcazaInfo.Nombre) ? barcazaInfo.Nombre : b.Nombre ?? string.Empty);
+                            var mat = !string.IsNullOrWhiteSpace(barcazaInfo.Matricula) ? barcazaInfo.Matricula : "S/N";
+                            var nom = !string.IsNullOrWhiteSpace(barcazaInfo.Nombre) ? barcazaInfo.Nombre : b.Nombre;
+                            etiquetaBarcaza = $"{nom} ({mat})";
                         }
                         else
                         {
-                            // Fallback a matricula o nombre crudo si no hay coincidencia
-                            etiquetaBarcaza = !string.IsNullOrWhiteSpace(b.Matricula) ? b.Matricula : (b.Nombre ?? string.Empty);
+                            var mat = !string.IsNullOrWhiteSpace(b.Matricula) ? b.Matricula : "S/N";
+                            etiquetaBarcaza = $"{b.Nombre} ({mat})";
                         }
 
-                        descripcion = $"{etiquetaBarcaza} - {cargaNombre} ({b.Cantidad} {b.Unidad})";
+                        descripcion = etiquetaBarcaza;
                     }
 
                     return new CargaDto
@@ -317,35 +292,45 @@ namespace Mbpc.Api.Services
                 })
                 .ToList();
 
-            var cargasSinDetalle = barcazasSinDetalle
-                .Select(bc =>
-                {
-                    var nombreReal = ResolverNombreDisplay(bc.Nombre ?? bc.Id, null);
-
-                    return new CargaDto
-                    {
-                        Id               = bc.Id,
-                        ViajeId          = viajeId,
-                        DescripcionLista = $"{nombreReal} - A Definir",
-                        Tonelaje         = 0,
-                        NivelRiesgo      = "Bajo",
-                        TipoUnidad       = "Barcaza",
-                        MercaderiaId     = null,
-                        MercaderiaNombre = null
-                    };
-                })
-                .ToList();
-
-            var resultado = cargasConDetalle.Concat(cargasSinDetalle).ToList();
-
-            var cacheOptions = new MemoryCacheEntryOptions
+            // Paso 4: Agregar las barcazas que están en el convoy pero no tienen detalle de carga
+            var cargasSinDetalle = barcazasSinDetalle.Select(bc =>
             {
-                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5),
-                SlidingExpiration               = TimeSpan.FromMinutes(2)
-            };
-            _cache.Set(cacheKey, resultado, cacheOptions);
+                string etiquetaBarcaza = string.IsNullOrWhiteSpace(bc.Id) ? "S/N" : bc.Id;
 
-            return resultado;
+                if (long.TryParse(bc.Id, out long bcIdNum))
+                {
+                    if (catalogoBarcazas.TryGetValue(bcIdNum, out var info))
+                    {
+                        var mat = !string.IsNullOrWhiteSpace(info.Matricula) ? info.Matricula : "S/N";
+                        etiquetaBarcaza = $"{info.Nombre} ({mat})";
+                    }
+                    else
+                    {
+                        etiquetaBarcaza = !string.IsNullOrWhiteSpace(bc.Matricula) ? bc.Matricula : $"BZA-{bc.Id}";
+                    }
+                }
+
+                return new CargaDto
+                {
+                    Id               = bc.Id ?? Guid.NewGuid().ToString(),
+                    ViajeId          = viajeId,
+                    DescripcionLista = etiquetaBarcaza,
+                    NivelRiesgo      = "Bajo",
+                    MuelleActual     = "En Tránsito",
+                    Tonelaje         = 0d,
+                    TipoUnidad       = "Barcaza",
+                    MercaderiaId     = null,
+                    MercaderiaNombre = "A Definir"
+                };
+            });
+
+            var resultadoFinal = cargasConDetalle.Concat(cargasSinDetalle).ToList();
+            
+            var cacheEntryOptions = new MemoryCacheEntryOptions()
+                .SetSlidingExpiration(TimeSpan.FromMinutes(2));
+            _cache.Set(cacheKey, resultadoFinal, cacheEntryOptions);
+
+            return resultadoFinal;
         }
 
         private sealed class OracleCargaRow

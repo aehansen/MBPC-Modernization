@@ -135,6 +135,8 @@ builder.Services.AddCors(options =>
     });
 });
 
+Mbpc.Api.Configuration.MongoMappingConfig.RegisterMappings();
+
 var app = builder.Build();
 
 // ── Middleware de excepciones global ─────────────────────────────────────────

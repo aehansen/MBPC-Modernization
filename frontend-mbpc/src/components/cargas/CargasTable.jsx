@@ -137,13 +137,13 @@ export default function CargasTable({ viajeId }) {
                 ID
               </th>
               <th className="px-4 py-3 text-left font-semibold text-slate-600 uppercase tracking-wide text-xs">
-                Descripción
+                Identificación
               </th>
               <th className="px-4 py-3 text-left font-semibold text-slate-600 uppercase tracking-wide text-xs">
                 Muelle
               </th>
               <th className="px-4 py-3 text-right font-semibold text-slate-600 uppercase tracking-wide text-xs">
-                Tonelaje
+                Carga / Tonelaje
               </th>
               <th className="px-4 py-3 text-left font-semibold text-slate-600 uppercase tracking-wide text-xs">
                 Riesgo
@@ -182,11 +182,12 @@ export default function CargasTable({ viajeId }) {
                     )}
                   </td>
 
-                  {/* Descripción — Hito 5.7: badge de TipoUnidad a la izquierda */}
+                  {/* Identificación (Antes Descripción) */}
                   <td className="px-4 py-3 text-slate-700">
                     <span className="flex items-center flex-wrap gap-y-1">
                       <TipoUnidadBadge tipoUnidad={carga.tipoUnidad} />
-                      {carga.descripcionLista}
+                      {/* REGLA: Si es Bodega, no mostramos el ID, mostramos un texto amigable */}
+                      {carga.tipoUnidad === "Bodega" ? "Bodega de Carga" : carga.descripcionLista}
                     </span>
                   </td>
 
@@ -197,13 +198,20 @@ export default function CargasTable({ viajeId }) {
                     )}
                   </td>
 
-                  {/* Tonelaje */}
-                  <td className="px-4 py-3 text-right font-medium text-slate-700 tabular-nums">
-                    {carga.tonelaje.toLocaleString("es-AR", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}{" "}
-                    <span className="text-xs text-slate-400">Tn</span>
+                  {/* Carga / Tonelaje */}
+                  <td className="px-4 py-3 text-right tabular-nums">
+                    <div className="flex flex-col items-end">
+                      <span className="font-semibold text-slate-800">
+                        {carga.mercaderiaNombre || "A Definir"}
+                      </span>
+                      <span className="text-xs text-slate-500">
+                        {carga.tonelaje.toLocaleString("es-AR", {
+                          minimumFractionDigits: 2,
+                          maximumFractionDigits: 2,
+                        })}{" "}
+                        Tn
+                      </span>
+                    </div>
                   </td>
 
                   {/* Nivel de Riesgo */}

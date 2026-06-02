@@ -20,6 +20,7 @@ namespace Mbpc.Api.DTOs
         public List<EtapaDto> Etapas { get; set; } = new List<EtapaDto>();
         public List<PracticoDto> Practicos { get; set; } = new List<PracticoDto>();
         public List<InspectorDto> Inspectores { get; set; } = new List<InspectorDto>();
+        public bool EsConvoy { get; set; }
     }
 
     // ══════════════════════════════════════════════════════════════════════════

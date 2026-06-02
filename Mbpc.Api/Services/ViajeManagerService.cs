@@ -157,6 +157,40 @@ namespace Mbpc.Api.Services
                         : $"BUQUE {buqueNombre}";
                 }
 
+                var esConvoy = false;
+
+                // 1. Consultar MongoDB para verificar si hay barcazas asociadas a este viaje (excluyendo bodegas con ID "0")
+                var travelId = p.TravelId;
+                var vesselName = p.VesselName;
+
+                var filtroDetalleBase = travelId > 0
+                    ? Builders<ViajeDetalleMongo>.Filter.Eq(v => v.IdViaje, travelId)
+                    : Builders<ViajeDetalleMongo>.Filter.Eq(v => v.VesselName, vesselName);
+
+                var detalle = await _detallesCollection.Find(filtroDetalleBase).FirstOrDefaultAsync();
+
+                if (detalle != null)
+                {
+                    var tieneBarcazasEtapa = detalle.Etapas?.Any(e => e != null && e.Barcazas != null && e.Barcazas.Any(b => b != null && b.Nombre != null && b.Nombre != "0")) ?? false;
+                    var tieneBarcazasRaiz = detalle.Barcazas != null && detalle.Barcazas.Any(b => b != null && b.Nombre != null && b.Nombre != "0");
+                    esConvoy = tieneBarcazasEtapa || tieneBarcazasRaiz;
+                }
+
+                // 2. Si no tiene barcazas registradas en MongoDB pero tiene un TravelId relacional válido, consultar Oracle (excluyendo bodegas con ID "0")
+                // En entorno de desarrollo (Development), omitimos esta consulta para evitar N+1 de logs bypass y timeouts innecesarios.
+                if (!esConvoy && travelId > 0 && !_env.IsDevelopment())
+                {
+                    try
+                    {
+                        var cargasLegacy = await _cargaService.ObtenerCargasPorViaje(travelId.ToString());
+                        esConvoy = cargasLegacy != null && cargasLegacy.Any(c => c != null && c.Id != "0");
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "ObtenerViajesDtoAsync: No se pudo consultar Oracle para verificar barcazas del TravelId={TravelId}", travelId);
+                    }
+                }
+
                 viajesDto.Add(new ViajeDto
                 {
                     Id                    = p.Id,
@@ -166,7 +200,8 @@ namespace Mbpc.Api.Services
                         : p.TravelId.ToString(),
                     Ruta                  = $"{p.Origin ?? "Sin Origen"} ➔ {p.Destination ?? "Sin Destino"} | Pos: {Math.Round(p.Latitude, 4)}, {Math.Round(p.Longitude, 4)}",
                     FechaInicioFormateada = p.MsgTime.ToString("dd/MM/yyyy HH:mm"),
-                    EstadoActual          = p.NavegationStatusDesc ?? "N/A"
+                    EstadoActual          = p.NavegationStatusDesc ?? "N/A",
+                    EsConvoy              = esConvoy
                 });
             }
 
