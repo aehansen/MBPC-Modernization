@@ -147,7 +147,6 @@ namespace Mbpc.Api.Services
                     ? p.VesselName
                     : p.TravelId.ToString();
 
-                // Si VesselName es un ID numérico, consultar el catálogo de buques para obtener el nombre real.
                 if (long.TryParse(buqueNombre, out long buqueId))
                 {
                     _logger.LogDebug(
@@ -162,8 +161,6 @@ namespace Mbpc.Api.Services
                 }
 
                 var esConvoy = false;
-
-                // 1. Consultar MongoDB para verificar si hay barcazas asociadas a este viaje (excluyendo bodegas con ID "0")
                 var travelId = p.TravelId;
                 var vesselName = p.VesselName;
 
@@ -180,8 +177,6 @@ namespace Mbpc.Api.Services
                     esConvoy = tieneBarcazasEtapa || tieneBarcazasRaiz;
                 }
 
-                // 2. Si no tiene barcazas registradas en MongoDB pero tiene un TravelId relacional válido, consultar Oracle (excluyendo bodegas con ID "0")
-                // En entorno de desarrollo (Development), omitimos esta consulta para evitar N+1 de logs bypass y timeouts innecesarios.
                 if (!esConvoy && travelId > 0 && !_env.IsDevelopment())
                 {
                     try
@@ -463,43 +458,42 @@ namespace Mbpc.Api.Services
 
                     var sql = new System.Text.StringBuilder(
                         @"SELECT TO_CHAR(T.ID)                                  AS Id,
-                                COALESCE(B.NOMBRE, 
-                                        CASE WHEN INSTR(T.BUQUE_INFO, ',') > 0 
-                                            THEN TRIM(REGEXP_SUBSTR(T.BUQUE_INFO, '(.*?)(,|$)', 1, 5, NULL, 1))
-                                            ELSE T.BUQUE_INFO 
-                                        END, 
-                                        'DESCONOCIDO')                        AS Buque,
-                                COALESCE(TO_CHAR(B.NRO_OMI), 
-                                        CASE WHEN INSTR(T.BUQUE_INFO, ',') > 0 AND REGEXP_SUBSTR(T.BUQUE_INFO, '(.*?)(,|$)', 1, 4, NULL, 1) != '0'
-                                            THEN TRIM(REGEXP_SUBSTR(T.BUQUE_INFO, '(.*?)(,|$)', 1, 4, NULL, 1))
-                                            ELSE NULL 
-                                        END, 
-                                        'S/D')                                AS Omi,
-                                COALESCE(TO_CHAR(B.MATRICULA), 
-                                        CASE WHEN INSTR(T.BUQUE_INFO, ',') > 0 AND REGEXP_SUBSTR(T.BUQUE_INFO, '(.*?)(,|$)', 1, 2, NULL, 1) != '0'
-                                            THEN TRIM(REGEXP_SUBSTR(T.BUQUE_INFO, '(.*?)(,|$)', 1, 2, NULL, 1))
-                                            ELSE NULL 
-                                        END, 
-                                        'S/D')                                AS Matricula,
-                                T.ORIGEN_ID                                    AS Origen,
-                                T.DESTINO                                      AS Destino,
-                                TO_CHAR(T.FECHA_SALIDA, 'DD/MM/YYYY HH24:MI')  AS FechaPartida,
-                                TO_CHAR(T.ETA,          'DD/MM/YYYY HH24:MI')  AS Eta,
-                                CASE T.ESTADO 
-                                    WHEN 1 THEN 'Planificado'
-                                    WHEN 2 THEN 'Navegando' 
-                                    WHEN 3 THEN 'Finalizado' 
-                                    WHEN 4 THEN 'Cancelado' 
-                                    ELSE 'Otro' 
-                                END                                            AS Estado,
-                                '0'                                            AS CosteraId
-                        FROM   MBPC.TBL_VIAJE T
-                        LEFT JOIN MBPC.Z_TBL_BUQUES_UNICO B ON T.BUQUE_ID = B.ID_BUQUE
-                        WHERE  T.ESTADO IN (2, 3, 4)");
+                                 COALESCE(B.NOMBRE, 
+                                         CASE WHEN INSTR(T.BUQUE_INFO, ',') > 0 
+                                             THEN TRIM(REGEXP_SUBSTR(T.BUQUE_INFO, '(.*?)(,|$)', 1, 5, NULL, 1))
+                                             ELSE T.BUQUE_INFO 
+                                         END, 
+                                         'DESCONOCIDO')                        AS Buque,
+                                 COALESCE(TO_CHAR(B.NRO_OMI), 
+                                         CASE WHEN INSTR(T.BUQUE_INFO, ',') > 0 AND REGEXP_SUBSTR(T.BUQUE_INFO, '(.*?)(,|$)', 1, 4, NULL, 1) != '0'
+                                             THEN TRIM(REGEXP_SUBSTR(T.BUQUE_INFO, '(.*?)(,|$)', 1, 4, NULL, 1))
+                                             ELSE NULL 
+                                         END, 
+                                         'S/D')                                AS Omi,
+                                 COALESCE(TO_CHAR(B.MATRICULA), 
+                                         CASE WHEN INSTR(T.BUQUE_INFO, ',') > 0 AND REGEXP_SUBSTR(T.BUQUE_INFO, '(.*?)(,|$)', 1, 2, NULL, 1) != '0'
+                                             THEN TRIM(REGEXP_SUBSTR(T.BUQUE_INFO, '(.*?)(,|$)', 1, 2, NULL, 1))
+                                             ELSE NULL 
+                                         END, 
+                                         'S/D')                                AS Matricula,
+                                 T.ORIGEN_ID                                    AS Origen,
+                                 T.DESTINO                                      AS Destino,
+                                 TO_CHAR(T.FECHA_SALIDA, 'DD/MM/YYYY HH24:MI')  AS FechaPartida,
+                                 TO_CHAR(T.ETA,          'DD/MM/YYYY HH24:MI')  AS Eta,
+                                 CASE T.ESTADO 
+                                     WHEN 1 THEN 'Planificado'
+                                     WHEN 2 THEN 'Navegando' 
+                                     WHEN 3 THEN 'Finalizado' 
+                                     WHEN 4 THEN 'Cancelado' 
+                                     ELSE 'Otro' 
+                                 END                                            AS Estado,
+                                 '0'                                            AS CosteraId
+                         FROM   MBPC.TBL_VIAJE T
+                         LEFT JOIN MBPC.Z_TBL_BUQUES_UNICO B ON T.BUQUE_ID = B.ID_BUQUE
+                         WHERE  T.ESTADO IN (2, 3, 4)");
 
                     var parameters = new DynamicParameters();
 
-                    // Filtros Dinámicos
                     if (!string.IsNullOrWhiteSpace(filtro.Nombre))
                     {
                         sql.Append(" AND UPPER(B.NOMBRE) LIKE UPPER(:nombre)");
@@ -709,9 +703,6 @@ namespace Mbpc.Api.Services
 
             try
             {
-                // ─── FASE 3: MONGODB (DETALLES Y COMPLEMENTOS) ───────────────
-                
-                // Si el usuario cargó una agencia en el modal de inicio, la inyectamos como complemento inicial
                 var agenciasIniciales = new List<AgenciaMongo>();
                 if (!string.IsNullOrWhiteSpace(nuevoViaje.AgenciaMaritima))
                 {
@@ -719,7 +710,7 @@ namespace Mbpc.Api.Services
                     {
                         Rol = "Agencia Principal",
                         Nombre = nuevoViaje.AgenciaMaritima.Trim(),
-                        Contacto = "A definir" // Dato por defecto para cumplir con el esquema BSON
+                        Contacto = "A definir"
                     });
                 }
 
@@ -780,10 +771,25 @@ namespace Mbpc.Api.Services
             return true;
         }
 
+        public async Task ThrowIfViajeFinalizadoAsync(string viajeId)
+        {
+            var filtro = BuildFiltroViaje(viajeId);
+            var viajeActual = await _viajesCollection.Find(filtro).FirstOrDefaultAsync();
+            if (viajeActual is not null)
+            {
+                if (viajeActual.NavegationStatusDesc != null && 
+                    viajeActual.NavegationStatusDesc.Equals(EstadoEtapa.Finalizado.ToString(), StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException("El viaje se encuentra finalizado. No se permiten modificaciones.");
+                }
+            }
+        }
+
         public async Task<PosicionActualizadaResultDto?> ActualizarPosicionAsync(
             string id,
             ActualizarPosicionDto dto)
         {
+            await ThrowIfViajeFinalizadoAsync(id);
             _logger.LogInformation(
                 "ActualizarPosicionAsync — Id: '{Id}' | Lat: {Lat} | Lng: {Lng} | FechaReporte: {Fecha}",
                 id, dto.Latitud, dto.Longitud, dto.FechaReporte);
@@ -892,7 +898,7 @@ namespace Mbpc.Api.Services
                 Longitud             = dto.Longitud,
                 VelocidadCalculadaKn = Math.Round(velocidadKn,  2),
                 DistanciaRecorridaNM = Math.Round(distanciaNM,  3),
-                TracklogId           = tracklogEntry.Id,
+                TracklogId           = tracklogEntry.Id.ToString()
             };
         }
 
@@ -924,7 +930,7 @@ namespace Mbpc.Api.Services
             var posicionActual = await _viajesCollection.Find(filtroEstado).FirstOrDefaultAsync();
             var estadoRaw = posicionActual?.NavegationStatusDesc ?? string.Empty;
 
-            if (estadoRaw.Equals("Finalizado", StringComparison.OrdinalIgnoreCase))
+            if (estadoRaw.Equals(EstadoEtapa.Finalizado.ToString(), StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException(
                     "El viaje ya se encuentra finalizado. No se permiten más modificaciones.");
@@ -966,10 +972,10 @@ namespace Mbpc.Api.Services
                     $"No se puede finalizar el viaje '{id}' porque {string.Join(" y ", motivos)}.");
             }
 
-            var exito = await CambiarEstadoNavegacionAsync(id, "Finalizado");
+            var exito = await CambiarEstadoNavegacionAsync(id, EstadoEtapa.Finalizado.ToString());
             if (exito)
             {
-                await RegistrarEventoAsync(id, TipoEventoViaje.FINALIZACION, $"Finalización del viaje. Estado anterior: {estadoRaw}", estadoRaw, "Finalizado");
+                await RegistrarEventoAsync(id, TipoEventoViaje.FINALIZACION, $"Finalización del viaje. Estado anterior: {estadoRaw}", estadoRaw, EstadoEtapa.Finalizado.ToString());
             }
             return exito;
         }
@@ -1006,8 +1012,9 @@ namespace Mbpc.Api.Services
             return dto;
         }
 
-        public async Task<bool> EmbarcarPersonalAsync(string viajeId, EmbarcarPersonalDto dto)
+        public async Task<bool> EmbarcarPracticoAsync(string viajeId, EmbarcarPracticoDto dto)
         {
+            await ThrowIfViajeFinalizadoAsync(viajeId);
             var filtroOcupado = Builders<ViajeDetalleMongo>.Filter.Or(
                 Builders<ViajeDetalleMongo>.Filter.ElemMatch(v => v.Inspectores, i => i.Documento == dto.Dni && i.FechaDesembarque == null),
                 Builders<ViajeDetalleMongo>.Filter.ElemMatch(v => v.Practicos, p => p.Documento == dto.Dni && p.FechaDesembarque == null)
@@ -1020,42 +1027,73 @@ namespace Mbpc.Api.Services
             var (detalle, _) = await GetViajeDetalleByIdAsync(viajeId);
             if (detalle == null) return false;
 
-            var update = dto.TipoPersonal == "Inspector" 
-                ? Builders<ViajeDetalleMongo>.Update.Push(v => v.Inspectores, new InspectorMongo { Documento = dto.Dni, NombreApellido = dto.NombreApellido, FechaEmbarque = dto.FechaEmbarque })
-                : Builders<ViajeDetalleMongo>.Update.Push(v => v.Practicos, new PracticoMongo { Documento = dto.Dni, NombreApellido = dto.NombreApellido, FechaEmbarque = dto.FechaEmbarque });
+            // TODO: [Hito 19 CQRS] Implementar llamada a Dapper/Oracle para persistencia relacional
+            var update = Builders<ViajeDetalleMongo>.Update.Push(v => v.Practicos, new PracticoMongo { Documento = dto.Dni, NombreApellido = dto.NombreApellido, FechaEmbarque = dto.FechaEmbarque });
 
             var result = await _detallesCollection.UpdateOneAsync(v => v.Id == detalle.Id, update);
             return result.ModifiedCount > 0;
         }
 
-        public async Task<bool> DesembarcarPersonalAsync(string viajeId, string dni, DesembarcarPersonalDto dto)
+        public async Task<bool> DesembarcarPracticoAsync(string viajeId, string dni, DesembarcarPracticoDto dto)
         {
+            await ThrowIfViajeFinalizadoAsync(viajeId);
             var (detalle, _) = await GetViajeDetalleByIdAsync(viajeId);
             if (detalle == null) return false;
 
-            UpdateDefinition<ViajeDetalleMongo> update;
-            FilterDefinition<ViajeDetalleMongo> filter;
-
-            if (dto.TipoPersonal == "Inspector")
-            {
-                filter = Builders<ViajeDetalleMongo>.Filter.And(
-                    Builders<ViajeDetalleMongo>.Filter.Eq(v => v.Id, detalle.Id),
-                    Builders<ViajeDetalleMongo>.Filter.ElemMatch(v => v.Inspectores, i => i.Documento == dni && i.FechaDesembarque == null)
-                );
-                update = Builders<ViajeDetalleMongo>.Update.Set("inspectores.$.fechaDesembarque", dto.FechaDesembarque);
-            }
-            else
-            {
-                filter = Builders<ViajeDetalleMongo>.Filter.And(
-                    Builders<ViajeDetalleMongo>.Filter.Eq(v => v.Id, detalle.Id),
-                    Builders<ViajeDetalleMongo>.Filter.ElemMatch(v => v.Practicos, p => p.Documento == dni && p.FechaDesembarque == null)
-                );
-                update = Builders<ViajeDetalleMongo>.Update.Set("practicos.$.fechaDesembarque", dto.FechaDesembarque);
-            }
+            var filter = Builders<ViajeDetalleMongo>.Filter.And(
+                Builders<ViajeDetalleMongo>.Filter.Eq(v => v.Id, detalle.Id),
+                Builders<ViajeDetalleMongo>.Filter.ElemMatch(v => v.Practicos, p => p.Documento == dni && p.FechaDesembarque == null)
+            );
+            
+            // TODO: [Hito 19 CQRS] Implementar llamada a Dapper/Oracle para persistencia relacional
+            var update = Builders<ViajeDetalleMongo>.Update.Set("practicos.$.fechaDesembarque", dto.FechaDesembarque);
 
             var result = await _detallesCollection.UpdateOneAsync(filter, update);
             if (result.ModifiedCount == 0)
-                throw new InvalidOperationException($"El DNI {dni} no está embarcado activamente en este viaje como {dto.TipoPersonal}.");
+                throw new InvalidOperationException($"El DNI {dni} no está embarcado activamente en este viaje como Práctico.");
+
+            return true;
+        }
+
+        public async Task<bool> EmbarcarInspectorAsync(string viajeId, EmbarcarInspectorDto dto)
+        {
+            await ThrowIfViajeFinalizadoAsync(viajeId);
+            var filtroOcupado = Builders<ViajeDetalleMongo>.Filter.Or(
+                Builders<ViajeDetalleMongo>.Filter.ElemMatch(v => v.Inspectores, i => i.Documento == dto.Dni && i.FechaDesembarque == null),
+                Builders<ViajeDetalleMongo>.Filter.ElemMatch(v => v.Practicos, p => p.Documento == dto.Dni && p.FechaDesembarque == null)
+            );
+            
+            var estaOcupado = await _detallesCollection.Find(filtroOcupado).AnyAsync();
+            if (estaOcupado)
+                throw new InvalidOperationException($"El DNI {dto.Dni} ya se encuentra embarcado en otro viaje activo.");
+
+            var (detalle, _) = await GetViajeDetalleByIdAsync(viajeId);
+            if (detalle == null) return false;
+
+            // TODO: [Hito 19 CQRS] Implementar llamada a Dapper/Oracle para persistencia relacional
+            var update = Builders<ViajeDetalleMongo>.Update.Push(v => v.Inspectores, new InspectorMongo { Documento = dto.Dni, NombreApellido = dto.NombreApellido, FechaEmbarque = dto.FechaEmbarque });
+
+            var result = await _detallesCollection.UpdateOneAsync(v => v.Id == detalle.Id, update);
+            return result.ModifiedCount > 0;
+        }
+
+        public async Task<bool> DesembarcarInspectorAsync(string viajeId, string dni, DesembarcarInspectorDto dto)
+        {
+            await ThrowIfViajeFinalizadoAsync(viajeId);
+            var (detalle, _) = await GetViajeDetalleByIdAsync(viajeId);
+            if (detalle == null) return false;
+
+            var filter = Builders<ViajeDetalleMongo>.Filter.And(
+                Builders<ViajeDetalleMongo>.Filter.Eq(v => v.Id, detalle.Id),
+                Builders<ViajeDetalleMongo>.Filter.ElemMatch(v => v.Inspectores, i => i.Documento == dni && i.FechaDesembarque == null)
+            );
+            
+            // TODO: [Hito 19 CQRS] Implementar llamada a Dapper/Oracle para persistencia relacional
+            var update = Builders<ViajeDetalleMongo>.Update.Set("inspectores.$.fechaDesembarque", dto.FechaDesembarque);
+
+            var result = await _detallesCollection.UpdateOneAsync(filter, update);
+            if (result.ModifiedCount == 0)
+                throw new InvalidOperationException($"El DNI {dni} no está embarcado activamente en este viaje como Inspector.");
 
             return true;
         }
@@ -1074,6 +1112,7 @@ namespace Mbpc.Api.Services
 
         private async Task<bool> CambiarEstadoConValidacionAsync(string id, EstadoEtapa estadoDestino)
         {
+            await ThrowIfViajeFinalizadoAsync(id);
             ViajePosicionMongo? viajeActual;
             try
             {
@@ -1168,22 +1207,18 @@ namespace Mbpc.Api.Services
         {
             var filters = new List<FilterDefinition<ViajePosicionMongo>>();
 
-            // 1. Si es un ObjectId válido de Mongo (24 caracteres hexadecimales)
             if (id.Length == 24 && ObjectId.TryParse(id, out var objectId))
             {
                 filters.Add(Builders<ViajePosicionMongo>.Filter.Eq("_id", objectId));
             }
 
-            // 2. Si es numérico, asumimos que nos mandaron el TravelId de Oracle
             if (long.TryParse(id, out var travelId))
             {
                 filters.Add(Builders<ViajePosicionMongo>.Filter.Eq("TravelId", travelId));
             }
 
-            // 3. Por defecto, siempre buscamos también por el nombre del buque
             filters.Add(Builders<ViajePosicionMongo>.Filter.Eq("VesselName", id));
 
-            // Retornamos un OR: encuentra el viaje si coincide cualquiera de las 3 opciones
             return Builders<ViajePosicionMongo>.Filter.Or(filters);
         }
 
@@ -1282,6 +1317,7 @@ namespace Mbpc.Api.Services
 
         public async Task<bool> TransferirJurisdiccionAsync(string id, TransferirJurisdiccionDto dto)
         {
+            await ThrowIfViajeFinalizadoAsync(id);
             var costeraId = _costeraUserContext.GetCurrentCosteraId();
             var filtroViaje = BuildFiltroViaje(id);
             
@@ -1294,18 +1330,16 @@ namespace Mbpc.Api.Services
                 throw new InvalidOperationException($"No se encontró el viaje '{id}' para la jurisdicción actual (Costera {costeraId}).");
             }
 
-            // Asegurar Transaccionalidad con Oracle (Clonando el doCall legacy)
             bool exitoOracle = false;
             try
             {
                 using var connection = new OracleConnection(_oracleConnectionString);
-                await connection.OpenAsync(); // Necesario abrirla a mano al no usar Dapper acá
+                await connection.OpenAsync();
                 
                 using var cmd = connection.CreateCommand();
                 cmd.CommandText = "mbpc.pasar_barco";
                 cmd.CommandType = CommandType.StoredProcedure;
 
-                // 1. Replicando los parámetros de la interfaz (Atento a los Varchar2 de legacy)
                 cmd.Parameters.Add(new OracleParameter("vViajeId", OracleDbType.Varchar2, viaje.TravelId.ToString(), ParameterDirection.Input));
                 cmd.Parameters.Add(new OracleParameter("vZonaId", OracleDbType.Varchar2, dto.NuevaCosteraId.ToString(), ParameterDirection.Input));
                 cmd.Parameters.Add(new OracleParameter("vEta", OracleDbType.Varchar2, DateTime.UtcNow.ToString("dd/MM/yyyy HH:mm"), ParameterDirection.Input));
@@ -1314,14 +1348,12 @@ namespace Mbpc.Api.Services
                 cmd.Parameters.Add(new OracleParameter("vRumbo", OracleDbType.Decimal, (decimal)(dto.Rumbo ?? 0), ParameterDirection.Input));
                 cmd.Parameters.Add(new OracleParameter("vMuelleId", OracleDbType.Varchar2, dto.MuelleLlegadaBuqueId ?? "0", ParameterDirection.Input));
                 
-                // 2. Replicando la inyección silenciosa del doCall() legacy
-                // Usamos -1000m por defecto como hacía el sistema viejo si fallaba el userId
                 cmd.Parameters.Add(new OracleParameter("usrid", OracleDbType.Decimal, -1000m, ParameterDirection.Input));
                 cmd.Parameters.Add(new OracleParameter("vCursor", OracleDbType.RefCursor, DBNull.Value, ParameterDirection.Output));
 
                 _logger.LogInformation("Ejecutando SP mbpc.pasar_barco en Oracle crudo para TravelId: {TravelId}.", viaje.TravelId);
                 
-                await cmd.ExecuteNonQueryAsync(); // No usamos ExecuteReader porque no necesitamos leer el cursor
+                await cmd.ExecuteNonQueryAsync();
                 
                 _logger.LogInformation("SP mbpc.pasar_barco ejecutado con éxito total en Oracle.");
                 exitoOracle = true;
@@ -1340,7 +1372,6 @@ namespace Mbpc.Api.Services
 
             if (!exitoOracle) return false;
 
-            // Actualización en MongoDB tras el éxito de Oracle
             var updatePosicion = Builders<ViajePosicionMongo>.Update.Set("CosteraId", dto.NuevaCosteraId);
             var resultPosicion = await _viajesCollection.UpdateOneAsync(filtro, updatePosicion);
 
@@ -1356,7 +1387,6 @@ namespace Mbpc.Api.Services
 
             _logger.LogInformation("Jurisdicción actualizada con éxito en MongoDB para el viaje '{Id}' a la costera {NuevaCostera}.", id, dto.NuevaCosteraId);
 
-            // Invalidación de caché
             try
             {
                 await _redisRetryPolicy.ExecuteAsync(async () =>

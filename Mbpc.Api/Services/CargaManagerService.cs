@@ -33,6 +33,8 @@ namespace Mbpc.Api.Services
         private readonly IWebHostEnvironment          _env;
         private readonly IMemoryCache                 _cache;
 
+        private IViajeService ViajeService => _serviceProvider.GetRequiredService<IViajeService>();
+
         // ── Claves de Caché ──────────────────────────────────────────────────
         private const string CacheKeyPrefixCargas = "cargas_viaje_";
 
@@ -153,7 +155,6 @@ namespace Mbpc.Api.Services
             }
         }
 
-        // ── Hito 6.1: ResolverVesselNameAsync se conserva solo para SincronizarAmarreConvoyAsync ──
         private async Task<string> ResolverVesselNameAsync(string parametro)
         {
             if (parametro.Length == 24 && ObjectId.TryParse(parametro, out var objectId))
@@ -182,10 +183,6 @@ namespace Mbpc.Api.Services
             return parametro;
         }
 
-        /// <summary>
-        /// Hito 6.1 — Búsqueda por Id (ObjectId) en lugar de VesselName.
-        /// El parámetro recibido ES el viajeId; no se realiza ninguna resolución de nombre.
-        /// </summary>
         private async Task<IEnumerable<CargaDto>> ObtenerCargasDesdeMongoDb(string viajeId, string cacheKey)
         {
             var convoyService = _serviceProvider.GetRequiredService<IConvoyManagerService>();
@@ -211,7 +208,6 @@ namespace Mbpc.Api.Services
                 return Enumerable.Empty<CargaDto>();
             }
 
-            // Paso 1: Recolectar TODOS los IDs numéricos únicos de ambas fuentes (Bug Fix - Nullable resuelto)
             var barcazasSinDetalle = barcazasConvoy
                 .Where(bc => !todasLasBarcazas.Any(b => b.Nombre == bc.Id))
                 .ToList();
@@ -220,11 +216,10 @@ namespace Mbpc.Api.Services
                 .Select(b => b.Nombre)
                 .Concat(barcazasSinDetalle.Select(bc => bc.Id))
                 .Where(id => !string.IsNullOrWhiteSpace(id) && long.TryParse(id, out _))
-                .Select(id => long.Parse(id!)) // <-- Corrección CS8622 aplicada aquí
+                .Select(id => long.Parse(id!))
                 .Distinct()
                 .ToList();
 
-            // Paso 2: Una sola llamada al catálogo
             var catalogoBarcazas = idsNumericos.Any()
                 ? await buqueService.ObtenerBuquesPorIdsAsync(idsNumericos)
                 : new Dictionary<long, BuqueAutocompleteDto>();
@@ -233,7 +228,6 @@ namespace Mbpc.Api.Services
                 "Hito 5.9 — Batch lookup resolvió {Resueltos}/{Total} ID(s) numéricos en 1 round-trip.",
                 catalogoBarcazas.Count, idsNumericos.Count);
 
-            // Paso 3: Construir DTOs
             var tareasTipoCarga = todasLasBarcazas
                 .Select(b => b.MercaderiaId.HasValue && b.MercaderiaId.Value > 0
                     ? _tipoCargaService.ObtenerPorIdAsync(b.MercaderiaId.Value)
@@ -254,8 +248,6 @@ namespace Mbpc.Api.Services
                         ? b.Carga 
                         : (tipoCarga?.Nombre ?? "A Definir");
                     
-                    string unidadMasa = !string.IsNullOrWhiteSpace(b.Unidad) ? b.Unidad.Trim() : "t";
-
                     if (esBodega)
                     {
                         descripcion = "Bodega";
@@ -294,7 +286,6 @@ namespace Mbpc.Api.Services
                 })
                 .ToList();
 
-            // Paso 4: Agregar las barcazas que están en el convoy pero no tienen detalle de carga
             var cargasSinDetalle = barcazasSinDetalle.Select(bc =>
             {
                 string etiquetaBarcaza = string.IsNullOrWhiteSpace(bc.Id) ? "S/N" : bc.Id;
@@ -347,6 +338,15 @@ namespace Mbpc.Api.Services
 
         public async Task<bool> AmarrarBarcaza(string id, string nuevoMuelle, CancellationToken cancellationToken = default)
         {
+            var filtro = Builders<ViajeDetalleMongo>.Filter.ElemMatch(
+                d => d.Etapas,
+                etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.Nombre == id));
+            var doc = await _detailsCollection.Find(filtro).FirstOrDefaultAsync(cancellationToken);
+            if (doc is not null)
+            {
+                await ViajeService.ThrowIfViajeFinalizadoAsync(doc.Id.ToString());
+            }
+
             _logger.LogInformation("Amarrando barcaza {Id} en muelle {Muelle}", id, nuevoMuelle);
             bool exitoOracle = false;
 
@@ -369,31 +369,23 @@ namespace Mbpc.Api.Services
                 exitoOracle = true;
             }
 
-            if (exitoOracle)
+            if (exitoOracle && doc is not null)
             {
                 try
                 {
-                    var filtro = Builders<ViajeDetalleMongo>.Filter.ElemMatch(
-                        d => d.Etapas,
-                        etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.Nombre == id));
+                    var barcazaTarget = (doc.Etapas?.SelectMany(e => e.Barcazas ?? new List<BarcazaMongo>())
+                        ?? Enumerable.Empty<BarcazaMongo>())
+                        .FirstOrDefault(b => b.Nombre == id);
 
-                    var doc = await _detailsCollection.Find(filtro).FirstOrDefaultAsync(cancellationToken);
-                    if (doc is not null)
+                    if (barcazaTarget is not null)
                     {
-                        var barcazaTarget = (doc.Etapas?.SelectMany(e => e.Barcazas ?? new List<BarcazaMongo>())
-                            ?? Enumerable.Empty<BarcazaMongo>())
-                            .FirstOrDefault(b => b.Nombre == id);
-
-                        if (barcazaTarget is not null)
-                        {
-                            var anterior = barcazaTarget.MuelleActual;
-                            barcazaTarget.MuelleActual = nuevoMuelle;
-                            var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
-                            await _detailsCollection.ReplaceOneAsync(filtroId, doc, cancellationToken: cancellationToken);
-                            await RegistrarEventoCargaDirectoAsync(doc, TipoEventoViaje.BARCAZA_AMARRADA, 
-                                $"Barcaza '{id}' amarrada en muelle '{nuevoMuelle}'.", anterior, nuevoMuelle);
-                            InvalidarCacheViajePorBuque(doc.VesselName);
-                        }
+                        var anterior = barcazaTarget.MuelleActual;
+                        barcazaTarget.MuelleActual = nuevoMuelle;
+                        var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
+                        await _detailsCollection.ReplaceOneAsync(filtroId, doc, cancellationToken: cancellationToken);
+                        await RegistrarEventoCargaDirectoAsync(doc, TipoEventoViaje.BARCAZA_AMARRADA, 
+                            $"Barcaza '{id}' amarrada en muelle '{nuevoMuelle}'.", anterior, nuevoMuelle);
+                        InvalidarCacheViajePorBuque(doc.VesselName);
                     }
                 }
                 catch (Exception mongoEx)
@@ -407,6 +399,15 @@ namespace Mbpc.Api.Services
 
         public async Task<bool> FondearBarcaza(string id, string zonaFondeo, CancellationToken cancellationToken = default)
         {
+            var filtro = Builders<ViajeDetalleMongo>.Filter.ElemMatch(
+                d => d.Etapas,
+                etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.Nombre == id));
+            var doc = await _detailsCollection.Find(filtro).FirstOrDefaultAsync(cancellationToken);
+            if (doc is not null)
+            {
+                await ViajeService.ThrowIfViajeFinalizadoAsync(doc.Id.ToString());
+            }
+
             _logger.LogInformation("Fondeando barcaza {Id} en zona {Zona}", id, zonaFondeo);
             bool exitoOracle = false;
 
@@ -429,31 +430,23 @@ namespace Mbpc.Api.Services
                 exitoOracle = true;
             }
 
-            if (exitoOracle)
+            if (exitoOracle && doc is not null)
             {
                 try
                 {
-                    var filtro = Builders<ViajeDetalleMongo>.Filter.ElemMatch(
-                        d => d.Etapas,
-                        etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.Nombre == id));
+                    var barcazaTarget = (doc.Etapas?.SelectMany(e => e.Barcazas ?? new List<BarcazaMongo>())
+                        ?? Enumerable.Empty<BarcazaMongo>())
+                        .FirstOrDefault(b => b.Nombre == id);
 
-                    var doc = await _detailsCollection.Find(filtro).FirstOrDefaultAsync(cancellationToken);
-                    if (doc is not null)
+                    if (barcazaTarget is not null)
                     {
-                        var barcazaTarget = (doc.Etapas?.SelectMany(e => e.Barcazas ?? new List<BarcazaMongo>())
-                            ?? Enumerable.Empty<BarcazaMongo>())
-                            .FirstOrDefault(b => b.Nombre == id);
-
-                        if (barcazaTarget is not null)
-                        {
-                            var anterior = barcazaTarget.MuelleActual;
-                            barcazaTarget.MuelleActual = zonaFondeo;
-                            var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
-                            await _detailsCollection.ReplaceOneAsync(filtroId, doc, cancellationToken: cancellationToken);
-                            await RegistrarEventoCargaDirectoAsync(doc, TipoEventoViaje.BARCAZA_FONDEADA, 
-                                $"Barcaza '{id}' fondeada en zona '{zonaFondeo}'.", anterior, zonaFondeo);
-                            InvalidarCacheViajePorBuque(doc.VesselName);
-                        }
+                        var anterior = barcazaTarget.MuelleActual;
+                        barcazaTarget.MuelleActual = zonaFondeo;
+                        var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
+                        await _detailsCollection.ReplaceOneAsync(filtroId, doc, cancellationToken: cancellationToken);
+                        await RegistrarEventoCargaDirectoAsync(doc, TipoEventoViaje.BARCAZA_FONDEADA, 
+                            $"Barcaza '{id}' fondeada en zona '{zonaFondeo}'.", anterior, zonaFondeo);
+                        InvalidarCacheViajePorBuque(doc.VesselName);
                     }
                 }
                 catch (Exception mongoEx)
@@ -467,6 +460,15 @@ namespace Mbpc.Api.Services
 
         public async Task<bool> CargarBarcaza(string id, double toneladas, CancellationToken cancellationToken = default)
         {
+            var filtro = Builders<ViajeDetalleMongo>.Filter.ElemMatch(
+                d => d.Etapas,
+                etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.Nombre == id));
+            var doc = await _detailsCollection.Find(filtro).FirstOrDefaultAsync(cancellationToken);
+            if (doc is not null)
+            {
+                await ViajeService.ThrowIfViajeFinalizadoAsync(doc.Id.ToString());
+            }
+
             _logger.LogInformation("Registrando carga a {Toneladas}tn de embarcación {Id}", toneladas, id);
             bool exitoOracle = false;
 
@@ -489,31 +491,23 @@ namespace Mbpc.Api.Services
                 exitoOracle = true;
             }
 
-            if (exitoOracle)
+            if (exitoOracle && doc is not null)
             {
                 try
                 {
-                    var filtro = Builders<ViajeDetalleMongo>.Filter.ElemMatch(
-                        d => d.Etapas,
-                        etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.Nombre == id));
+                    var barcazaTarget = (doc.Etapas?.SelectMany(e => e.Barcazas ?? new List<BarcazaMongo>())
+                        ?? Enumerable.Empty<BarcazaMongo>())
+                        .FirstOrDefault(b => b.Nombre == id);
 
-                    var doc = await _detailsCollection.Find(filtro).FirstOrDefaultAsync(cancellationToken);
-                    if (doc is not null)
+                    if (barcazaTarget is not null)
                     {
-                        var barcazaTarget = (doc.Etapas?.SelectMany(e => e.Barcazas ?? new List<BarcazaMongo>())
-                            ?? Enumerable.Empty<BarcazaMongo>())
-                            .FirstOrDefault(b => b.Nombre == id);
-
-                        if (barcazaTarget is not null)
-                        {
-                            var anterior = barcazaTarget.Cantidad?.ToString() ?? "0";
-                            barcazaTarget.Cantidad = toneladas;
-                            var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
-                            await _detailsCollection.ReplaceOneAsync(filtroId, doc, cancellationToken: cancellationToken);
-                            await RegistrarEventoCargaDirectoAsync(doc, TipoEventoViaje.BARCAZA_CARGADA, 
-                                $"Carga registrada para la barcaza '{id}': {toneladas} Tn.", anterior, toneladas.ToString());
-                            InvalidarCacheViajePorBuque(doc.VesselName);
-                        }
+                        var anterior = barcazaTarget.Cantidad?.ToString() ?? "0";
+                        barcazaTarget.Cantidad = toneladas;
+                        var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
+                        await _detailsCollection.ReplaceOneAsync(filtroId, doc, cancellationToken: cancellationToken);
+                        await RegistrarEventoCargaDirectoAsync(doc, TipoEventoViaje.BARCAZA_CARGADA, 
+                            $"Carga registrada para la barcaza '{id}': {toneladas} Tn.", anterior, toneladas.ToString());
+                        InvalidarCacheViajePorBuque(doc.VesselName);
                     }
                 }
                 catch (Exception mongoEx)
@@ -527,7 +521,16 @@ namespace Mbpc.Api.Services
 
         public async Task<bool> DescargarBarcaza(string id, double toneladas, CancellationToken cancellationToken = default)
         {
-            _logger.LogInformation("Registrando descarga a {Toneladas}tn de embarcación {Id}", toneladas, id);
+            var filtro = Builders<ViajeDetalleMongo>.Filter.ElemMatch(
+                d => d.Etapas,
+                etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.Nombre == id));
+            var doc = await _detailsCollection.Find(filtro).FirstOrDefaultAsync(cancellationToken);
+            if (doc is not null)
+            {
+                await ViajeService.ThrowIfViajeFinalizadoAsync(doc.Id.ToString());
+            }
+
+            _logger.LogInformation("Registrando descarga a {Toneladas}tn de embarrassed {Id}", toneladas, id);
             bool exitoOracle = false;
 
             try
@@ -549,37 +552,29 @@ namespace Mbpc.Api.Services
                 exitoOracle = true;
             }
 
-            if (exitoOracle)
+            if (exitoOracle && doc is not null)
             {
                 try
                 {
-                    var filtro = Builders<ViajeDetalleMongo>.Filter.ElemMatch(
-                        d => d.Etapas,
-                        etapa => etapa.Barcazas != null && etapa.Barcazas.Any(b => b.Nombre == id));
+                    var barcazaTarget = (doc.Etapas?.SelectMany(e => e.Barcazas ?? new List<BarcazaMongo>())
+                        ?? Enumerable.Empty<BarcazaMongo>())
+                        .FirstOrDefault(b => b.Nombre == id);
 
-                    var doc = await _detailsCollection.Find(filtro).FirstOrDefaultAsync(cancellationToken);
-                    if (doc is not null)
+                    if (barcazaTarget is not null)
                     {
-                        var barcazaTarget = (doc.Etapas?.SelectMany(e => e.Barcazas ?? new List<BarcazaMongo>())
-                            ?? Enumerable.Empty<BarcazaMongo>())
-                            .FirstOrDefault(b => b.Nombre == id);
-
-                        if (barcazaTarget is not null)
+                        var anterior = barcazaTarget.Cantidad?.ToString() ?? "0";
+                        barcazaTarget.Cantidad = toneladas;
+                        if (toneladas == 0)
                         {
-                            var anterior = barcazaTarget.Cantidad?.ToString() ?? "0";
-                            barcazaTarget.Cantidad = toneladas;
-                            if (toneladas == 0)
-                            {
-                                barcazaTarget.Carga = "EN LASTRE";
-                                barcazaTarget.Descargada = true;
-                            }
-
-                            var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
-                            await _detailsCollection.ReplaceOneAsync(filtroId, doc, cancellationToken: cancellationToken);
-                            await RegistrarEventoCargaDirectoAsync(doc, TipoEventoViaje.BARCAZA_DESCARGADA, 
-                                $"Descarga registrada para la barcaza '{id}': {toneladas} Tn.", anterior, toneladas.ToString());
-                            InvalidarCacheViajePorBuque(doc.VesselName);
+                            barcazaTarget.Carga = "EN LASTRE";
+                            barcazaTarget.Descargada = true;
                         }
+
+                        var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
+                        await _detailsCollection.ReplaceOneAsync(filtroId, doc, cancellationToken: cancellationToken);
+                        await RegistrarEventoCargaDirectoAsync(doc, TipoEventoViaje.BARCAZA_DESCARGADA, 
+                            $"Descarga registrada para la barcaza '{id}': {toneladas} Tn.", anterior, toneladas.ToString());
+                        InvalidarCacheViajePorBuque(doc.VesselName);
                     }
                 }
                 catch (Exception mongoEx)
@@ -593,10 +588,10 @@ namespace Mbpc.Api.Services
 
         public async Task<bool> AgregarCargaAsync(string viajeId, NuevaCargaDto nuevaCarga)
         {
+            await ViajeService.ThrowIfViajeFinalizadoAsync(viajeId);
             _logger.LogInformation(
                 "Agregando carga BarcazaId={BarcazaId} al viajeId='{ViajeId}'.", nuevaCarga.BarcazaId, viajeId);
 
-            // ── Fase 0: Resolver detalle vía dominio (cruza posición ↔ details por TravelId/VesselName) ──
             using var scope = _serviceProvider.CreateScope();
             var viajeService = scope.ServiceProvider.GetRequiredService<IViajeService>();
 
@@ -614,7 +609,6 @@ namespace Mbpc.Api.Services
                 return false;
             }
 
-            // ── Fase 0b: Hidratación resiliente — documento no existe ─────────────────
             if (doc is null)
             {
                 _logger.LogWarning(
@@ -686,10 +680,8 @@ namespace Mbpc.Api.Services
                 }
             }
 
-            // El SP Oracle legado requiere el VesselName; lo leemos del documento ya cargado/hidratado.
             string nombreBuque = doc.VesselName ?? string.Empty;
 
-            // ── Fase 1: Persistir en Oracle ───────────────────────────────────────────
             bool exitoOracle = false;
             try
             {
@@ -712,7 +704,6 @@ namespace Mbpc.Api.Services
                 exitoOracle = true;
             }
 
-            // ── Fase 2: CQRS — mutar el documento en MongoDB ──────────────────────────
             if (exitoOracle)
             {
                 try
@@ -762,6 +753,7 @@ namespace Mbpc.Api.Services
 
         public async Task<bool> ModificarCargaAsync(string id, ModificarCargaDto dto)
         {
+            await ViajeService.ThrowIfViajeFinalizadoAsync(dto.ViajeId);
             bool exitoOracle = false;
             try
             {
@@ -787,11 +779,9 @@ namespace Mbpc.Api.Services
             {
                 try
                 {
-                    // FIX HITO 10.5 — Resolvemos IViajeService en tiempo de ejecución para evitar dependencia circular
                     using var scope = _serviceProvider.CreateScope();
                     var viajeService = scope.ServiceProvider.GetRequiredService<IViajeService>();
                     
-                    // Delegamos en el servicio de viajes unificado
                     var (detalleEncontrado, _) = await viajeService.GetViajeDetalleByIdAsync(dto.ViajeId);
                     
                     if (detalleEncontrado == null)
@@ -802,7 +792,6 @@ namespace Mbpc.Api.Services
 
                     var doc = detalleEncontrado;
 
-                    // Buscar la carga en la última etapa (scoping de etapa)
                     var ultimaEtapa = doc.Etapas?.LastOrDefault();
                     var barcazaTarget = ultimaEtapa?.Barcazas?.FirstOrDefault(b => b.Nombre == id);
 
@@ -870,10 +859,8 @@ namespace Mbpc.Api.Services
                 return false;
             }
 
-            // Hito 5.8: Scoping estricto por ViajeId utilizando el ID resuelto del documento detalle.
             var filtroStrict = Builders<ViajeDetalleMongo>.Filter.Eq(x => x.Id, doc.Id);
 
-            // Operación atómica de PullFilter sobre el array de barcazas de las etapas
             var update = Builders<ViajeDetalleMongo>.Update.PullFilter(
                 "ETAPAS.$[].BARCAZAS",
                 Builders<BarcazaMongo>.Filter.Eq(b => b.Nombre, cargaId)
@@ -901,6 +888,7 @@ namespace Mbpc.Api.Services
 
         public async Task<bool> EliminarCargaAsync(string viajeId, string cargaId)
         {
+            await ViajeService.ThrowIfViajeFinalizadoAsync(viajeId);
             _logger.LogInformation("Eliminando carga '{CargaId}' del viaje '{ViajeId}'.", cargaId, viajeId);
 
             if (string.IsNullOrWhiteSpace(viajeId) || string.IsNullOrWhiteSpace(cargaId))
@@ -989,6 +977,7 @@ namespace Mbpc.Api.Services
 
         public async Task<bool> SincronizarAmarreConvoyAsync(string viajeId)
         {
+            await ViajeService.ThrowIfViajeFinalizadoAsync(viajeId);
             try
             {
                 using var scope = _serviceProvider.CreateScope();
@@ -1045,8 +1034,6 @@ namespace Mbpc.Api.Services
                 bool modificado = false;
                 foreach (var barcaza in ultimaEtapa.Barcazas)
                 {
-                    // Al amarrar el remolcador, las barcazas en tránsito pasan a Amarrada:
-                    // se asigna el muelle de destino si aún no tienen uno.
                     if (string.IsNullOrWhiteSpace(barcaza.MuelleActual))
                     {
                         barcaza.MuelleActual = muelleDestino;
@@ -1079,6 +1066,7 @@ namespace Mbpc.Api.Services
 
         public async Task<bool> SincronizarZarpeConvoyAsync(string viajeId)
         {
+            await ViajeService.ThrowIfViajeFinalizadoAsync(viajeId);
             try
             {
                 var viajeService = _serviceProvider.GetRequiredService<IViajeService>();
@@ -1110,8 +1098,6 @@ namespace Mbpc.Api.Services
                 bool modificado = false;
                 foreach (var barcaza in ultimaEtapa.Barcazas)
                 {
-                    // Al zarpar, las barcazas pasan a EnTransito:
-                    // se limpia el muelle actual (ya no están amarradas).
                     if (!string.IsNullOrEmpty(barcaza.MuelleActual))
                     {
                         barcaza.MuelleActual = null;

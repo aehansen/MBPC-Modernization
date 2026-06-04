@@ -4,8 +4,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import axiosInstance from "@/axiosClient";
 import type {
   PersonalViajeDto,
-  EmbarcarPersonalDto,
-  DesembarcarPersonalDto
+  EmbarcarPracticoDto,
+  DesembarcarPracticoDto,
+  EmbarcarInspectorDto,
+  DesembarcarInspectorDto
 } from "@/types/viajes.types";
 
 const ENDPOINT_VIAJES = "/viajes";
@@ -44,23 +46,23 @@ export function useObtenerPersonal(viajeId: string) {
   });
 }
 
-export function useEmbarcarPersonal() {
+export function useEmbarcarPractico() {
   const queryClient = useQueryClient();
 
   return useMutation<
     { Mensaje: string },
     Error,
-    { viajeId: string; payload: EmbarcarPersonalDto }
+    { viajeId: string; payload: EmbarcarPracticoDto }
   >({
     mutationFn: async ({ viajeId, payload }) => {
       try {
         const { data } = await axiosInstance.post(
-          `${ENDPOINT_VIAJES}/${viajeId}/personal/embarcar`,
+          `${ENDPOINT_VIAJES}/${viajeId}/practicos/embarcar`,
           payload
         );
         return data;
       } catch (error: unknown) {
-        throw new Error(extractApiErrorMessage(error, "Error al embarcar personal"));
+        throw new Error(extractApiErrorMessage(error, "Error al embarcar práctico"));
       }
     },
     onSuccess: (_, variables) => {
@@ -69,23 +71,73 @@ export function useEmbarcarPersonal() {
   });
 }
 
-export function useDesembarcarPersonal() {
+export function useDesembarcarPractico() {
   const queryClient = useQueryClient();
 
   return useMutation<
     { Mensaje: string },
     Error,
-    { viajeId: string; dni: string; payload: DesembarcarPersonalDto }
+    { viajeId: string; dni: string; payload: DesembarcarPracticoDto }
   >({
     mutationFn: async ({ viajeId, dni, payload }) => {
       try {
         const { data } = await axiosInstance.put(
-          `${ENDPOINT_VIAJES}/${viajeId}/personal/desembarcar/${dni}`,
+          `${ENDPOINT_VIAJES}/${viajeId}/practicos/${dni}/desembarcar`,
           payload
         );
         return data;
       } catch (error: unknown) {
-        throw new Error(extractApiErrorMessage(error, "Error al desembarcar personal"));
+        throw new Error(extractApiErrorMessage(error, "Error al desembarcar práctico"));
+      }
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: getPersonalQueryKey(variables.viajeId) });
+    }
+  });
+}
+
+export function useEmbarcarInspector() {
+  const queryClient = useQueryClient();
+
+  return useMutation<
+    { Mensaje: string },
+    Error,
+    { viajeId: string; payload: EmbarcarInspectorDto }
+  >({
+    mutationFn: async ({ viajeId, payload }) => {
+      try {
+        const { data } = await axiosInstance.post(
+          `${ENDPOINT_VIAJES}/${viajeId}/inspectores/embarcar`,
+          payload
+        );
+        return data;
+      } catch (error: unknown) {
+        throw new Error(extractApiErrorMessage(error, "Error al embarcar inspector"));
+      }
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: getPersonalQueryKey(variables.viajeId) });
+    }
+  });
+}
+
+export function useDesembarcarInspector() {
+  const queryClient = useQueryClient();
+
+  return useMutation<
+    { Mensaje: string },
+    Error,
+    { viajeId: string; dni: string; payload: DesembarcarInspectorDto }
+  >({
+    mutationFn: async ({ viajeId, dni, payload }) => {
+      try {
+        const { data } = await axiosInstance.put(
+          `${ENDPOINT_VIAJES}/${viajeId}/inspectores/${dni}/desembarcar`,
+          payload
+        );
+        return data;
+      } catch (error: unknown) {
+        throw new Error(extractApiErrorMessage(error, "Error al desembarcar inspector"));
       }
     },
     onSuccess: (_, variables) => {

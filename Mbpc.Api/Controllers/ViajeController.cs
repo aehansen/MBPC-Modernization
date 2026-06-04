@@ -45,7 +45,6 @@ namespace Mbpc.Api.Controllers
                 "GetViajes — CosteraId: {CosteraId} | Nombre: '{Nombre}' | Página: {Pagina} | Tamaño: {Tamanio}",
                 costeraIdClaim, nombre ?? "TODOS", pagina, tamanio);
 
-            // Controlador anoréxico: El mapeo ahora ocurre en el Service (Hito 5.8)
             var viajesDto = await _viajeService.ObtenerViajesDtoAsync(nombre, pagina, tamanio);
 
             return Ok(viajesDto);
@@ -192,7 +191,7 @@ namespace Mbpc.Api.Controllers
                     "IniciarViaje bloqueado por regla de dominio para BuqueId: '{BuqueId}' CosteraId: {CosteraId}. Detalle: {Msg}",
                     nuevoViaje.BuqueId, costeraIdClaim, ex.Message);
 
-                return BadRequest(new { mensaje = ex.Message });
+                return UnprocessableEntity(new { mensaje = ex.Message });
             }
 
             if (!exito)
@@ -252,7 +251,7 @@ namespace Mbpc.Api.Controllers
                     "AmarrarViaje bloqueado por regla de dominio para Id: '{Id}'. Detalle: {Msg}",
                     id, ex.Message);
 
-                return BadRequest(new { mensaje = ex.Message });
+                return UnprocessableEntity(new { mensaje = ex.Message });
             }
 
             if (!exito)
@@ -280,7 +279,7 @@ namespace Mbpc.Api.Controllers
                     "FinalizarViaje bloqueado por regla de dominio para Id: '{Id}'. Detalle: {Msg}",
                     id, ex.Message);
 
-                return BadRequest(new { mensaje = ex.Message });
+                return UnprocessableEntity(new { mensaje = ex.Message });
             }
 
             if (!exito)
@@ -373,7 +372,7 @@ namespace Mbpc.Api.Controllers
                     "ActualizarPosicion bloqueada por cinemática inválida para Id: '{Id}'. Detalle: {Msg}",
                     id, ex.Message);
 
-                return BadRequest("El salto de posición es inválido o excede la velocidad máxima permitida.");
+                return UnprocessableEntity(new { mensaje = "El salto de posición es inválido o excede la velocidad máxima permitida." });
             }
 
             if (resultado is null)
@@ -435,11 +434,11 @@ namespace Mbpc.Api.Controllers
                 _logger.LogWarning(
                     "TransferirJurisdiccion bloqueado por regla de dominio para Id: '{Id}'. Detalle: {Msg}",
                     id, ex.Message);
-                return BadRequest(new { mensaje = ex.Message });
+                return UnprocessableEntity(new { mensaje = ex.Message });
             }
         }
 
-        // ── PERSONAL EXTERNO (Hito 9.0) ──────────────────────────────────────
+        // ── PERSONAL EXTERNO (Hito 9.0 & Hito 19) ────────────────────────────
 
         [HttpGet("{id}/personal")]
         public async Task<IActionResult> ObtenerPersonal(string id)
@@ -449,37 +448,71 @@ namespace Mbpc.Api.Controllers
             return Ok(result);
         }
 
-        [HttpPost("{id}/personal/embarcar")]
-        public async Task<IActionResult> EmbarcarPersonal(string id, [FromBody] EmbarcarPersonalDto dto)
+        [HttpPost("{id}/practicos/embarcar")]
+        public async Task<IActionResult> EmbarcarPractico(string id, [FromBody] EmbarcarPracticoDto dto)
         {
             if (!ModelState.IsValid) return BadRequest(ModelState);
             
             try
             {
-                var result = await _viajeService.EmbarcarPersonalAsync(id, dto);
+                var result = await _viajeService.EmbarcarPracticoAsync(id, dto);
                 if (!result) return NotFound("Viaje no encontrado o no está activo.");
-                return Ok(new { Mensaje = "Personal embarcado correctamente." });
+                return Ok(new { Mensaje = "Práctico embarcado correctamente." });
             }
             catch (InvalidOperationException ex)
             {
-                return BadRequest(new { Error = ex.Message });
+                return UnprocessableEntity(new { Error = ex.Message });
             }
         }
 
-        [HttpPut("{id}/personal/desembarcar/{dni}")]
-        public async Task<IActionResult> DesembarcarPersonal(string id, string dni, [FromBody] DesembarcarPersonalDto dto)
+        [HttpPut("{id}/practicos/{dni}/desembarcar")]
+        public async Task<IActionResult> DesembarcarPractico(string id, string dni, [FromBody] DesembarcarPracticoDto dto)
         {
             if (!ModelState.IsValid) return BadRequest(ModelState);
 
             try
             {
-                var result = await _viajeService.DesembarcarPersonalAsync(id, dni, dto);
-                if (!result) return NotFound("Viaje/Personal no encontrado.");
-                return Ok(new { Mensaje = "Personal desembarcado correctamente." });
+                var result = await _viajeService.DesembarcarPracticoAsync(id, dni, dto);
+                if (!result) return NotFound("Viaje o Práctico no encontrado.");
+                return Ok(new { Mensaje = "Práctico desembarcado correctamente." });
             }
             catch (InvalidOperationException ex)
             {
-                return BadRequest(new { Error = ex.Message });
+                return UnprocessableEntity(new { Error = ex.Message });
+            }
+        }
+
+        [HttpPost("{id}/inspectores/embarcar")]
+        public async Task<IActionResult> EmbarcarInspector(string id, [FromBody] EmbarcarInspectorDto dto)
+        {
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+            
+            try
+            {
+                var result = await _viajeService.EmbarcarInspectorAsync(id, dto);
+                if (!result) return NotFound("Viaje no encontrado o no está activo.");
+                return Ok(new { Mensaje = "Inspector embarcado correctamente." });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return UnprocessableEntity(new { Error = ex.Message });
+            }
+        }
+
+        [HttpPut("{id}/inspectores/{dni}/desembarcar")]
+        public async Task<IActionResult> DesembarcarInspector(string id, string dni, [FromBody] DesembarcarInspectorDto dto)
+        {
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+
+            try
+            {
+                var result = await _viajeService.DesembarcarInspectorAsync(id, dni, dto);
+                if (!result) return NotFound("Viaje o Inspector no encontrado.");
+                return Ok(new { Mensaje = "Inspector desembarcado correctamente." });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return UnprocessableEntity(new { Error = ex.Message });
             }
         }
     }

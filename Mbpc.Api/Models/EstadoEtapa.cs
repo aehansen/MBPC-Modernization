@@ -6,6 +6,7 @@ namespace Mbpc.Api.Models
         Amarrado,
         Navegando,
         Fondeado,
-        Reanudado
+        Reanudado,
+        Finalizado
     }
 }

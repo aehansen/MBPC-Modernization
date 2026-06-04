@@ -121,19 +121,10 @@ namespace Mbpc.Api.Services
 
         // ── PERSONAL EXTERNO (Hito 9.0) ──────────────────────────────────────
 
-        /// <summary>
-        /// Embarca un Inspector o Práctico en el viaje indicado.
-        /// Regla fail-fast: lanza InvalidOperationException si el DNI ya está embarcado
-        /// (FechaDesembarque == null) en cualquier otro viaje activo.
-        /// </summary>
-        Task<bool> EmbarcarPersonalAsync(string viajeId, EmbarcarPersonalDto dto);
-
-        /// <summary>
-        /// Registra el desembarque del personal externo identificado por su DNI.
-        /// Usa ArrayFilters de MongoDB para actualizar solo el subdocumento activo.
-        /// Lanza InvalidOperationException si el DNI no se encuentra activo en el viaje.
-        /// </summary>
-        Task<bool> DesembarcarPersonalAsync(string viajeId, string dni, DesembarcarPersonalDto dto);
+        Task<bool> EmbarcarPracticoAsync(string viajeId, EmbarcarPracticoDto dto);
+        Task<bool> DesembarcarPracticoAsync(string viajeId, string dni, DesembarcarPracticoDto dto);
+        Task<bool> EmbarcarInspectorAsync(string viajeId, EmbarcarInspectorDto dto);
+        Task<bool> DesembarcarInspectorAsync(string viajeId, string dni, DesembarcarInspectorDto dto);
 
         /// <summary>
         /// Retorna el personal externo (inspectores y prácticos) embarcado en un viaje.
@@ -145,5 +136,10 @@ namespace Mbpc.Api.Services
         /// Transfiere la jurisdicción de un viaje a otra dependencia (Costera).
         /// </summary>
         Task<bool> TransferirJurisdiccionAsync(string id, TransferirJurisdiccionDto dto);
+
+        /// <summary>
+        /// Valida si el viaje está finalizado y lanza InvalidOperationException si es así.
+        /// </summary>
+        Task ThrowIfViajeFinalizadoAsync(string viajeId);
     }
 }

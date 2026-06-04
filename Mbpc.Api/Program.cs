@@ -156,9 +156,6 @@ app.UseExceptionHandler(errApp =>
 {
     errApp.Run(async context =>
     {
-        context.Response.StatusCode  = 500;
-        context.Response.ContentType = "application/json";
-
         var feature = context.Features
             .Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>();
 
@@ -168,6 +165,20 @@ app.UseExceptionHandler(errApp =>
 
         logger.LogError(error, "Excepción no manejada");
 
+        context.Response.ContentType = "application/json";
+
+        if (error is InvalidOperationException)
+        {
+            context.Response.StatusCode = 422;
+            await context.Response.WriteAsJsonAsync(new
+            {
+                mensaje = error.Message,
+                detalle = error.Message
+            });
+            return;
+        }
+
+        context.Response.StatusCode = 500;
         await context.Response.WriteAsJsonAsync(new
         {
             mensaje = "Ocurrió un error interno. Por favor contacte al administrador.",

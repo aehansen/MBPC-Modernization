@@ -203,14 +203,22 @@ export interface PersonalViajeDto {
   practicos: PersonalItemDto[];
 }
 
-export interface EmbarcarPersonalDto {
+export interface EmbarcarPracticoDto {
   dni: string;
   nombreApellido: string;
-  tipoPersonal: "Inspector" | "Practico";
   fechaEmbarque?: string;
 }
 
-export interface DesembarcarPersonalDto {
-  tipoPersonal: "Inspector" | "Practico";
+export interface DesembarcarPracticoDto {
+  fechaDesembarque?: string;
+}
+
+export interface EmbarcarInspectorDto {
+  dni: string;
+  nombreApellido: string;
+  fechaEmbarque?: string;
+}
+
+export interface DesembarcarInspectorDto {
   fechaDesembarque?: string;
 }
