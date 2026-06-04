@@ -112,6 +112,9 @@ namespace Mbpc.Api.Models.Mongo
         [BsonElement("DatosPbip")]
         [BsonIgnoreIfNull]
         public DatosPbipMongo? DatosPbip { get; set; }
+
+        [BsonElement("Eventos")]
+        public List<EventoViajeMongo> Eventos { get; set; } = new();
     }
 
     [BsonIgnoreExtraElements]

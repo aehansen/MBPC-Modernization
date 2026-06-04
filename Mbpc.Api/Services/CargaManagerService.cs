@@ -12,6 +12,8 @@ using Mbpc.Api.DTOs;
 using Mbpc.Api.DTOs.Convoy;
 using System.Data;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.AspNetCore.Http;
+using System.Security.Claims;
 
 namespace Mbpc.Api.Services
 {
@@ -384,9 +386,12 @@ namespace Mbpc.Api.Services
 
                         if (barcazaTarget is not null)
                         {
+                            var anterior = barcazaTarget.MuelleActual;
                             barcazaTarget.MuelleActual = nuevoMuelle;
                             var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
                             await _detailsCollection.ReplaceOneAsync(filtroId, doc, cancellationToken: cancellationToken);
+                            await RegistrarEventoCargaDirectoAsync(doc, TipoEventoViaje.BARCAZA_AMARRADA, 
+                                $"Barcaza '{id}' amarrada en muelle '{nuevoMuelle}'.", anterior, nuevoMuelle);
                             InvalidarCacheViajePorBuque(doc.VesselName);
                         }
                     }
@@ -441,9 +446,12 @@ namespace Mbpc.Api.Services
 
                         if (barcazaTarget is not null)
                         {
+                            var anterior = barcazaTarget.MuelleActual;
                             barcazaTarget.MuelleActual = zonaFondeo;
                             var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
                             await _detailsCollection.ReplaceOneAsync(filtroId, doc, cancellationToken: cancellationToken);
+                            await RegistrarEventoCargaDirectoAsync(doc, TipoEventoViaje.BARCAZA_FONDEADA, 
+                                $"Barcaza '{id}' fondeada en zona '{zonaFondeo}'.", anterior, zonaFondeo);
                             InvalidarCacheViajePorBuque(doc.VesselName);
                         }
                     }
@@ -498,9 +506,12 @@ namespace Mbpc.Api.Services
 
                         if (barcazaTarget is not null)
                         {
+                            var anterior = barcazaTarget.Cantidad?.ToString() ?? "0";
                             barcazaTarget.Cantidad = toneladas;
                             var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
                             await _detailsCollection.ReplaceOneAsync(filtroId, doc, cancellationToken: cancellationToken);
+                            await RegistrarEventoCargaDirectoAsync(doc, TipoEventoViaje.BARCAZA_CARGADA, 
+                                $"Carga registrada para la barcaza '{id}': {toneladas} Tn.", anterior, toneladas.ToString());
                             InvalidarCacheViajePorBuque(doc.VesselName);
                         }
                     }
@@ -555,6 +566,7 @@ namespace Mbpc.Api.Services
 
                         if (barcazaTarget is not null)
                         {
+                            var anterior = barcazaTarget.Cantidad?.ToString() ?? "0";
                             barcazaTarget.Cantidad = toneladas;
                             if (toneladas == 0)
                             {
@@ -564,6 +576,8 @@ namespace Mbpc.Api.Services
 
                             var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
                             await _detailsCollection.ReplaceOneAsync(filtroId, doc, cancellationToken: cancellationToken);
+                            await RegistrarEventoCargaDirectoAsync(doc, TipoEventoViaje.BARCAZA_DESCARGADA, 
+                                $"Descarga registrada para la barcaza '{id}': {toneladas} Tn.", anterior, toneladas.ToString());
                             InvalidarCacheViajePorBuque(doc.VesselName);
                         }
                     }
@@ -728,6 +742,9 @@ namespace Mbpc.Api.Services
                     var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
                     await _detailsCollection.ReplaceOneAsync(filtroId, doc);
 
+                    await RegistrarEventoCargaDirectoAsync(doc, TipoEventoViaje.BARCAZA_ADJUNTADA, 
+                        $"Barcaza '{nuevaBarcazaDoc.Nombre}' adjuntada al convoy con carga '{nuevaBarcazaDoc.Carga}' de {nuevaBarcazaDoc.Cantidad} Tn.", null, nuevaBarcazaDoc.Nombre);
+
                     _cache.Remove($"{CacheKeyPrefixCargas}{viajeId}");
                     _logger.LogInformation(
                         "¡CQRS Exitoso! Carga BarcazaId={BarcazaId} agregada al documento MongoDB '{DocId}' " +
@@ -792,12 +809,17 @@ namespace Mbpc.Api.Services
                     if (barcazaTarget is not null)
                     {
                         var tipoCarga = await _tipoCargaService.ObtenerPorIdAsync(dto.MercaderiaId);
+                        var anteriorDetalle = $"Carga: {barcazaTarget.Carga}, Cantidad: {barcazaTarget.Cantidad}";
                         barcazaTarget.Carga        = tipoCarga?.Nombre ?? "A Definir";
                         barcazaTarget.Cantidad     = dto.Tonelaje;
                         barcazaTarget.MercaderiaId = dto.MercaderiaId;
 
                         var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
                         await _detailsCollection.ReplaceOneAsync(filtroId, doc);
+
+                        await RegistrarEventoCargaDirectoAsync(doc, TipoEventoViaje.CARGA_MODIFICADA, 
+                            $"Carga modificada para barcaza '{id}'. Nueva Mercadería: {barcazaTarget.Carga}, Toneladas: {dto.Tonelaje}.", 
+                            anteriorDetalle, $"Carga: {barcazaTarget.Carga}, Cantidad: {dto.Tonelaje}");
 
                         _logger.LogInformation(
                             "¡CQRS Exitoso! Barcaza '{BarcazaId}' modificada en MongoDB para el documento '{DocId}' (ViajeId='{ViajeId}').",
@@ -866,6 +888,9 @@ namespace Mbpc.Api.Services
                     cargaId, doc.Id);
                 return false;
             }
+
+            await RegistrarEventoCargaDirectoAsync(doc, TipoEventoViaje.BARCAZA_SEPARADA, 
+                $"Barcaza '{cargaId}' separada del convoy (eliminada del detalle operativo).", cargaId, null);
 
             _logger.LogInformation(
                 "EliminarCargaDesdeMongoDb: Carga '{CargaId}' eliminada atómicamente del documento '{DocId}' (ViajeId='{ViajeId}').",
@@ -1160,6 +1185,38 @@ namespace Mbpc.Api.Services
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "No se pudo limpiar la caché del viaje tras actualizar la barcaza {Id}", idBarcaza);
+            }
+        }
+
+        private async Task RegistrarEventoCargaDirectoAsync(ViajeDetalleMongo doc, TipoEventoViaje tipo, string detalle, string? anterior = null, string? nuevo = null)
+        {
+            try
+            {
+                var httpContextAccessor = _serviceProvider.GetService<IHttpContextAccessor>();
+                var user = httpContextAccessor?.HttpContext?.User;
+                string usuario = user?.Identity?.Name 
+                                 ?? user?.FindFirst(ClaimTypes.NameIdentifier)?.Value 
+                                 ?? user?.FindFirst(ClaimTypes.Name)?.Value 
+                                 ?? "Sistema";
+
+                var nuevoEvento = new EventoViajeMongo
+                {
+                    TipoEvento = tipo,
+                    FechaHora = DateTime.UtcNow,
+                    Usuario = usuario,
+                    Detalle = detalle,
+                    EstadoAnterior = anterior,
+                    EstadoNuevo = nuevo
+                };
+
+                var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
+                var update = Builders<ViajeDetalleMongo>.Update.Push(d => d.Eventos, nuevoEvento);
+                await _detailsCollection.UpdateOneAsync(filtroId, update);
+                _logger.LogInformation("Evento de carga registrado directamente para el viaje '{Id}': {Tipo}", doc.Id, tipo);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al registrar evento de carga directo '{Tipo}' para el viaje '{Id}'.", tipo, doc.Id);
             }
         }
     }

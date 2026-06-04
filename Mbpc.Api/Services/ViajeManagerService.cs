@@ -12,6 +12,7 @@ using Mbpc.Api.Services.Auth;
 using Microsoft.Extensions.Hosting;
 using Polly;
 using Polly.Retry;
+using Microsoft.AspNetCore.Http;
 using System.Data;
 using System.Security.Claims;
 using System.Text.Json;
@@ -30,6 +31,7 @@ namespace Mbpc.Api.Services
         private readonly ICosteraUserContext                   _costeraUserContext;
         private readonly ICargaService                         _cargaService;
         private readonly IBuqueService                         _buqueService;
+        private readonly IHttpContextAccessor                  _httpContextAccessor;
 
         private static readonly AsyncRetryPolicy _oracleRetryPolicy = Policy
             .Handle<OracleException>()
@@ -73,7 +75,8 @@ namespace Mbpc.Api.Services
             IDistributedCache             cache,
             ICosteraUserContext           costeraUserContext,
             ICargaService                 cargaService,
-            IBuqueService                 buqueService) 
+            IBuqueService                 buqueService,
+            IHttpContextAccessor          httpContextAccessor) 
         {
             var database = mongoClient.GetDatabase(mongoSettings.Value.DatabaseName);
 
@@ -93,6 +96,7 @@ namespace Mbpc.Api.Services
             _costeraUserContext     = costeraUserContext;
             _cargaService           = cargaService;
             _buqueService           = buqueService;
+            _httpContextAccessor    = httpContextAccessor;
         }
 
         private static FilterDefinition<ViajePosicionMongo> BuildFiltroCostera(int costeraId)
@@ -962,7 +966,12 @@ namespace Mbpc.Api.Services
                     $"No se puede finalizar el viaje '{id}' porque {string.Join(" y ", motivos)}.");
             }
 
-            return await CambiarEstadoNavegacionAsync(id, "Finalizado");
+            var exito = await CambiarEstadoNavegacionAsync(id, "Finalizado");
+            if (exito)
+            {
+                await RegistrarEventoAsync(id, TipoEventoViaje.FINALIZACION, $"Finalización del viaje. Estado anterior: {estadoRaw}", estadoRaw, "Finalizado");
+            }
+            return exito;
         }
 
         public async Task<PersonalViajeDto?> ObtenerPersonalAsync(string viajeId)
@@ -1090,7 +1099,20 @@ namespace Mbpc.Api.Services
                     "Se omite la validación de transición y se aplica '{Destino}' de todas formas.",
                     viajeActual.NavegationStatusDesc, id, estadoDestino);
 
-                return await CambiarEstadoNavegacionAsync(id, estadoDestino.ToString());
+                var resultBypass = await CambiarEstadoNavegacionAsync(id, estadoDestino.ToString());
+                if (resultBypass)
+                {
+                    var tipoBypass = estadoDestino switch
+                    {
+                        EstadoEtapa.Navegando => TipoEventoViaje.ZARPE,
+                        EstadoEtapa.Amarrado => TipoEventoViaje.AMARRE,
+                        EstadoEtapa.Fondeado => TipoEventoViaje.FONDEO,
+                        EstadoEtapa.Reanudado => TipoEventoViaje.REANUDACION,
+                        _ => TipoEventoViaje.ZARPE
+                    };
+                    await RegistrarEventoAsync(id, tipoBypass, $"Transición de estado por bypass: {viajeActual.NavegationStatusDesc} ➔ {estadoDestino}", viajeActual.NavegationStatusDesc, estadoDestino.ToString());
+                }
+                return resultBypass;
             }
 
             if (!_transicionesPermitidas.TryGetValue(estadoActual, out var transicionesValidas)
@@ -1125,7 +1147,21 @@ namespace Mbpc.Api.Services
                 "Transición VÁLIDA para viaje '{Id}': '{Actual}' → '{Destino}'. Ejecutando update en MongoDB.",
                 id, estadoActual, estadoDestino);
 
-            return await CambiarEstadoNavegacionAsync(id, estadoDestino.ToString());
+            var exito = await CambiarEstadoNavegacionAsync(id, estadoDestino.ToString());
+            if (exito)
+            {
+                var tipoEvento = estadoDestino switch
+                {
+                    EstadoEtapa.Navegando => TipoEventoViaje.ZARPE,
+                    EstadoEtapa.Amarrado => TipoEventoViaje.AMARRE,
+                    EstadoEtapa.Fondeado => TipoEventoViaje.FONDEO,
+                    EstadoEtapa.Reanudado => TipoEventoViaje.REANUDACION,
+                    _ => TipoEventoViaje.ZARPE
+                };
+
+                await RegistrarEventoAsync(id, tipoEvento, $"Transición de estado: {estadoActual} ➔ {estadoDestino}", estadoActual.ToString(), estadoDestino.ToString());
+            }
+            return exito;
         }
 
         private static FilterDefinition<ViajePosicionMongo> BuildFiltroViaje(string id)
@@ -1336,7 +1372,15 @@ namespace Mbpc.Api.Services
                 _logger.LogWarning(redisEx, "No se pudo invalidar la caché de Redis tras la transferencia de jurisdicción.");
             }
 
-            return resultPosicion.ModifiedCount > 0 || resultDetalle.ModifiedCount > 0;
+            var modificado = resultPosicion.ModifiedCount > 0 || resultDetalle.ModifiedCount > 0;
+            if (modificado)
+            {
+                await RegistrarEventoAsync(id, TipoEventoViaje.TRANSFERENCIA_JURISDICCION,
+                    $"Transferencia de jurisdicción de la Costera {costeraId} a la Costera {dto.NuevaCosteraId}.",
+                    costeraId.ToString(), dto.NuevaCosteraId.ToString());
+            }
+
+            return modificado;
         }
 
         private void ValidarFechaEvento(DateTime fecha, DateTime fechaCreacionViaje)
@@ -1360,6 +1404,45 @@ namespace Mbpc.Api.Services
             throw new InvalidOperationException(
                 $"El enum DeclaracionMalvinasEnum '{nombreCompleto}' no sigue la convención de nombres '_LETRA'. " +
                 $"Segmento extraído: '{ultimoSegmento}'. Revise los nombres de los valores del enum.");
+        }
+
+        private async Task RegistrarEventoAsync(string viajeId, TipoEventoViaje tipo, string detalle, string? anterior = null, string? nuevo = null)
+        {
+            try
+            {
+                var user = _httpContextAccessor.HttpContext?.User;
+                string usuario = user?.Identity?.Name 
+                                 ?? user?.FindFirst(ClaimTypes.NameIdentifier)?.Value 
+                                 ?? user?.FindFirst(ClaimTypes.Name)?.Value 
+                                 ?? "Sistema";
+
+                var nuevoEvento = new EventoViajeMongo
+                {
+                    TipoEvento = tipo,
+                    FechaHora = DateTime.UtcNow,
+                    Usuario = usuario,
+                    Detalle = detalle,
+                    EstadoAnterior = anterior,
+                    EstadoNuevo = nuevo
+                };
+
+                var (viajeDetalle, _) = await GetViajeDetalleByIdAsync(viajeId);
+                if (viajeDetalle != null)
+                {
+                    var filtroDetalle = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, viajeDetalle.Id);
+                    var updateDetalle = Builders<ViajeDetalleMongo>.Update.Push(d => d.Eventos, nuevoEvento);
+                    await _detallesCollection.UpdateOneAsync(filtroDetalle, updateDetalle);
+                    _logger.LogInformation("Evento registrado con éxito en MongoDB para el viaje '{Id}': {Tipo}", viajeId, tipo);
+                }
+                else
+                {
+                    _logger.LogWarning("No se pudo registrar el evento '{Tipo}' porque no se encontró el detalle operativo para el viaje '{Id}'.", tipo, viajeId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al registrar el evento de auditoría '{Tipo}' para el viaje '{Id}'.", tipo, viajeId);
+            }
         }
     }
 }
