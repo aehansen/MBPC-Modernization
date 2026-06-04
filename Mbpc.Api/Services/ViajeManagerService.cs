@@ -408,6 +408,7 @@ namespace Mbpc.Api.Services
                                         ? detalle.Destination
                                         : p.Destination,
                             TieneDetalleOperativo = tieneDetalle,
+                            CosteraId             = p.CosteraId ?? 0,
                             CantidadBarcazas = tieneDetalle ? (detalle?.Etapas?.Sum(e => e.Barcazas?.Count ?? 0) ?? 0) : 0,
                             Remolcador       = tieneDetalle ? detalle?.Etapas?.LastOrDefault()?.Remolcador?.Nombre : null
                         };

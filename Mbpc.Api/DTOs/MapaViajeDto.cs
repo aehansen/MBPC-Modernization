@@ -33,6 +33,7 @@ namespace Mbpc.Api.DTOs
         /// El frontend puede usar esto para mostrar un ícono de calidad del dato.
         /// </summary>
         public bool TieneDetalleOperativo { get; set; }
+        public int CosteraId { get; set; }
 
         // ── Manifiesto (si existe en ViajeDetalleMongo) ──────────────────────
         public int CantidadBarcazas { get; set; }

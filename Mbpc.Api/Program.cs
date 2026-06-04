@@ -6,6 +6,7 @@ using MongoDB.Driver;
 using Mbpc.Api.Models.Config;
 using Mbpc.Api.Services;
 using Mbpc.Api.Services.Auth;
+using Mbpc.Api.Workers;
 using Oracle.ManagedDataAccess.Client;
 using System.Text;
 using System.Text.Json;
@@ -121,6 +122,9 @@ builder.Services.AddScoped<ICargaService, CargaManagerService>();
 builder.Services.AddScoped<IConvoyManagerService, ConvoyManagerService>();
 builder.Services.AddScoped<IBuqueService, BuqueManagerService>();
 builder.Services.AddScoped<ICosteraService, CosteraManagerService>();
+
+// ── Background Workers / Hosted Services ──────────────────────────────────────
+builder.Services.AddHostedService<ReconciliacionEspacialWorker>();
 
 // ── Servicio de Chat / IA ────────────────────────────────────────────────────
 builder.Services.AddScoped<IChatService, ChatManagerService>();
