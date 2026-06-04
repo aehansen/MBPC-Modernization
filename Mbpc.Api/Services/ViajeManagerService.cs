@@ -1257,9 +1257,6 @@ namespace Mbpc.Api.Services
                 throw new InvalidOperationException($"No se encontró el viaje '{id}' para la jurisdicción actual (Costera {costeraId}).");
             }
 
-            // Validación de fecha del evento (usando DateTime.UtcNow como referencia)
-            ValidarFechaEvento(DateTime.UtcNow, viaje.MsgTime);
-
             // Asegurar Transaccionalidad con Oracle (Clonando el doCall legacy)
             bool exitoOracle = false;
             try

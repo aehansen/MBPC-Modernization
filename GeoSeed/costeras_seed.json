@@ -1,0 +1,529 @@
+[
+  {
+    "costeraId": 1,
+    "nombre": "Jurisdicción Marina 1",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -59.86030411322212,
+          -33.279378905472726
+        ],
+        [
+          -59.86090022729039,
+          -34.00003632148529
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 2,
+    "nombre": "Jurisdicción Marina 2",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -59.3724053711647,
+          -33.38753241637921
+        ],
+        [
+          -59.372884767740786,
+          -33.95508210836045
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 3,
+    "nombre": "Jurisdicción Marina 3",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -58.56862004243554,
+          -33.91744420152722
+        ],
+        [
+          -58.291440465223644,
+          -33.91744420152722
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 4,
+    "nombre": "Jurisdicción Marina 4",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -58.5707914926737,
+          -34.28739537961529
+        ],
+        [
+          -58.54243304209094,
+          -34.41139666416696
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 5,
+    "nombre": "Jurisdicción Marina 5",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -58.5707914926737,
+          -34.28739537961529
+        ],
+        [
+          -58.209067357815826,
+          -34.06355660519122
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 6,
+    "nombre": "Jurisdicción Marina 6",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -58.54238594833768,
+          -34.41168939328213
+        ],
+        [
+          -58.53268463516689,
+          -34.45014500443853
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 7,
+    "nombre": "Jurisdicción Marina 7",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -60.32954265325263,
+          -33.09627350742447
+        ],
+        [
+          -60.32954265325263,
+          -33.29939944421594
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 8,
+    "nombre": "Jurisdicción Marina 8",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -60.951263877695595,
+          -32.46631827784714
+        ],
+        [
+          -60.46828897694629,
+          -32.46631827784714
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 9,
+    "nombre": "Jurisdicción Marina 9",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -60.851241568562614,
+          -31.829935500752587
+        ],
+        [
+          -60.40659761428181,
+          -31.829935500752587
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 10,
+    "nombre": "Jurisdicción Marina 10",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -60.18681659437107,
+          -31.061800330495604
+        ],
+        [
+          -59.70020227846817,
+          -31.061573962686104
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 11,
+    "nombre": "Jurisdicción Marina 11",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -59.63842826401335,
+          -30.03022690026579
+        ],
+        [
+          -59.56091467228261,
+          -30.030163041287235
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 12,
+    "nombre": "Jurisdicción Marina 12",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -59.67568618763707,
+          -29.308981825119876
+        ],
+        [
+          -59.49925732089887,
+          -29.308981825119876
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 13,
+    "nombre": "Jurisdicción Marina 13",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -58.945440608163956,
+          -28.086502827886722
+        ],
+        [
+          -58.945354329551044,
+          -28.14346121772136
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 14,
+    "nombre": "Jurisdicción Marina 14",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -57.38826773847344,
+          -35.83327321013126
+        ],
+        [
+          -54.99840300131677,
+          -35.8295306147953
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 15,
+    "nombre": "Jurisdicción Marina 15",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -56.934358999927134,
+          -36.50026581471205
+        ],
+        [
+          -55.23370261401063,
+          -36.50026581471205
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 16,
+    "nombre": "Jurisdicción Marina 16",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -65.0770870964284,
+          -41.98944479060541
+        ],
+        [
+          -56.06176418042563,
+          -41.98208577316611
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 17,
+    "nombre": "Jurisdicción Marina 17",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -61.44020796741054,
+          -39.400275475546295
+        ],
+        [
+          -62.14018943463577,
+          -39.400275475546295
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 18,
+    "nombre": "Jurisdicción Marina 18",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -61.42943902176091,
+          -39.400275475546295
+        ],
+        [
+          -61.42943902176091,
+          -38.989671463330495
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 19,
+    "nombre": "Jurisdicción Marina 19",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -66.33950019670509,
+          -54.5017881014521
+        ],
+        [
+          -60.08892009037751,
+          -54.5017881014521
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 20,
+    "nombre": "Jurisdicción Marina 20",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -58.61489485111074,
+          -27.315518595400057
+        ],
+        [
+          -58.655257886158275,
+          -27.315518595400057
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 21,
+    "nombre": "Jurisdicción Marina 21",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -58.27820659200964,
+          -26.787795828878423
+        ],
+        [
+          -58.28632497834411,
+          -26.787795828878423
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 22,
+    "nombre": "Jurisdicción Marina 22",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -57.845905232032244,
+          -25.9947243710721
+        ],
+        [
+          -57.854571856748024,
+          -25.9947243710721
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 23,
+    "nombre": "Jurisdicción Marina 23",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -57.66468983667286,
+          -25.355970120804304
+        ],
+        [
+          -57.64447836284985,
+          -25.355970120804304
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 24,
+    "nombre": "Jurisdicción Marina 24",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -58.59668483489131,
+          -27.314844705362475
+        ],
+        [
+          -58.58811699371057,
+          -27.322322538821687
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 25,
+    "nombre": "Jurisdicción Marina 25",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -57.859926933887586,
+          -27.29962686491396
+        ],
+        [
+          -57.84496042581079,
+          -27.282622830892297
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 26,
+    "nombre": "Jurisdicción Marina 26",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -57.25264071063696,
+          -27.431422248672327
+        ],
+        [
+          -57.25264071063696,
+          -27.48429013331057
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 27,
+    "nombre": "Jurisdicción Marina 27",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -56.553187102135325,
+          -27.347032159922612
+        ],
+        [
+          -56.553187102135325,
+          -27.47968501432837
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 28,
+    "nombre": "Jurisdicción Marina 28",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -55.570839175779376,
+          -27.13163351208934
+        ],
+        [
+          -55.56005265673027,
+          -27.13163351208934
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 29,
+    "nombre": "Jurisdicción Marina 29",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -54.96123489425575,
+          -26.78125328256715
+        ],
+        [
+          -54.95625798110313,
+          -26.783486720658
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 30,
+    "nombre": "Jurisdicción Marina 30",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -54.681233494113336,
+          -26.34878153274472
+        ],
+        [
+          -54.67791339563135,
+          -26.349310599863895
+        ]
+      ]
+    }
+  },
+  {
+    "costeraId": 31,
+    "nombre": "Jurisdicción Marina 31",
+    "geometria": {
+      "type": "LineString",
+      "coordinates": [
+        [
+          -54.564094260849394,
+          -25.59122837205086
+        ],
+        [
+          -54.59627378909642,
+          -25.58929411740167
+        ]
+      ]
+    }
+  }
+]

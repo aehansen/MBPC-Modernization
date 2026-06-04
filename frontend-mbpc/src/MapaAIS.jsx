@@ -1,17 +1,18 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import "@arcgis/core/assets/esri/themes/light/main.css";
 import apiClient from "./axiosClient";
-import { useTransferirViaje } from "./hooks/useViajes";
+import { useTransferirJurisdiccion } from "./hooks/useTransferirJurisdiccion";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MapaAIS.jsx  (v2 — FeatureLayer + Clustering + Popup Institucional + Viboreo)
+// MapaAIS.jsx  (v3 — Hito 14: Polígonos Dinámicos vía GeoJSONLayer + Geofencing)
 //
-// Cambios respecto a v1:
-//   • buqueLayer migrado de GraphicsLayer → FeatureLayer client-side con
-//     featureReduction clustering (clusterRadius 80px).
-//   • Popup reemplazado por función content() que retorna HTML institucional PNA.
-//   • zoomABuque ahora agrega un anillo cyan de "viboreo" sobre un GraphicsLayer
-//     temporal y lo remueve a los 3 segundos.
+// Cambios respecto a v2:
+//   • Eliminada la constante COSTERAS_POLIGONOS (hardcodeada).
+//   • Se agrega GeoJSONLayer dinámico cargado desde /api/costeras/limites.
+//   • Blob Hack: el JWT de Axios se usa para descargar el GeoJSON y convertirlo
+//     en una URL de objeto para que GeoJSONLayer pueda consumirlo sin CORS.
+//   • costerasGeometriesRef reemplaza la lista estática para el motor Geofencing.
+//   • GeoJSONLayer se inserta DEBAJO del FeatureLayer de buques.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── Paleta de estados ────────────────────────────────────────────────────────
@@ -81,47 +82,35 @@ const FIELDS_BUQUE = [
   { name: "longitud",           alias: "Longitud",                type: "double" },
 ];
 
-// ── Polígonos de Jurisdicciones (Costeras) para Geofencing ───────────────────
-const COSTERAS_POLIGONOS = [
-  {
-    id: 1,
-    nombre: "Costera Río de la Plata Norte",
-    rings: [
-      [
-        [-58.5, -34.0],
-        [-57.8, -34.0],
-        [-57.8, -34.8],
-        [-58.5, -34.8],
-        [-58.5, -34.0]
-      ]
-    ]
-  },
-  {
-    id: 2,
-    nombre: "Costera Río de la Plata Sur",
-    rings: [
-      [
-        [-57.8, -34.0],
-        [-57.0, -34.0],
-        [-57.0, -34.8],
-        [-57.8, -34.8],
-        [-57.8, -34.0]
-      ]
-    ]
+const getOperatorCosteraId = () => {
+  const token = localStorage.getItem("mbpc_token");
+  if (!token) return null;
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1]));
+    return Number(payload.CosteraId || payload.costeraId || 0);
+  } catch (e) {
+    return null;
   }
-];
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 export default function MapaAIS() {
-  const mapDiv         = useRef(null);
-  const viewRef        = useRef(null);
-  const featureLayerRef= useRef(null);  // FeatureLayer client-side (buques + clustering)
-  const routeLayerRef  = useRef(null);  // GraphicsLayer (rutas)
-  const highlightLayerRef = useRef(null); // GraphicsLayer temporal (anillo de viboreo)
-  const arcgisRef      = useRef(null);
-  const oidCounter     = useRef(1);     // ObjectID auto-incremental para el FeatureLayer
+  const mapDiv            = useRef(null);
+  const viewRef           = useRef(null);
+  const featureLayerRef   = useRef(null);  // FeatureLayer client-side (buques + clustering)
+  const routeLayerRef     = useRef(null);  // GraphicsLayer (rutas)
+  const highlightLayerRef = useRef(null);  // GraphicsLayer temporal (anillo de viboreo)
+  const arcgisRef         = useRef(null);
+  const oidCounter        = useRef(1);     // ObjectID auto-incremental para el FeatureLayer
   const jurisdiccionPreviaRef = useRef({});
-  const { mutate: transferirViaje } = useTransferirViaje();
+  const alertasMostradasRef = useRef({});
+
+  // ── Ref de geometrías de costeras para el motor de Geofencing ──────────────
+  // Cada entrada: { id: number, nombre: string, poligonoArcgis: Polygon[] }
+  // (puede haber múltiples Polygon por entrada si el tipo es MultiPolygon)
+  const costerasGeometriesRef = useRef([]);
+
+  const { mutate: transferirJurisdiccion } = useTransferirJurisdiccion();
 
   const [buques,         setBuques]        = useState([]);
   const [filtroTexto,    setFiltroTexto]   = useState("");
@@ -129,17 +118,48 @@ export default function MapaAIS() {
   const [cargando,       setCargando]      = useState(true);
   const [error,          setError]         = useState(null);
   const [panelAbierto,   setPanelAbierto]  = useState(true);
+  const [transferenciaPendiente, setTransferenciaPendiente] = useState(null);
+
+  const handleConfirmarTransferencia = () => {
+    if (transferenciaPendiente) {
+      const { viajeId, nuevaCosteraId } = transferenciaPendiente;
+      jurisdiccionPreviaRef.current[viajeId] = nuevaCosteraId;
+      transferirJurisdiccion({ viajeId, nuevaCosteraId }, {
+        onSuccess: () => {
+          setTransferenciaPendiente(null);
+          delete alertasMostradasRef.current[viajeId];
+        },
+        onError: () => {
+          delete alertasMostradasRef.current[viajeId];
+          setTransferenciaPendiente(null);
+        }
+      });
+    }
+  };
+
+  const handleCancelarTransferencia = () => {
+    if (transferenciaPendiente) {
+      const { viajeId, previoId } = transferenciaPendiente;
+      jurisdiccionPreviaRef.current[viajeId] = previoId;
+      delete alertasMostradasRef.current[viajeId];
+      setTransferenciaPendiente(null);
+    }
+  };
 
   // ── 1. Inicializar ArcGIS ──────────────────────────────────────────────────
   useEffect(() => {
     let vista;
+    let blobUrl = null; // se revoca en el cleanup para evitar memory leaks
 
     async function init() {
+      console.info("[MapaAIS] Iniciando carga de módulos ArcGIS...");
+
       const [
         { default: Map              },
         { default: MapView          },
         { default: GraphicsLayer    },
         { default: FeatureLayer     },
+        { default: GeoJSONLayer     },
         { default: Graphic          },
         { default: Point            },
         { default: SimpleMarkerSymbol },
@@ -153,6 +173,7 @@ export default function MapaAIS() {
         import("@arcgis/core/views/MapView.js"),
         import("@arcgis/core/layers/GraphicsLayer.js"),
         import("@arcgis/core/layers/FeatureLayer.js"),
+        import("@arcgis/core/layers/GeoJSONLayer.js"),
         import("@arcgis/core/Graphic.js"),
         import("@arcgis/core/geometry/Point.js"),
         import("@arcgis/core/symbols/SimpleMarkerSymbol.js"),
@@ -163,24 +184,23 @@ export default function MapaAIS() {
         import("@arcgis/core/geometry/Polygon.js"),
       ]);
 
+      console.info("[MapaAIS] Módulos ArcGIS cargados correctamente.");
       esriConfig.apiKey = "";
 
       arcgisRef.current = {
         Graphic, Point, SimpleMarkerSymbol, SimpleLineSymbol, Polyline, FeatureLayer, geometryEngine, Polygon
       };
 
-      // ── Rutas (GraphicsLayer estático) ──
-      const routeLayer  = new GraphicsLayer({ id: "rutas" });
+      // ── Capas base siempre presentes ──────────────────────────────────────
+      const routeLayer = new GraphicsLayer({ id: "rutas" });
       routeLayerRef.current = routeLayer;
 
-      // ── Highlight temporal (GraphicsLayer para el anillo de viboreo) ──
       const highlightLayer = new GraphicsLayer({ id: "highlight", listMode: "hide" });
       highlightLayerRef.current = highlightLayer;
 
-      // ── FeatureLayer client-side para buques (habilita clustering) ──
       const buqueFeatureLayer = new FeatureLayer({
         id             : "buques",
-        source         : [],          // Se poblará dinámicamente via applyEdits
+        source         : [],
         fields         : FIELDS_BUQUE,
         objectIdField  : "ObjectID",
         geometryType   : "point",
@@ -189,13 +209,61 @@ export default function MapaAIS() {
         popupTemplate  : buildPopupTemplate(),
         featureReduction: FEATURE_REDUCTION_CLUSTER,
       });
-
       featureLayerRef.current = buqueFeatureLayer;
 
-      const map = new Map({
-        basemap: "osm",
-        layers : [routeLayer, buqueFeatureLayer, highlightLayer],
-      });
+      // ── Intentar carga de jurisdicciones (Blob Hack) ──────────────────────
+      // Si falla, el mapa igual se levanta con el basemap y los buques.
+      try {
+        blobUrl = await cargarPoligonosJurisdicciones(Polygon);
+      } catch (errCosteras) {
+        // cargarPoligonosJurisdicciones ya loguea el error internamente;
+        // aquí solo nos aseguramos de que blobUrl quede en null.
+        console.warn("[MapaAIS] Se omite la capa de jurisdicciones por error en la carga.");
+        blobUrl = null;
+      }
+
+      // ── Armar el stack de capas del mapa ──────────────────────────────────
+      // GeoJSONLayer solo se agrega si blobUrl es válido.
+      const capasBase = [routeLayer, buqueFeatureLayer, highlightLayer];
+
+      if (blobUrl) {
+        console.info("[MapaAIS] GeoJSONLayer de jurisdicciones inicializado con Blob URL:", blobUrl);
+        const geoJsonLayer = new GeoJSONLayer({
+          id   : "costeras",
+          url  : blobUrl,
+          title: "Límites Jurisdiccionales",
+          renderer: {
+            type  : "simple",
+            symbol: {
+              type   : "simple-line",
+              color  : [0, 36, 84, 0.8],
+              width  : 2
+            },
+          },
+          popupTemplate: {
+            title  : "Jurisdicción: {nombre}",
+            content: [
+              {
+                type      : "fields",
+                fieldInfos: [
+                  { fieldName: "costeraId", label: "ID Costera" },
+                  { fieldName: "nombre",    label: "Nombre"     },
+                ],
+              },
+            ],
+          },
+          effect: "drop-shadow(0px 0px 6px rgba(0,170,220,0.45))",
+        });
+        // Insertar costeras como primera capa (fondo del mapa)
+        capasBase.unshift(geoJsonLayer);
+      } else {
+        console.warn(
+          "[MapaAIS] blobUrl es null — GeoJSONLayer de jurisdicciones NO fue agregado al mapa. " +
+          "El motor de Geofencing estará inactivo hasta que el endpoint /api/costeras/limites responda."
+        );
+      }
+
+      const map = new Map({ basemap: "osm", layers: capasBase });
 
       vista = new MapView({
         container: mapDiv.current,
@@ -208,18 +276,106 @@ export default function MapaAIS() {
 
       viewRef.current = vista;
       await vista.when();
+      console.info("[MapaAIS] MapView listo. Cargando buques...");
       await fetchYRenderizar();
     }
 
     init().catch(err => {
-      console.error("Error cargando ArcGIS:", err);
-      setError("No se pudo inicializar el mapa. Verificá la API key de ArcGIS.");
+      console.error("[MapaAIS] Error crítico en la inicialización del mapa:", err);
+      setError("No se pudo inicializar el mapa. Revisá la consola para más detalles.");
       setCargando(false);
     });
 
-    return () => { vista?.destroy(); };
+    return () => {
+      vista?.destroy();
+      if (blobUrl) {
+        URL.revokeObjectURL(blobUrl);
+        console.info("[MapaAIS] Blob URL de jurisdicciones revocada correctamente.");
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ── Carga GeoJSON desde el backend con JWT y convierte a Blob URL ──────────
+  // Retorna la Blob URL si tiene éxito, o null si falla (el mapa sigue cargando).
+  // ── Carga GeoJSON desde el backend con JWT y convierte a Blob URL ──────────
+  // Retorna la Blob URL si tiene éxito, o null si falla (el mapa sigue cargando).
+  async function cargarPoligonosJurisdicciones(Polygon) {
+    try {
+      const res = await apiClient.get("/costeras/limites", { params: { todos: true } });
+      const geoJsonData = res.data;
+
+      if (!geoJsonData || !geoJsonData.features) {
+        console.warn("[Costeras] El payload de límites llegó vacío o sin features.");
+        return null;
+      }
+
+      // 1. Filtrado Defensivo
+      geoJsonData.features = geoJsonData.features.filter(f => 
+        f.geometry && f.geometry.coordinates && f.geometry.coordinates.length > 0
+      );
+
+      const features = geoJsonData.features;
+
+      // 2. Poblar costerasGeometriesRef para el motor de Geofencing
+      const geometrias = [];
+      for (const feature of features) {
+        const { costeraId, nombre } = feature.properties ?? {};
+        const geom = feature.geometry;
+
+        if (!geom || !costeraId) continue;
+
+        const poligonosArcgis = [];
+        const { Polygon: ArcGISPolygon, Polyline: ArcGISPolyline } = arcgisRef.current ?? {};
+
+        if (geom.type === "Polygon") {
+          poligonosArcgis.push(new (ArcGISPolygon || Polygon)({
+            rings: geom.coordinates,
+            spatialReference: { wkid: 4326 },
+          }));
+        } else if (geom.type === "LineString") {
+          if (ArcGISPolyline) {
+            poligonosArcgis.push(new ArcGISPolyline({
+              paths: [geom.coordinates],
+              spatialReference: { wkid: 4326 }
+            }));
+          } else {
+            console.warn("[Costeras] ArcGISPolyline no cargado aún para LineString.");
+          }
+        } else if (geom.type === "MultiPolygon") {
+          for (const ring of geom.coordinates) {
+            poligonosArcgis.push(new (ArcGISPolygon || Polygon)({
+              rings: ring,
+              spatialReference: { wkid: 4326 },
+            }));
+          }
+        }
+
+        if (poligonosArcgis.length > 0) {
+          geometrias.push({ id: costeraId, nombre, poligonosArcgis });
+        }
+      }
+
+      costerasGeometriesRef.current = geometrias;
+      console.info(`[Geofencing] ${geometrias.length} jurisdicciones cargadas en memoria.`);
+
+      // 3. Filtro del operador relajado para permitir pruebas
+      const operatorCosteraId = getOperatorCosteraId();
+      let visualGeoJsonData = { ...geoJsonData };
+      if (operatorCosteraId > 0 && operatorCosteraId <= 31) {
+        visualGeoJsonData.features = features.filter(
+          f => f.properties && Number(f.properties.costeraId) === operatorCosteraId
+        );
+      }
+
+      const blob = new Blob([JSON.stringify(visualGeoJsonData)], { type: "application/json" });
+      const blobUrl = URL.createObjectURL(blob);
+      return blobUrl;
+    } catch (err) {
+      console.error("[Geofencing] Error cargando límites jurisdiccionales:", err);
+      return null;
+    }
+  }
 
   // ── 2. Renderer para el FeatureLayer ──────────────────────────────────────
   function buildRenderer(SimpleMarkerSymbol) {
@@ -395,96 +551,151 @@ export default function MapaAIS() {
     }
   }, []);
 
-  // ── 5. Actualizar el FeatureLayer via applyEdits ───────────────────────────
+  // ── 3. Actualizar el FeatureLayer via applyEdits y evaluar Geofencing
   async function renderizarFeatures(datos) {
     if (!featureLayerRef.current || !arcgisRef.current) return;
-
     const { Graphic, Point, geometryEngine, Polygon } = arcgisRef.current;
-
-    // Limpiar rutas
+    
+    // Limpiar rutas anteriores de la otra capa
     routeLayerRef.current?.removeAll();
 
-    // Construir nuevos Graphics con atributos tipados
-    const nuevosGraphics = datos.map(buque => {
+    // Dibujar los polígonos de prueba/jurisdicciones en el mapa para que sean visibles
+    for (const costera of costerasGeometriesRef.current) {
+      for (const poly of costera.poligonosArcgis) {
+        const isPolygon = poly.type === "polygon";
+        routeLayerRef.current.add(new Graphic({
+          geometry: poly,
+          symbol: isPolygon ? {
+            type: "simple-fill",
+            color: [0, 170, 220, 20], // semi-transparent cyan
+            outline: {
+              color: [0, 170, 220, 150],
+              width: 1.5,
+              style: "dash"
+            }
+          } : {
+            type: "simple-line",
+            color: [0, 170, 220, 150],
+            width: 2,
+            style: "dash"
+          }
+        }));
+      }
+    }
+    
+    const nuevosGraphics = [];
+
+    // Iteramos sobre los buques que vinieron del backend
+    for (const buque of datos) {
+      // 🛡️ BLINDAJE DE PROPIEDADES (Soporta PascalCase de .NET y camelCase de Mongo/JS)
+      const bId         = buque.id ?? buque.Id ?? buque._id;
+      const lon         = buque.longitud ?? buque.longitude ?? buque.Longitude;
+      const lat         = buque.latitud ?? buque.latitude ?? buque.Latitude;
+      const costeraReal = buque.costeraId ?? buque.CosteraId;
+
+      // Anti-crash para coordenadas nulas o en cero
+      if (lon == null || lat == null || (lon === 0 && lat === 0) || !bId) {
+         continue; 
+      }
+
       const punto = new Point({
-        longitude: buque.longitud,
-        latitude : buque.latitud,
+        type: "point",
+        longitude: lon,
+        latitude : lat,
         spatialReference: { wkid: 4326 }
       });
 
-      // Detección de Geofencing para la transferencia de jurisdicción
-      if (geometryEngine && Polygon) {
-        for (const costera of COSTERAS_POLIGONOS) {
-          const poligonoArcgis = new Polygon({
-            rings: costera.rings,
-            spatialReference: { wkid: 4326 }
-          });
+      // Inicializar la caché geográfica por barco usando la BD como fuente de la verdad
+      if (jurisdiccionPreviaRef.current[bId] === undefined) {
+         jurisdiccionPreviaRef.current[bId] = costeraReal;
+      }
 
-          if (geometryEngine.intersects(poligonoArcgis, punto)) {
-            const previoId = jurisdiccionPreviaRef.current[buque.id];
+      // ── Detección de Geofencing en el Cliente ────
+      if (geometryEngine && costerasGeometriesRef.current.length > 0) {
+        for (const costera of costerasGeometriesRef.current) {
+          const dentroDeJurisdiccion = costera.poligonosArcgis.some(
+            poly => geometryEngine.intersects(geometryEngine.geodesicBuffer(poly, 50, "meters"), punto)
+          );
+
+          if (dentroDeJurisdiccion) {
+            const previoId = jurisdiccionPreviaRef.current[bId];
+            
+            // ¡Si la jurisdicción espacial calculada difiere de la anterior, se gatilla el Handover!
             if (previoId !== costera.id) {
-              jurisdiccionPreviaRef.current[buque.id] = costera.id;
-              console.warn(`Transferencia automática disparada para el buque ${buque.nombreBuque ?? buque.id} hacia la Costera ${costera.id}`);
-              transferirViaje({ viajeId: buque.id, nuevaCosteraId: costera.id });
+              if (alertasMostradasRef.current[bId] !== costera.id) {
+                alertasMostradasRef.current[bId] = costera.id;
+                console.warn(
+                  `[Geofencing] ¡CRUCE DE FRONTERA DETECTADO! Buque "${buque.nombreBuque ?? buque.VesselName ?? bId}" → Entrando a Costera ${costera.id} (${costera.nombre}). Esperando confirmación del operador.`
+                );
+                setTransferenciaPendiente({
+                  viajeId: bId.toString(),
+                  nombreBuque: buque.nombreBuque ?? buque.VesselName ?? bId,
+                  nuevaCosteraId: costera.id,
+                  nombreCostera: costera.nombre,
+                  previoId: previoId
+                });
+                notificarHandover(
+                  buque.nombreBuque ?? buque.VesselName ?? bId,
+                  costera.nombre,
+                  punto
+                );
+              }
             }
-            break;
+            break; 
           }
         }
       }
 
-      return new Graphic({
+      // Construimos el gráfico con tolerancia de tipado para los atributos del popup
+      nuevosGraphics.push(new Graphic({
         geometry: punto,
         attributes: {
           ObjectID           : oidCounter.current++,
-          id                 : buque.id,
-          nombreBuque        : buque.nombreBuque       ?? "DESCONOCIDO",
-          mmsi               : buque.mmsi              ?? "",
-          imo                : buque.imo               ?? "",
-          estadoNav          : buque.estadoNav         ?? "N/A",
-          velocidad          : buque.velocidad         ?? 0,
-          rumbo              : buque.rumbo             ?? 0,
-          origen             : buque.origen            ?? "",
-          destino            : buque.destino           ?? "",
+          id                 : bId,
+          nombreBuque        : buque.nombreBuque ?? buque.VesselName ?? "DESCONOCIDO",
+          mmsi               : buque.mmsi              ?? buque.MMSI ?? "",
+          imo                : buque.imo               ?? buque.IMO ?? "",
+          estadoNav          : buque.estadoNav         ?? buque.NavegationStatusDesc ?? "N/A",
+          velocidad          : buque.velocidad         ?? buque.SpeedOverGroud ?? 0,
+          rumbo              : buque.rumbo             ?? buque.CourseOverGround ?? 0,
+          origen             : buque.origen            ?? buque.Origin ?? "",
+          destino            : buque.destino           ?? buque.Destination ?? "",
           cantidadBarcazas   : buque.cantidadBarcazas  ?? 0,
           remolcador         : buque.remolcador        ?? "",
-          ultimaActualizacion: buque.ultimaActualizacion ?? "",
-          latitud            : buque.latitud,
-          longitud           : buque.longitud,
+          ultimaActualizacion: buque.ultimaActualizacion ?? buque.msgTime ?? "",
+          latitud            : lat,
+          longitud           : lon,
         },
-      });
-    });
-
-    // deleteFeatures: eliminar todos los existentes
-    const layer = featureLayerRef.current;
-    try {
-      const existingResult = await layer.queryFeatures({ where: "1=1", returnGeometry: false });
-      const deleteEdits    = existingResult.features.length > 0
-        ? { deleteFeatures: existingResult.features }
-        : {};
-
-      await layer.applyEdits({
-        ...deleteEdits,
-        addFeatures: nuevosGraphics,
-      });
-    } catch (err) {
-      console.error("applyEdits error:", err);
+      }));
     }
-
-    // Actualizar rutas en GraphicsLayer separado
-    const { Polyline, Graphic: G2, SimpleLineSymbol } = arcgisRef.current;
-    datos.forEach(buque => {
-      if (buque.origen && buque.destino) {
-        routeLayerRef.current.add(new G2({
-          geometry: new Polyline({ paths: [[[buque.longitud, buque.latitud]]] }),
-          symbol  : new SimpleLineSymbol({
-            style: "dash",
-            color: [150, 150, 150, 140],
-            width: 1.2,
-          }),
-        }));
-      }
+    
+    // 🔥 CONFIGURACIÓN QUIRÚRGICA DE REFRESH PARA CLIENT-SIDE FEATURE LAYER
+    // Consultamos todos los gráficos viejos que están dibujados actualmente en el mapa
+    const featureQuery = await featureLayerRef.current.queryFeatures();
+    
+    // Ejecutamos applyEdits de forma atómica: Borra lo viejo y mete lo nuevo en un solo viaje
+    await featureLayerRef.current.applyEdits({
+      deleteFeatures: featureQuery.features,
+      addFeatures: nuevosGraphics
     });
   }
+
+  // Función blindada para ejecutar la Alerta y el Popup
+  const notificarHandover = (buqueNombre, nuevaCosteraNombre, puntoBuque) => {
+    const view = viewRef.current;
+    
+    // Blindaje de ciclo de vida: Si la vista no está lista o el popup fue destruido, abortamos.
+    if (!view || !view.popup || typeof view.popup.open !== 'function') {
+      console.warn("[Geofencing] La vista o el widget Popup de ArcGIS no están inicializados.");
+      return;
+    }
+
+    view.popup.open({
+      title: "⚠️ Traspaso Operativo Detectado",
+      content: `El buque <b class="text-[#002454]">${buqueNombre}</b> ingresó al sector de control de <b>${nuevaCosteraNombre}</b>. Iniciando el handover automático...`,
+      location: puntoBuque
+    });
+  };
 
   // ── 6. Zoom + Highlight / Viboreo ─────────────────────────────────────────
   function zoomABuque(buque) {
@@ -508,12 +719,21 @@ export default function MapaAIS() {
         where         : `id = '${buque.id}'`,
         returnGeometry: true,
         outFields     : ["*"],
-      }).then(result => {
-        if (result.features.length > 0) {
-          viewRef.current?.popup.open({
-            features: result.features,
-            location: punto,
-          });
+      }).then(async (result) => {
+        if (result.features.length > 0 && viewRef.current) {
+          const view = viewRef.current;
+          await view.when();
+          if (view.popup && typeof view.popup.open === "function") {
+            view.popup.open({
+              features: result.features,
+              location: punto,
+            });
+          } else if (view.popup) {
+            console.warn("[ArcGIS] view.popup.open no está disponible como función. Usando fallback de propiedades.");
+            view.popup.features = result.features;
+            view.popup.location = punto;
+            view.popup.visible = true;
+          }
         }
       });
     }
@@ -585,19 +805,52 @@ export default function MapaAIS() {
       console.warn("No hay buques disponibles para simular el cruce.");
       return;
     }
-    const nuevosBuques = buques.map((b, idx) => {
-      if (idx === 0) {
+
+    // Identificar el buque objetivo (el seleccionado, o el primero de la lista)
+    const targetId = buqueSeleccion || buques[0].id;
+    const targetBuque = buques.find(b => b.id === targetId);
+
+    if (!targetBuque) {
+      console.warn("No se pudo encontrar el buque seleccionado para simular el cruce.");
+      return;
+    }
+
+    // Buscar una costera de destino cuya ID difiera de la costera actual del buque
+    const targetCosteraId = targetBuque.costeraId ?? targetBuque.CosteraId;
+    const nuevaCostera = costerasGeometriesRef.current.find(c => c.id !== targetCosteraId);
+
+    if (!nuevaCostera || nuevaCostera.poligonosArcgis.length === 0) {
+      console.warn("No se encontró una costera de destino válida para simular el cruce.");
+      return;
+    }
+
+    const poly = nuevaCostera.poligonosArcgis[0];
+    let lonDestino, latDestino;
+
+    if (poly.paths && poly.paths[0] && poly.paths[0][0]) {
+      lonDestino = poly.paths[0][0][0];
+      latDestino = poly.paths[0][0][1];
+    } else if (poly.rings && poly.rings[0] && poly.rings[0][0]) {
+      lonDestino = poly.rings[0][0][0];
+      latDestino = poly.rings[0][0][1];
+    } else {
+      console.warn("La costera destino no tiene un formato de geometría (paths/rings) válido.");
+      return;
+    }
+
+    const nuevosBuques = buques.map((b) => {
+      if (b.id === targetId) {
         return {
           ...b,
-          latitud: -34.5,
-          longitud: -57.5,
-          nombreBuque: `${b.nombreBuque ?? "Buque"} (SIMULADO)`,
+          latitud: latDestino,
+          longitud: lonDestino,
+          nombreBuque: `${b.nombreBuque ?? "Buque"} (PASADO A ${nuevaCostera.nombre})`,
         };
       }
       return b;
     });
 
-    console.warn(`Simulando posición para el buque ${nuevosBuques[0].nombreBuque} en latitud -34.5, longitud -57.5`);
+    console.warn(`Simulando paso de jurisdicción para el buque ${targetBuque.nombreBuque ?? targetId} a ${nuevaCostera.nombre} (latitud ${latDestino}, longitud ${lonDestino})`);
     setBuques(nuevosBuques);
     renderizarFeatures(nuevosBuques);
   };
@@ -728,6 +981,67 @@ export default function MapaAIS() {
       >
         {cargando ? "⟳" : "↻"}
       </button>
+
+      {/* Modal de Confirmación de Handover de Jurisdicción */}
+      {transferenciaPendiente && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="bg-white border border-gray-200 rounded-2xl shadow-2xl w-full max-w-[480px] overflow-hidden">
+            {/* Encabezado */}
+            <div className="bg-[#002454] text-white px-6 py-4 flex items-center gap-3">
+              <div className="w-10 h-10 bg-[#104a8e] rounded-full flex items-center justify-center text-white text-lg font-bold shrink-0">
+                ⚠️
+              </div>
+              <div>
+                <h3 className="font-bold text-base leading-tight">Handover Automático Detectado</h3>
+                <p className="text-xs text-blue-200 mt-0.5">Control de Tránsito Marítimo (MBPC)</p>
+              </div>
+            </div>
+            
+            {/* Contenido */}
+            <div className="p-6 space-y-4">
+              <p className="text-gray-700 text-sm leading-relaxed">
+                El motor de Geofencing ha detectado que el buque <strong className="text-[#002454] font-semibold">{transferenciaPendiente.nombreBuque}</strong> ha salido de su jurisdicción actual e ingresó al polígono de la costera:
+              </p>
+              
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 flex flex-col gap-2">
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-gray-500">Destino de Transferencia</span>
+                  <span className="font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                    {transferenciaPendiente.nombreCostera} ({transferenciaPendiente.nuevaCosteraId})
+                  </span>
+                </div>
+                <div className="h-px bg-gray-200 w-full" />
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-gray-500">ID de Viaje</span>
+                  <span className="font-mono text-gray-700">{transferenciaPendiente.viajeId}</span>
+                </div>
+              </div>
+
+              <p className="text-xs text-gray-400 italic">
+                * Confirmar esta acción actualizará el registro regulatorio en Oracle y MongoDB. El buque dejará de ser visible en su panel operativo para asignarse a la costera de destino.
+              </p>
+            </div>
+            
+            {/* Botones */}
+            <div className="bg-gray-50 px-6 py-4 flex items-center justify-end gap-3 border-t border-gray-150">
+              <button
+                type="button"
+                onClick={handleCancelarTransferencia}
+                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg text-xs font-semibold hover:bg-gray-100 transition duration-150"
+              >
+                Rechazar Handover
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmarTransferencia}
+                className="px-5 py-2 bg-[#104a8e] hover:bg-[#002454] text-white rounded-lg text-xs font-semibold shadow-md transition duration-150 flex items-center gap-1.5"
+              >
+                Confirmar y Traspasar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

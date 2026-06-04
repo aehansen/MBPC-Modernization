@@ -5,6 +5,7 @@
  */
 
 export const COSTERAS = [
+  { id: 1, zona: "SEED", nombre: "TEST", etiqueta: "SEED - TEST" },
   { id: 437, zona: "PZAP", nombre: "ELDO", etiqueta: "PZAP - ELDO" },
   { id: 418, zona: "PZAP", nombre: "IGUA", etiqueta: "PZAP - IGUA" },
   { id: 471, zona: "PZAP", nombre: "ITAE", etiqueta: "PZAP - ITAE" },

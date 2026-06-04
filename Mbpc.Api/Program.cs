@@ -65,6 +65,13 @@ builder.Services.AddSingleton<IMongoClient>(sp =>
     return new MongoClient(settings.ConnectionString);
 });
 
+builder.Services.AddSingleton<IMongoDatabase>(sp =>
+{
+    var client = sp.GetRequiredService<IMongoClient>();
+    var settings = sp.GetRequiredService<IOptions<MongoDbSettings>>().Value;
+    return client.GetDatabase(settings.DatabaseName);
+});
+
 // ── Oracle ──────────────────────────────────────────────────────────────────
 builder.Services.Configure<OracleDbSettings>(
     builder.Configuration.GetSection("OracleDbSettings"));
@@ -113,6 +120,7 @@ builder.Services.AddScoped<IViajeService, ViajeManagerService>();
 builder.Services.AddScoped<ICargaService, CargaManagerService>();
 builder.Services.AddScoped<IConvoyManagerService, ConvoyManagerService>();
 builder.Services.AddScoped<IBuqueService, BuqueManagerService>();
+builder.Services.AddScoped<ICosteraService, CosteraManagerService>();
 
 // ── Servicio de Chat / IA ────────────────────────────────────────────────────
 builder.Services.AddScoped<IChatService, ChatManagerService>();
