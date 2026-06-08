@@ -17,6 +17,7 @@ import {
   type NuevoViajeResponse,
   type NuevoViajeError,
 } from "@/types/viajes.types";
+import { useMuelles, usePuntosControl } from "@/hooks/useCatalogos";
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -150,6 +151,8 @@ export function ModalNuevoViaje({
   });
 
   const { mutate, isPending } = useNuevoViaje();
+  const { data: muelles = [], isLoading: isLoadingMuelles } = useMuelles();
+  const { data: puntosControl = [], isLoading: isLoadingPuntos } = usePuntosControl();
 
   // Resetear el formulario cuando el modal se cierra
   useEffect(() => {
@@ -355,19 +358,21 @@ export function ModalNuevoViaje({
               {/* Muelle de Salida */}
               <div>
                 <Label htmlFor="muelleSalida">Muelle de Salida</Label>
-                <input
+                <select
                   id="muelleSalida"
-                  type="text"
-                  placeholder="Ej: Muelle 5 - Puerto Nuevo"
-                  disabled={isPending}
+                  disabled={isPending || isLoadingMuelles}
                   className={getInputClass(!!errors.muelleSalida)}
-                  {...register("muelleSalida", {
-                    maxLength: {
-                      value: 200,
-                      message: "Máximo 200 caracteres.",
-                    },
-                  })}
-                />
+                  {...register("muelleSalida")}
+                >
+                  <option value="">
+                    {isLoadingMuelles ? "Cargando muelles..." : "— Seleccione un muelle —"}
+                  </option>
+                  {muelles.map((muelle) => (
+                    <option key={muelle.id} value={muelle.nombre}>
+                      {muelle.nombre}
+                    </option>
+                  ))}
+                </select>
                 <FieldError message={errors.muelleSalida?.message} />
               </div>
 
@@ -451,21 +456,23 @@ export function ModalNuevoViaje({
                 <Label htmlFor="proximoPuntoControl" required>
                   Próximo Punto de Control
                 </Label>
-                <input
+                <select
                   id="proximoPuntoControl"
-                  type="text"
-                  placeholder="Ej: Prefectura Zárate"
-                  disabled={isPending}
+                  disabled={isPending || isLoadingPuntos}
                   className={getInputClass(!!errors.proximoPuntoControl)}
                   {...register("proximoPuntoControl", {
                     required: "El próximo punto de control es requerido.",
-                    minLength: { value: 2, message: "Mínimo 2 caracteres." },
-                    maxLength: {
-                      value: 200,
-                      message: "Máximo 200 caracteres.",
-                    },
                   })}
-                />
+                >
+                  <option value="">
+                    {isLoadingPuntos ? "Cargando puntos de control..." : "— Seleccione un punto de control —"}
+                  </option>
+                  {puntosControl.map((punto) => (
+                    <option key={punto.id} value={punto.nombre}>
+                      {punto.nombre}
+                    </option>
+                  ))}
+                </select>
                 <FieldError message={errors.proximoPuntoControl?.message} />
               </div>
 

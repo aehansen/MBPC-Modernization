@@ -163,20 +163,27 @@ namespace Mbpc.Api.Services
                 var esConvoy = false;
                 var travelId = p.TravelId;
                 var vesselName = p.VesselName;
-
+                
                 var filtroDetalleBase = travelId > 0
                     ? Builders<ViajeDetalleMongo>.Filter.Eq(v => v.IdViaje, travelId)
                     : Builders<ViajeDetalleMongo>.Filter.Eq(v => v.VesselName, vesselName);
-
+                
                 var detalle = await _detallesCollection.Find(filtroDetalleBase).FirstOrDefaultAsync();
-
+                
                 if (detalle != null)
                 {
-                    var tieneBarcazasEtapa = detalle.Etapas?.Any(e => e != null && e.Barcazas != null && e.Barcazas.Any(b => b != null && b.Nombre != null && b.Nombre != "0")) ?? false;
-                    var tieneBarcazasRaiz = detalle.Barcazas != null && detalle.Barcazas.Any(b => b != null && b.Nombre != null && b.Nombre != "0");
+                    // Lógica robusta: chequeamos que BARCAZA (Nombre) tenga valor y no sea "0"
+                    var tieneBarcazasEtapa = detalle.Etapas?.Any(e => 
+                        e != null && e.Barcazas != null && 
+                        e.Barcazas.Any(b => b != null && !string.IsNullOrWhiteSpace(b.Nombre) && b.Nombre != "0")) ?? false;
+                    
+                    var tieneBarcazasRaiz = detalle.Barcazas != null && 
+                        detalle.Barcazas.Any(b => b != null && !string.IsNullOrWhiteSpace(b.Nombre) && b.Nombre != "0");
+                    
                     esConvoy = tieneBarcazasEtapa || tieneBarcazasRaiz;
                 }
 
+                // Fallback a Oracle solo si sigue siendo falso y estamos en producción
                 if (!esConvoy && travelId > 0 && !_env.IsDevelopment())
                 {
                     try
@@ -186,7 +193,7 @@ namespace Mbpc.Api.Services
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "ObtenerViajesDtoAsync: No se pudo consultar Oracle para verificar barcazas del TravelId={TravelId}", travelId);
+                        _logger.LogWarning(ex, "ObtenerViajesDtoAsync: Falló fallback a Oracle para ViajeId={TravelId}", travelId);
                     }
                 }
 
@@ -449,6 +456,12 @@ namespace Mbpc.Api.Services
         public async Task<List<ViajeHistoricoDto>> GetHistoricoAsync(FiltroHistoricoDto filtro)
         {
             var costeraId = _costeraUserContext.GetCurrentCosteraId();
+
+            if (_env.IsDevelopment())
+            {
+                _logger.LogWarning("[DEV BYPASS] Omitiendo consulta de histórico a Oracle en GetHistoricoAsync y retornando lista vacía.");
+                return new List<ViajeHistoricoDto>();
+            }
 
             try
             {

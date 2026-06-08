@@ -132,6 +132,7 @@ export function useAdjuntarBarcazas() {
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: convoyKeys.all });
       queryClient.invalidateQueries({ queryKey: cargasKeys.byViaje(variables.viajeId) }); // Invalidación cruzada
+      queryClient.invalidateQueries({ queryKey: ['viajes'] });
     },
   });
 }

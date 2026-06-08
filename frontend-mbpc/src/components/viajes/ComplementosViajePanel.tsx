@@ -1,23 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useForm, type SubmitHandler } from 'react-hook-form';
-
+import { useMemo, useState } from 'react';
 import {
-  useActualizarDatosPbip,
   useAgregarNotaBitacora,
   useViajeComplementos,
 } from '../../hooks/viajes/useViajeComplementos';
-import type { ActualizarDatosPbipDto } from '../../types/complementos.types';
+import PbipForm from './pbip/PbipForm';
 
 interface ComplementosViajePanelProps {
   viajeId: string;
 }
 
-const EMPTY_PBIP_FORM: ActualizarDatosPbipDto = {
-  contactoOcpm: '',
-  nroInmarsat: '',
-  arqueoBruto: 0,
-  nivelProteccion: 1,
-};
+
 
 function formatFecha(fechaIso: string): string {
   const date = new Date(fechaIso);
@@ -35,42 +27,15 @@ export default function ComplementosViajePanel({ viajeId }: ComplementosViajePan
   } = useViajeComplementos(viajeId);
 
   const agregarNotaMutation = useAgregarNotaBitacora(viajeId);
-  const actualizarPbipMutation = useActualizarDatosPbip(viajeId);
 
   const secretarias = useMemo(() => complementos?.notasBitacora ?? [], [complementos?.notasBitacora]);
   const agencias = useMemo(() => complementos?.agencias ?? [], [complementos?.agencias]);
-
-  const {
-    register,
-    handleSubmit,
-    reset,
-    formState: { errors, isDirty },
-  } = useForm<ActualizarDatosPbipDto>({
-    defaultValues: EMPTY_PBIP_FORM,
-  });
-
-  useEffect(() => {
-    if (!complementos?.datosPbip) return;
-    const { contactoOcpm, nroInmarsat, arqueoBruto, nivelProteccion } = complementos.datosPbip;
-    reset({
-      contactoOcpm: contactoOcpm || '',
-      nroInmarsat: nroInmarsat || '',
-      arqueoBruto: arqueoBruto || 0,
-      nivelProteccion: nivelProteccion || 1,
-    });
-  }, [complementos, reset]);
 
   const handleAgregarNota = async () => {
     const texto = notaNueva.trim();
     if (!texto) return;
     await agregarNotaMutation.mutateAsync({ texto });
     setNotaNueva('');
-  };
-
-  const onSubmitPbip: SubmitHandler<ActualizarDatosPbipDto> = async (values) => {
-    values.nivelProteccion = Number(values.nivelProteccion);
-    values.arqueoBruto = Number(values.arqueoBruto);
-    await actualizarPbipMutation.mutateAsync(values);
   };
 
   if (isLoading) {
@@ -146,71 +111,9 @@ export default function ComplementosViajePanel({ viajeId }: ComplementosViajePan
 
         <article className="rounded-lg border border-slate-800 bg-slate-950/60 p-4 xl:col-span-1">
           <h3 className="text-sm font-semibold uppercase tracking-wider text-emerald-300">Seguridad PBIP</h3>
-
-          <form className="mt-4 space-y-4" onSubmit={handleSubmit(onSubmitPbip)}>
-            <div>
-              <label htmlFor="nivelProteccion" className="mb-1 block text-xs font-semibold text-slate-400">
-                Nivel de Protección
-              </label>
-              <select
-                id="nivelProteccion"
-                {...register('nivelProteccion', { required: true })}
-                className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500"
-              >
-                <option value={1}>Nivel de Protección 1 (Normal)</option>
-                <option value={2}>Nivel de Protección 2 (Reforzado)</option>
-                <option value={3}>Nivel de Protección 3 (Excepcional)</option>
-              </select>
-            </div>
-
-            <div>
-              <label htmlFor="contactoOcpm" className="mb-1 block text-xs font-semibold text-slate-400">
-                Contacto Oficial OCPM
-              </label>
-              <input
-                id="contactoOcpm"
-                type="text"
-                {...register('contactoOcpm', { required: 'El contacto OCPM es requerido' })}
-                className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500"
-              />
-              {errors.contactoOcpm && (
-                <span className="mt-1 block text-xs text-red-400">{errors.contactoOcpm.message}</span>
-              )}
-            </div>
-
-            <div>
-              <label htmlFor="nroInmarsat" className="mb-1 block text-xs font-semibold text-slate-400">
-                Nro de Terminal INMARSAT
-              </label>
-              <input
-                id="nroInmarsat"
-                type="text"
-                {...register('nroInmarsat')}
-                className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="arqueoBruto" className="mb-1 block text-xs font-semibold text-slate-400">
-                Arqueo Bruto (TRG)
-              </label>
-              <input
-                id="arqueoBruto"
-                type="number"
-                step="any"
-                {...register('arqueoBruto')}
-                className="w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500"
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={actualizarPbipMutation.isPending || !isDirty}
-              className="w-full rounded-md bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-500 disabled:opacity-50"
-            >
-              {actualizarPbipMutation.isPending ? 'Sincronizando...' : 'Actualizar Datos PBIP'}
-            </button>
-          </form>
+          <div className="mt-4">
+            <PbipForm viajeId={viajeId} datosPbip={complementos?.datosPbip || null} />
+          </div>
         </article>
 
         <article className="rounded-lg border border-slate-800 bg-slate-950/60 p-4 xl:col-span-1">

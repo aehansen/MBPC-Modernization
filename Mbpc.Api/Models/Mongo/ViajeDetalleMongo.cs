@@ -264,55 +264,39 @@ namespace Mbpc.Api.Models.Mongo
     [BsonIgnoreExtraElements]
     public class BarcazaMongo
     {
-        // FIX: documentos legacy pueden traer idViaje como BsonNull → long? evita FormatException
-        [BsonElement("ID_VIAJE")]
-        [BsonIgnoreIfNull]
-        public long? IdViaje { get; set; }
-
+        // Mapeamos explícitamente el campo BARCAZA del JSON a esta propiedad
         [BsonElement("BARCAZA")]
-        [BsonIgnoreIfNull]
         public string? Nombre { get; set; }
 
-        [BsonElement("BANDERA")]
-        [BsonIgnoreIfNull]
-        public string? Bandera { get; set; }
-
-        [BsonElement("MATRICULA")]
-        [BsonIgnoreIfNull]
-        public string? Matricula { get; set; }
-
         [BsonElement("CARGA")]
-        [BsonIgnoreIfNull]
         public string? Carga { get; set; }
 
         [BsonElement("CANTIDAD")]
-        [BsonIgnoreIfNull]
         public double? Cantidad { get; set; }
 
         [BsonElement("UNIDAD")]
-        [BsonIgnoreIfNull]
         public string? Unidad { get; set; }
 
-        [BsonElement("MUELLE_ACTUAL")]
-        [BsonIgnoreIfNull]
-        public string? MuelleActual { get; set; }
-
         [BsonElement("MERCADERIA_ID")]
-        [BsonIgnoreIfNull]
         public int? MercaderiaId { get; set; }
 
-        /// <summary>
-        /// Indica descarga completa registrada (dual-path con validación de finalización de viaje).
-        /// </summary>
+        [BsonElement("ID_VIAJE")]
+        public long? IdViaje { get; set; }
+
+        [BsonElement("BANDERA")]
+        public string? Bandera { get; set; }
+
+        [BsonElement("MATRICULA")]
+        public string? Matricula { get; set; }
+
+        [BsonElement("MUELLE_ACTUAL")]
+        public string? MuelleActual { get; set; }
+
         [BsonElement("DESCARGADA")]
-        [BsonIgnoreIfNull]
         public bool? Descargada { get; set; }
 
         // ── PROPIEDADES DE NEGOCIO (nunca se serializan) ─────────────────────────
 
-        /// <summary>
-        /// Descripción amigable de la unidad de medida para presentación en UI.
-        /// </summary>
         [BsonIgnore]
         public string UnidadDescripcion => Unidad?.ToUpperInvariant() switch
         {
@@ -323,9 +307,6 @@ namespace Mbpc.Api.Models.Mongo
             _     => Unidad ?? string.Empty
         };
 
-        /// <summary>
-        /// Indica si la barcaza lleva carga líquida según el tipo de mercadería.
-        /// </summary>
         [BsonIgnore]
         public bool EsCargaLiquida =>
             Carga != null &&
@@ -333,9 +314,6 @@ namespace Mbpc.Api.Models.Mongo
              Carga.Contains("combustible", StringComparison.OrdinalIgnoreCase) ||
              Carga.Contains("gas", StringComparison.OrdinalIgnoreCase));
 
-        /// <summary>
-        /// Resumen compacto para logs y trazabilidad.
-        /// </summary>
         [BsonIgnore]
         public string Resumen =>
             $"[{Matricula ?? "SIN MATRÍCULA"}] {Nombre ?? "SIN NOMBRE"} — {Cantidad?.ToString("N2") ?? "0"} {Unidad}";

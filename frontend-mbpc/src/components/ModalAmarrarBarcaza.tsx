@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 import toast from "react-hot-toast";
 import { useAmarrarBarcaza } from "../hooks/useAmarrarBarcaza";
 import type { AmarrarBarcazaError } from "../types/amarrarBarcaza.types";
+import { useMuelles } from "../hooks/useCatalogos";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -21,21 +22,6 @@ interface ModalAmarrarBarcazaProps {
 }
 
 // ─── Opciones de muelle ───────────────────────────────────────────────────────
-
-/**
- * Lista de muelles disponibles.
- * Reemplazar o extender con datos dinámicos si el backend los expone.
- */
-const MUELLES_DISPONIBLES: readonly string[] = [
-  "M-01",
-  "M-02",
-  "M-03",
-  "M-04",
-  "M-05",
-  "M-06",
-  "M-07",
-  "M-08",
-];
 
 // ─── Estado inicial del formulario ────────────────────────────────────────────
 
@@ -59,6 +45,7 @@ export default function ModalAmarrarBarcaza({
   const firstInputRef = useRef<HTMLInputElement>(null);
 
   const { mutate, isPending, reset } = useAmarrarBarcaza();
+  const { data: muelles = [], isLoading: isLoadingMuelles } = useMuelles();
 
   // Resetear formulario y estado de mutación al abrir/cerrar.
   useEffect(() => {
@@ -270,7 +257,7 @@ export default function ModalAmarrarBarcaza({
                 name="nuevoMuelle"
                 value={form.nuevoMuelle}
                 onChange={handleChange}
-                disabled={isPending}
+                disabled={isPending || isLoadingMuelles}
                 className="
                   w-full px-3 py-2.5 text-sm text-slate-800
                   border border-slate-300 rounded-md
@@ -281,11 +268,11 @@ export default function ModalAmarrarBarcaza({
                 "
               >
                 <option value="" disabled>
-                  — Seleccione un muelle —
+                  {isLoadingMuelles ? "— Cargando muelles... —" : "— Seleccione un muelle —"}
                 </option>
-                {MUELLES_DISPONIBLES.map((muelle) => (
-                  <option key={muelle} value={muelle}>
-                    {muelle}
+                {muelles.map((muelle) => (
+                  <option key={muelle.id} value={muelle.nombre}>
+                    {muelle.nombre}
                   </option>
                 ))}
               </select>

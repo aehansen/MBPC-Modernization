@@ -1,6 +1,39 @@
 @Mbpc.Api_HostAddress = http://localhost:5009
 
-GET {{Mbpc.Api_HostAddress}}/weatherforecast/
+# 1. Obtener Token JWT para la Prueba
+# Hacé clic en "Send" en la siguiente petición de Login para generar el token.
+# Luego, copiá el valor de "token" que se devuelve en la respuesta 
+# y reemplazalo en la variable @authToken que se encuentra más abajo.
+# 
+# NOTA: CosteraId = 0 representa el rol de "Admin".
+POST {{Mbpc.Api_HostAddress}}/api/auth/login
+Content-Type: application/json
+
+{
+  "CosteraId": 0,
+  "Password": "admin"
+}
+
+###
+
+# 2. Configuración del Token JWT
+# Pegá el token copiado aquí para autorizar las siguientes solicitudes:
+@authToken = pegá_tu_token_aquí_sin_Bearer
+
+###
+
+# 3. Peticiones de Catálogos (Módulo Centralizado)
+
+# GET Puntos de Control (PDC)
+GET {{Mbpc.Api_HostAddress}}/api/catalogos/puntos-control
 Accept: application/json
+Authorization: Bearer {{authToken}}
+
+###
+
+# GET Muelles
+GET {{Mbpc.Api_HostAddress}}/api/catalogos/muelles
+Accept: application/json
+Authorization: Bearer {{authToken}}
 
 ###

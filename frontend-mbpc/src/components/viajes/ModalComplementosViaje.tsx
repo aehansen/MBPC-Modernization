@@ -3,7 +3,6 @@ import { useForm } from "react-hook-form";
 import {
   useViajeComplementos,
   useAgregarNotaBitacora,
-  useActualizarDatosPbip,
   useAsignarAgencias,
 } from "../../hooks/viajes/useViajeComplementos";
 import {
@@ -11,10 +10,9 @@ import {
   AgregarNotaBitacoraDto,
   Agencia,
   AsignarAgenciaDto,
-  DatosPbip,
-  ActualizarDatosPbipDto,
   ViajeComplementos,
 } from "../../types/complementos.types";
+import PbipForm from "./pbip/PbipForm";
 
 // ─── PROPS ────────────────────────────────────────────────────────────────────
 
@@ -404,128 +402,7 @@ function TabAgencias({
     </div>
   );
 }
-
-const NIVELES_PROTECCION = [
-  { value: 1, label: "Nivel 1 — Normal" },
-  { value: 2, label: "Nivel 2 — Heightened" },
-  { value: 3, label: "Nivel 3 — Excepción" },
-];
-
-function TabPbip({
-  viajeId,
-  datosPbip,
-}: {
-  viajeId: string;
-  datosPbip: DatosPbip | null;
-}) {
-  const {
-    register,
-    handleSubmit,
-    formState: { errors, isDirty },
-  } = useForm<ActualizarDatosPbipDto>({
-    defaultValues: {
-      contactoOcpm: datosPbip?.contactoOcpm ?? "",
-      nroInmarsat: datosPbip?.nroInmarsat ?? "",
-      arqueoBruto: datosPbip?.arqueoBruto ?? 0,
-      nivelProteccion: datosPbip?.nivelProteccion ?? 1,
-    },
-  });
-
-  const mutation = useActualizarDatosPbip(viajeId);
-
-  return (
-    <form onSubmit={handleSubmit((data) => mutation.mutate(data))} className="flex flex-col gap-4">
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-            Contacto OCPM
-          </label>
-          <input
-            {...register("contactoOcpm", { required: "Campo obligatorio." })}
-            className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-            placeholder="Ej: Cte. García / +54 11 0000-0000"
-          />
-          {errors.contactoOcpm && (
-            <p className="text-red-400 text-xs">{errors.contactoOcpm.message}</p>
-          )}
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-            Nro. Inmarsat
-          </label>
-          <input
-            {...register("nroInmarsat", { required: "Campo obligatorio." })}
-            className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-            placeholder="Ej: 764XXXXXXX"
-          />
-          {errors.nroInmarsat && (
-            <p className="text-red-400 text-xs">{errors.nroInmarsat.message}</p>
-          )}
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-            Arqueo Bruto (GT)
-          </label>
-          <input
-            type="number"
-            step="0.01"
-            {...register("arqueoBruto", {
-              required: "Campo obligatorio.",
-              valueAsNumber: true,
-              min: { value: 0, message: "Debe ser ≥ 0." },
-            })}
-            className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-          />
-          {errors.arqueoBruto && (
-            <p className="text-red-400 text-xs">{errors.arqueoBruto.message}</p>
-          )}
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <label className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-            Nivel de Protección
-          </label>
-          <select
-            {...register("nivelProteccion", { valueAsNumber: true, required: true })}
-            className="bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-300 focus:outline-none focus:ring-1 focus:ring-cyan-500"
-          >
-            {NIVELES_PROTECCION.map((n) => (
-              <option key={n.value} value={n.value}>
-                {n.label}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-3 pt-2 border-t border-slate-700/50">
-        <button
-          type="submit"
-          disabled={mutation.isPending || !isDirty}
-          className="bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-lg px-5 py-2 transition-colors flex items-center gap-2"
-        >
-          {mutation.isPending ? (
-            <>
-              <SpinnerIcon /> Guardando…
-            </>
-          ) : (
-            "Guardar datos PBIP"
-          )}
-        </button>
-        {mutation.isSuccess && (
-          <span className="text-emerald-400 text-xs">✓ Datos PBIP actualizados.</span>
-        )}
-        {mutation.isError && (
-          <span className="text-red-400 text-xs">
-            Error: {(mutation.error as Error).message}
-          </span>
-        )}
-      </div>
-    </form>
-  );
-}
+// TabPbip component removed. PbipForm is used instead.
 
 // ─── ICONO SPINNER ────────────────────────────────────────────────────────────
 
@@ -681,7 +558,7 @@ export default function ModalComplementosViaje({
                 <TabAgencias viajeId={viajeId} agencias={data.agencias} />
               )}
               {activeTab === "pbip" && (
-                <TabPbip viajeId={viajeId} datosPbip={data.datosPbip} />
+                <PbipForm viajeId={viajeId} datosPbip={data.datosPbip} />
               )}
             </>
           )}

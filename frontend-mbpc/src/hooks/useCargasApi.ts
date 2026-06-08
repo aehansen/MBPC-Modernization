@@ -55,6 +55,7 @@ export function useCrearCarga(viajeId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: cargasKeys.byViaje(viajeId) });
       qc.invalidateQueries({ queryKey: convoyKeys.all }); // Invalidación cruzada
+      qc.invalidateQueries({ queryKey: ['viajes'] });
     },
   });
 }

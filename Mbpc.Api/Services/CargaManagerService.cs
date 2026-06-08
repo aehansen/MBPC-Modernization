@@ -90,8 +90,8 @@ namespace Mbpc.Api.Services
         {
             if (_env.IsDevelopment())
             {
-                _logger.LogWarning("[DEV BYPASS] Omitiendo conexión a Oracle en ObtenerCargasDesdeOracle para evitar timeouts de red. Retornando lista vacía.");
-                return Enumerable.Empty<CargaDto>();
+                _logger.LogWarning("[DEV BYPASS] Activando fallback a MongoDB en ObtenerCargasDesdeOracle para TravelId {TravelId}.", travelId);
+                return await ObtenerCargasDesdeMongoFallbackAsync(travelId, cacheKey);
             }
 
             try
@@ -150,9 +150,52 @@ namespace Mbpc.Api.Services
             }
             catch (OracleException ex)
             {
-                _logger.LogError(ex, "Error de Oracle en producción al obtener cargas para TravelId {TravelId}.", travelId);
-                throw;
+                if (!_env.IsDevelopment())
+                {
+                    _logger.LogError(ex, "Error de Oracle en producción al obtener cargas para TravelId {TravelId}.", travelId);
+                    throw;
+                }
+
+                _logger.LogWarning(ex, "Error de Oracle en desarrollo. Activando fallback a MongoDB para TravelId {TravelId}.", travelId);
+                return await ObtenerCargasDesdeMongoFallbackAsync(travelId, cacheKey);
             }
+        }
+
+        private async Task<IEnumerable<CargaDto>> ObtenerCargasDesdeMongoFallbackAsync(long travelId, string cacheKey)
+        {
+            var filter = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.IdViaje, travelId);
+            var doc = await _detailsCollection.Find(filter).FirstOrDefaultAsync();
+            if (doc is null)
+            {
+                _logger.LogWarning("Fallback MongoDB — No se encontró documento de detalle para TravelId {TravelId}. Retornando lista vacía.", travelId);
+                return Enumerable.Empty<CargaDto>();
+            }
+
+            var todasLasBarcazas = (doc.Etapas?.LastOrDefault()?.Barcazas ?? doc.Barcazas ?? new List<BarcazaMongo>())
+                .Where(b => b is not null)
+                .ToList();
+
+            var result = todasLasBarcazas.Select(b => new CargaDto
+            {
+                Id               = b.Nombre ?? Guid.NewGuid().ToString(),
+                ViajeId          = travelId.ToString(),
+                DescripcionLista = b.Nombre == "0" ? "Bodega" : $"{b.Nombre} ({b.Matricula ?? "S/N"})",
+                NivelRiesgo      = "Bajo",
+                MuelleActual     = b.MuelleActual,
+                Tonelaje         = b.Cantidad ?? 0d,
+                TipoUnidad       = b.Nombre == "0" ? "Bodega" : "Barcaza",
+                MercaderiaId     = b.MercaderiaId,
+                MercaderiaNombre = b.Carga ?? "A Definir"
+            }).ToList();
+
+            var cacheOptions = new MemoryCacheEntryOptions
+            {
+                AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(5),
+                SlidingExpiration               = TimeSpan.FromMinutes(2)
+            };
+            _cache.Set(cacheKey, result, cacheOptions);
+
+            return result;
         }
 
         private async Task<string> ResolverVesselNameAsync(string parametro)

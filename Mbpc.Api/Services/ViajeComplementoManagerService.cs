@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using MongoDB.Bson;
 using MongoDB.Driver;
 using Mbpc.Api.Models.Config;
 using Mbpc.Api.Models.Mongo;
@@ -184,7 +185,7 @@ namespace Mbpc.Api.Services
 
             if (costeraId > 0)
             {
-                update = update.SetOnInsert(x => x.CosteraId, costeraId);
+                update = update.SetOnInsert(x => x.CosteraIdRaw, (BsonValue)costeraId);
             }
 
             var updateOptions = new UpdateOptions { IsUpsert = true };

@@ -394,48 +394,46 @@ public sealed class ConvoyManagerService : IConvoyManagerService
         // ── Paso 1: intentar resolver barcazas desde MongoDB (ambas fuentes) ────
         var barcazasRaw = ResolverBarcazasDesdeMongo(detalle, viajeId);
 
+        bool usarOracle = barcazasRaw.Count == 0;
+        long idViajeRelacional = detalle?.IdViaje > 0 ? detalle.IdViaje.GetValueOrDefault() : travelId;
+
         // ── Paso 2: si MongoDB no aportó nada, activar fallback Oracle ───────────
-        // Este bloque es el único punto de decisión para Oracle, sin importar
-        // si se llegó aquí desde la rama de Etapas o desde la raíz legacy.
-        if (barcazasRaw.Count == 0)
+        if (usarOracle && idViajeRelacional > 0)
         {
-            long idViajeRelacional = detalle?.IdViaje > 0 ? detalle.IdViaje.GetValueOrDefault() : travelId;
+            _logger.LogWarning(
+                "ResolverBarcazas: MongoDB no devolvió barcazas para ViajeId={ViajeId}. " +
+                "Activando fallback Oracle con IdViaje Relacional={IdViajeRelacional}.",
+                viajeId, idViajeRelacional);
 
-            if (idViajeRelacional > 0)
+            try
             {
-                _logger.LogWarning(
-                    "ResolverBarcazas: MongoDB no devolvió barcazas para ViajeId={ViajeId}. " +
-                    "Activando fallback Oracle con IdViaje Relacional={IdViajeRelacional}.",
-                    viajeId, idViajeRelacional);
-
                 var cargasLegacy = await _cargaService.ObtenerCargasPorViaje(idViajeRelacional.ToString());
 
-                if (cargasLegacy is null || !cargasLegacy.Any())
+                if (cargasLegacy is not null && cargasLegacy.Any())
                 {
-                    _logger.LogWarning(
-                        "ResolverBarcazas: El fallback a Oracle no devolvió cargas " +
-                        "para IdViaje Relacional={IdViajeRelacional}.",
-                        idViajeRelacional);
-                    return [];
+                    return cargasLegacy
+                        .Where(c => c is not null)
+                        .Select(MapearBarcazaDesdeOracle)
+                        .ToList();
                 }
 
-                return cargasLegacy
-                    .Where(c => c is not null)
-                    .Select(MapearBarcazaDesdeOracle)
-                    .ToList();
+                _logger.LogWarning(
+                    "ResolverBarcazas: El fallback a Oracle no devolvió cargas " +
+                    "para IdViaje Relacional={IdViajeRelacional}.",
+                    idViajeRelacional);
             }
-
-            _logger.LogWarning(
-                "ResolverBarcazas: Sin barcazas en Mongo y sin IdViaje Relacional para ViajeId={ViajeId}. " +
-                "No es posible consultar Oracle.",
-                viajeId);
-
-            return [];
+            catch (Exception ex)
+            {
+                if (!_env.IsDevelopment())
+                {
+                    _logger.LogError(ex, "Error al obtener cargas desde Oracle en producción.");
+                    throw;
+                }
+                _logger.LogWarning(ex, "Error al obtener cargas desde Oracle en desarrollo. Se confiará en los datos de barcazasRaw de MongoDB.");
+            }
         }
 
         // ── Paso 3: Hito 5.9 — Patrón Anti-N+1 ─────────────────────────────────
-        // Solo se ejecuta si barcazasRaw tiene datos. Oracle ya hizo early-return.
-        // Resolución diferida para evitar ciclo de DI (mismo patrón que CargaManagerService).
         var buqueService = _serviceProvider.GetRequiredService<IBuqueService>();
 
         // Recolectar todos los IDs numéricos únicos de las barcazas

@@ -11,6 +11,7 @@ import {
 } from '../../hooks/useCargasApi';
 import { convoyKeys } from '../../hooks/useGestionConvoy';
 import type { TipoCarga } from '../../types/cargas.types';
+import { useMuelles } from '../../hooks/useCatalogos';
 
 // Importamos los modales de edición y eliminación generados
 import CargaEditModal from './CargaEditModal';
@@ -50,6 +51,10 @@ export default function CargasModal({
   const { mutate: fondear } = useFondearCarga(viajeId);
   const { mutate: cargarTon } = useCargarToneladas(viajeId);
   const { mutate: descargarTon } = useDescargarToneladas(viajeId);
+
+  const { data: muelles = [], isLoading: isLoadingMuelles } = useMuelles();
+  const [amarreCargaId, setAmarreCargaId] = useState<string | null>(null);
+  const [selectedMuelle, setSelectedMuelle] = useState<string>('');
 
   const [showForm, setShowForm] = useState(false);
   const [tipo, setTipo] = useState<TipoCarga>('Barcaza');
@@ -198,8 +203,8 @@ export default function CargasModal({
 
   const handleAccion = (accion: 'amarrar' | 'fondear' | 'cargar' | 'descargar', id: string) => {
     if (accion === 'amarrar') {
-      const muelle = window.prompt('Ingrese el nuevo muelle:');
-      if (muelle) amarrar({ id, nuevoMuelle: muelle });
+      setAmarreCargaId(id);
+      setSelectedMuelle('');
     } else if (accion === 'fondear') {
       const zona = window.prompt('Ingrese la zona de fondeo:');
       if (zona) fondear({ id, zonaFondeo: zona });
@@ -213,6 +218,20 @@ export default function CargasModal({
       const ton = parseFloat(val || '');
       if (!isNaN(ton) && ton > 0) descargarTon({ id, toneladas: ton });
       else if (val) alert('Valor inválido');
+    }
+  };
+
+  const handleConfirmarAmarre = () => {
+    if (amarreCargaId && selectedMuelle) {
+      amarrar(
+        { id: amarreCargaId, nuevoMuelle: selectedMuelle },
+        {
+          onSuccess: () => {
+            setAmarreCargaId(null);
+            setSelectedMuelle('');
+          },
+        }
+      );
     }
   };
 
@@ -434,6 +453,62 @@ export default function CargasModal({
           onClose={cerrarModalAbm}
           onSuccess={handleSuccessAbm}
         />
+      )}
+
+      {/* ── Modal de Selección de Muelle para Amarre ── */}
+      {amarreCargaId && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black bg-opacity-65 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-700/60 rounded-lg shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="h-1 w-full bg-gradient-to-r from-blue-700 to-sky-500" />
+            <div className="px-6 py-4 border-b border-slate-700/60 bg-slate-800 flex justify-between items-center text-white">
+              <h3 className="text-sm font-bold">Seleccionar Muelle de Amarre</h3>
+              <button
+                onClick={() => setAmarreCargaId(null)}
+                className="text-slate-400 hover:text-white font-bold text-xl leading-none"
+              >
+                &times;
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label htmlFor="select-muelle-amarre" className="block text-xs font-semibold uppercase text-slate-400 mb-2">
+                  Muelles Disponibles
+                </label>
+                <select
+                  id="select-muelle-amarre"
+                  value={selectedMuelle}
+                  onChange={(e) => setSelectedMuelle(e.target.value)}
+                  disabled={isLoadingMuelles}
+                  className="w-full bg-slate-800 border border-slate-600/50 text-slate-100 text-sm rounded px-3 py-2.5 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/40"
+                >
+                  <option value="" disabled>
+                    {isLoadingMuelles ? "Cargando muelles..." : "— Seleccione un muelle —"}
+                  </option>
+                  {muelles.map((muelle) => (
+                    <option key={muelle.id} value={muelle.nombre} className="bg-slate-800 text-slate-100">
+                      {muelle.nombre}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="px-6 py-4 bg-slate-800/40 border-t border-slate-700/60 flex justify-end gap-3">
+              <button
+                onClick={() => setAmarreCargaId(null)}
+                className="px-4 py-2 text-sm font-medium text-slate-400 hover:text-slate-200 border border-slate-600/50 hover:border-slate-500 rounded transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirmarAmarre}
+                disabled={!selectedMuelle}
+                className="px-5 py-2 text-sm font-semibold rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
