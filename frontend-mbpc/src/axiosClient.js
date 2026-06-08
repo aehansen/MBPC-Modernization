@@ -74,4 +74,9 @@ export const tipoCargaApi = {
   autocomplete: (query) => apiClient.get("/tipocarga/autocomplete", { params: { query } }),
 };
 
+export const reporteApi = {
+  getData: (nombre, params) => apiClient.get(`/reportes/${encodeURIComponent(nombre)}/data`, { params }),
+  exportar: (nombre, params) => apiClient.get(`/reportes/${encodeURIComponent(nombre)}/exportar`, { params, responseType: "blob" }),
+};
+
 export default apiClient;

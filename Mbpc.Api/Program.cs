@@ -123,6 +123,7 @@ builder.Services.AddScoped<IConvoyManagerService, ConvoyManagerService>();
 builder.Services.AddScoped<IBuqueService, BuqueManagerService>();
 builder.Services.AddScoped<ICosteraService, CosteraManagerService>();
 builder.Services.AddScoped<ICatalogoService, CatalogoManagerService>();
+builder.Services.AddScoped<IReporteService, ReporteManagerService>();
 
 // ── Background Workers / Hosted Services ──────────────────────────────────────
 builder.Services.AddHostedService<ReconciliacionEspacialWorker>();

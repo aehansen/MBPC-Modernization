@@ -40,4 +40,15 @@ namespace Mbpc.Api.DTOs
         public DateTime? Desde { get; init; }
         public DateTime? Hasta { get; init; }
     }
+
+    public record ReportParamDto
+    {
+        public string Name { get; init; } = string.Empty;
+        public string? Value { get; init; }
+    }
+
+    public record ReporteRequestDto
+    {
+        public List<ReportParamDto> Parametros { get; init; } = new();
+    }
 }
