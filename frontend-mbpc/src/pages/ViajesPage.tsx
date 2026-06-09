@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useViajes } from '../hooks/useViajesApi';
 import MapaAIS from "../MapaAIS.jsx";
 import ViajesDashboard from "../components/viajes/ViajesDashboard";
@@ -109,6 +110,17 @@ export default function ViajesPage() {
           </svg>
           Viaje (Histórico)
         </button>
+
+        {/* ── 6. Catálogos ────────────────────────────────────────────────── */}
+        <Link
+          to="/catalogos"
+          className="flex items-center gap-1.5 px-4 py-1.5 bg-[#104a8e] hover:bg-[#1a5fa8] text-white text-xs font-semibold rounded transition border border-blue-600"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 10h16M4 14h16M4 18h16" />
+          </svg>
+          Catálogos
+        </Link>
 
       </div>{/* /botonera */}
 

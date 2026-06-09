@@ -16,6 +16,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import Login       from "./pages/Login";
 import MainLayout  from "./components/layout/MainLayout";
 import ViajesPage  from "./pages/ViajesPage";
+import Catalogos   from "./pages/Catalogos";
 
 // ── CSS global ────────────────────────────────────────────────────────────
 import "./index.css";
@@ -74,6 +75,17 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
                 */}
                 <MainLayout>
                   <ViajesPage />
+                </MainLayout>
+              </RequireAuth>
+            }
+          />
+
+          <Route
+            path="/catalogos"
+            element={
+              <RequireAuth>
+                <MainLayout>
+                  <Catalogos />
                 </MainLayout>
               </RequireAuth>
             }
