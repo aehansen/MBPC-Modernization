@@ -86,7 +86,7 @@ namespace Mbpc.Api.Services
             if (_env.IsDevelopment() && string.IsNullOrEmpty(_oracleConnectionString))
             {
                 _logger.LogWarning("Bypass de base de datos en entorno de desarrollo. Retornando datos mockeados para '{ReportName}'", reportName);
-                return GenerarMockDataTable(reportName, costeraId);
+                return GenerarMockDataTable(reportName, costeraId, parametersList);
             }
 
             try
@@ -119,7 +119,7 @@ namespace Mbpc.Api.Services
                 if (_env.IsDevelopment())
                 {
                     _logger.LogWarning(ex, "[DEV BYPASS] Fallo Oracle al ejecutar reporte '{ReportName}'. Retornando datos mockeados.", reportName);
-                    return GenerarMockDataTable(reportName, costeraId);
+                    return GenerarMockDataTable(reportName, costeraId, parametersList);
                 }
                 _logger.LogError(ex, "Error ejecutando stored procedure de reporte '{ReportName}'", reportName);
                 throw;
@@ -186,18 +186,96 @@ namespace Mbpc.Api.Services
             }
         }
 
-        private DataTable GenerarMockDataTable(string reportName, int costeraId)
+        private DataTable GenerarMockDataTable(string reportName, int costeraId, List<ReportParamDto> parameters)
         {
             var dataTable = new DataTable();
-            dataTable.Columns.Add("ID_REPORTE", typeof(int));
-            dataTable.Columns.Add("REPORTE", typeof(string));
-            dataTable.Columns.Add("COSTERA_ID", typeof(int));
-            dataTable.Columns.Add("FECHA", typeof(string));
-            dataTable.Columns.Add("DETALLE", typeof(string));
+            
+            // Extraer valores de filtros de la lista de parámetros
+            string? nombreFiltro = parameters.FirstOrDefault(p => p.Name.Equals("nombre", StringComparison.OrdinalIgnoreCase))?.Value;
+            string? omiFiltro = parameters.FirstOrDefault(p => p.Name.Equals("omi", StringComparison.OrdinalIgnoreCase))?.Value;
+            string? matriculaFiltro = parameters.FirstOrDefault(p => p.Name.Equals("matricula", StringComparison.OrdinalIgnoreCase))?.Value;
+            string? origenFiltro = parameters.FirstOrDefault(p => p.Name.Equals("origen", StringComparison.OrdinalIgnoreCase))?.Value;
+            string? destinoFiltro = parameters.FirstOrDefault(p => p.Name.Equals("destino", StringComparison.OrdinalIgnoreCase))?.Value;
 
-            dataTable.Rows.Add(1, reportName, costeraId, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss"), "Simulación de reporte 1");
-            dataTable.Rows.Add(2, reportName, costeraId, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss"), "Simulación de reporte 2");
-            dataTable.Rows.Add(3, reportName, costeraId, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss"), "Simulación de reporte 3");
+            if (reportName.Equals("buques_puerto", StringComparison.OrdinalIgnoreCase))
+            {
+                dataTable.Columns.Add("id", typeof(string));
+                dataTable.Columns.Add("buque", typeof(string));
+                dataTable.Columns.Add("origen", typeof(string));
+                dataTable.Columns.Add("destino", typeof(string));
+                dataTable.Columns.Add("eta", typeof(string));
+                dataTable.Columns.Add("estado", typeof(string));
+                dataTable.Columns.Add("mmsi", typeof(string));
+
+                var rows = new List<object[]>
+                {
+                    new object[] { "1", "EDERRA I", "Gualeguaychú", "Nueva Palmira", "2026-06-11 14:00", "Amarrado", "0" },
+                    new object[] { "2", "YANI G", "Puerto Buenos Aires", "Puerto Dock Sud", "2026-06-12 08:30", "Fondeado", "1045174" },
+                    new object[] { "3", "MSC ROSARIA", "Zárate", "Puerto Buenos Aires", "2026-06-12 18:00", "Amarrado", "9320257" }
+                };
+
+                foreach (var row in rows)
+                {
+                    string buqueName = (string)row[1];
+                    if (string.IsNullOrEmpty(nombreFiltro) || buqueName.Contains(nombreFiltro, StringComparison.OrdinalIgnoreCase))
+                    {
+                        dataTable.Rows.Add(row);
+                    }
+                }
+            }
+            else if (reportName.Equals("historico_viajes", StringComparison.OrdinalIgnoreCase))
+            {
+                dataTable.Columns.Add("id", typeof(string));
+                dataTable.Columns.Add("buque", typeof(string));
+                dataTable.Columns.Add("omi", typeof(string));
+                dataTable.Columns.Add("matricula", typeof(string));
+                dataTable.Columns.Add("origen", typeof(string));
+                dataTable.Columns.Add("destino", typeof(string));
+                dataTable.Columns.Add("fechaPartida", typeof(string));
+                dataTable.Columns.Add("eta", typeof(string));
+                dataTable.Columns.Add("estado", typeof(string));
+                dataTable.Columns.Add("costeraId", typeof(string));
+
+                var rows = new List<object[]>
+                {
+                    new object[] { "101", "EDERRA I", "0", "01230", "Gualeguaychú", "San Lorenzo", "2026-06-08 09:00", "2026-06-09 18:00", "Finalizado", "Gualeguaychu" },
+                    new object[] { "102", "MSC ROSARIA", "9320257", "N/A", "Puerto Zarate", "Puerto Montevideo", "2026-06-07 10:00", "2026-06-08 22:00", "Finalizado", "Zarate" },
+                    new object[] { "103", "YANI G", "1045174", "LW4793", "Puerto Corrientes", "Puerto Buenos Aires", "2026-06-05 06:00", "2026-06-07 15:45", "Finalizado", "Corrientes" }
+                };
+
+                foreach (var row in rows)
+                {
+                    string buqueName = (string)row[1];
+                    string omiVal = (string)row[2];
+                    string matVal = (string)row[3];
+                    string oriVal = (string)row[4];
+                    string destVal = (string)row[5];
+
+                    bool match = true;
+                    if (!string.IsNullOrEmpty(nombreFiltro) && !buqueName.Contains(nombreFiltro, StringComparison.OrdinalIgnoreCase)) match = false;
+                    if (!string.IsNullOrEmpty(omiFiltro) && !omiVal.Contains(omiFiltro, StringComparison.OrdinalIgnoreCase)) match = false;
+                    if (!string.IsNullOrEmpty(matriculaFiltro) && !matVal.Contains(matriculaFiltro, StringComparison.OrdinalIgnoreCase)) match = false;
+                    if (!string.IsNullOrEmpty(origenFiltro) && !oriVal.Contains(origenFiltro, StringComparison.OrdinalIgnoreCase)) match = false;
+                    if (!string.IsNullOrEmpty(destinoFiltro) && !destVal.Contains(destinoFiltro, StringComparison.OrdinalIgnoreCase)) match = false;
+
+                    if (match)
+                    {
+                        dataTable.Rows.Add(row);
+                    }
+                }
+            }
+            else
+            {
+                dataTable.Columns.Add("ID_REPORTE", typeof(int));
+                dataTable.Columns.Add("REPORTE", typeof(string));
+                dataTable.Columns.Add("COSTERA_ID", typeof(int));
+                dataTable.Columns.Add("FECHA", typeof(string));
+                dataTable.Columns.Add("DETALLE", typeof(string));
+
+                dataTable.Rows.Add(1, reportName, costeraId, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss"), "Simulación de reporte 1");
+                dataTable.Rows.Add(2, reportName, costeraId, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss"), "Simulación de reporte 2");
+                dataTable.Rows.Add(3, reportName, costeraId, DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss"), "Simulación de reporte 3");
+            }
 
             return dataTable;
         }

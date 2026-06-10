@@ -34,6 +34,35 @@ public class ReporteController : ControllerBase
         return Ok(mappedData);
     }
 
+    [HttpGet("{nombre}/params")]
+    public IActionResult GetParams([FromRoute] string nombre)
+    {
+        _logger.LogInformation("Endpoint GET /api/reportes/{Nombre}/params invocado.", nombre);
+        
+        var list = new List<object>();
+        if (nombre.Equals("buques_puerto", StringComparison.OrdinalIgnoreCase))
+        {
+            list.Add(new { label = "Nombre de Buque", name = "nombre", type = "text" });
+        }
+        else if (nombre.Equals("historico_viajes", StringComparison.OrdinalIgnoreCase))
+        {
+            list.Add(new { label = "Nombre de Buque", name = "nombre", type = "text" });
+            list.Add(new { label = "OMI", name = "omi", type = "number" });
+            list.Add(new { label = "Matrícula", name = "matricula", type = "text" });
+            list.Add(new { label = "Puerto de Origen", name = "origen", type = "text" });
+            list.Add(new { label = "Puerto de Destino", name = "destino", type = "text" });
+            list.Add(new { label = "Fecha Desde", name = "desde", type = "date" });
+            list.Add(new { label = "Fecha Hasta", name = "hasta", type = "date" });
+        }
+        else if (nombre.Equals("auditoria_general", StringComparison.OrdinalIgnoreCase))
+        {
+            list.Add(new { label = "Usuario Operador", name = "usuario", type = "text" });
+            list.Add(new { label = "Categoría", name = "categoria", type = "text" });
+        }
+        
+        return Ok(list);
+    }
+
     [HttpGet("{nombre}/exportar")]
     public async Task<IActionResult> Exportar([FromRoute] string nombre, [FromQuery] ReporteRequestDto request)
     {

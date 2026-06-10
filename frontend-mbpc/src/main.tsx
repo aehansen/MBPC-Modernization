@@ -17,6 +17,7 @@ import MainLayout  from "./components/layout/MainLayout";
 import ViajesPage  from "./pages/ViajesPage";
 import Catalogos   from "./pages/Catalogos";
 import InspeccionesPage from "./pages/InspeccionesPage";
+import PlataformaReportesPage from "./pages/PlataformaReportesPage";
 
 // ── CSS global ────────────────────────────────────────────────────────────
 import "./index.css";
@@ -98,6 +99,18 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
               <RequireAuth>
                 <MainLayout>
                   <InspeccionesPage />
+                </MainLayout>
+              </RequireAuth>
+            }
+          />
+
+          {/* NUEVA RUTA: Reportes y Auditoría */}
+          <Route
+            path="/reportes"
+            element={
+              <RequireAuth>
+                <MainLayout>
+                  <PlataformaReportesPage />
                 </MainLayout>
               </RequireAuth>
             }

@@ -406,6 +406,7 @@ namespace Mbpc.Api.Services
                 new() { IdBuque = 8747719, Nombre = "COMANDANTE LUIS PIEDRABUENA", Matricula = "LW4926", Omi = "8747719", Tipo = "Remolcador" },
 
                 // ─── BUQUES MOTOR / ULTRAMAR ───
+                new() { IdBuque = 5000012, Nombre = "EDERRA I", Matricula = "01230", Omi = "0", Tipo = "Buque Motor", Bandera = "ARGENTINA", Costera = "Gualeguaychu", Estado = "Activo" },
                 new() { IdBuque = 5000001, Nombre = "MSC ROSARIA", Matricula = "N/A", Omi = "9320257", Tipo = "Buque Motor" },
                 new() { IdBuque = 5000007, Nombre = "MAREM", Matricula = null, Omi = "9545077", Tipo = "Buque Motor" },
                 new() { IdBuque = 5000008, Nombre = "ARGENMAR MISTRAL", Matricula = "03166", Omi = "9498937", Tipo = "Buque Motor" },
@@ -417,6 +418,14 @@ namespace Mbpc.Api.Services
                 new() { IdBuque = 5000004, Nombre = "STAR GRACE", Matricula = "N/A", Omi = "9500000", Tipo = "Buque Motor" },
                 new() { IdBuque = 5000005, Nombre = "SBI ANTARES", Matricula = "N/A", Omi = "9600000", Tipo = "Buque Motor" },
                 new() { IdBuque = 5000006, Nombre = "NAVIOS SPRING", Matricula = "N/A", Omi = "9700000", Tipo = "Buque Motor" },
+                new() { IdBuque = 5000013, Nombre = "DON BENJAMIN", Matricula = "02451", Omi = "9123044", Tipo = "Buque Motor", Bandera = "ARGENTINA", Costera = "Zárate", Estado = "Activo" },
+                new() { IdBuque = 5000014, Nombre = "PAMPAS II", Matricula = "03001", Omi = "9201192", Tipo = "Buque Motor", Bandera = "ARGENTINA", Costera = "Buenos Aires", Estado = "Activo" },
+                new() { IdBuque = 5000015, Nombre = "SAN JORGE", Matricula = "01890", Omi = "9048255", Tipo = "Buque Motor", Bandera = "ARGENTINA", Costera = "San Pedro", Estado = "Activo" },
+                new() { IdBuque = 5000016, Nombre = "ESTRELLA DEL SUR", Matricula = "02781", Omi = "9580442", Tipo = "Buque Motor", Bandera = "ARGENTINA", Costera = "Corrientes", Estado = "Activo" },
+                new() { IdBuque = 5000017, Nombre = "RIVER EXPRESS", Matricula = "01429", Omi = "9422001", Tipo = "Buque Motor", Bandera = "PARAGUAY", Costera = "Gualeguaychú", Estado = "Activo" },
+                new() { IdBuque = 5000018, Nombre = "STENA ATLANTIS", Matricula = "N/A", Omi = "9602011", Tipo = "Buque Motor", Bandera = "REINO UNIDO", Costera = "Buenos Aires", Estado = "Activo" },
+                new() { IdBuque = 5000019, Nombre = "PIONEER SEA", Matricula = "N/A", Omi = "9823055", Tipo = "Buque Motor", Bandera = "PANAMA", Costera = "Zárate", Estado = "Activo" },
+                new() { IdBuque = 5000020, Nombre = "GRANDE BUENOS AIRES", Matricula = "N/A", Omi = "9253208", Tipo = "Buque Motor", Bandera = "ITALIA", Costera = "Buenos Aires", Estado = "Activo" },
 
                 // ─── EMBARCACIONES MENORES ───
                 new() { IdBuque = 4000001, Nombre = "PRACTICO I", Matricula = "REY-0192", Omi = "-", Tipo = "Embarcación Menor" },
