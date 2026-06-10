@@ -5,19 +5,20 @@ import MapaAIS from "../MapaAIS.jsx";
 import ViajesDashboard from "../components/viajes/ViajesDashboard";
 import ModalHistorico from "../components/viajes/ModalHistorico";
 import ModalNuevoViaje from "../components/viajes/ModalNuevoViaje";
+import LaunchpadModal from "../components/viajes/LaunchpadModal";
 import ModalGestionConvoy from "@/components/convoy/ModalGestionConvoy";
-import type { NuevoViajeResponse, NuevoViajeError, ViajeDto } from "@/types/viajes.types"; // ← import de tipos para el handler
+import type { NuevoViajeResponse, NuevoViajeError } from "@/types/viajes.types";
 
 type Vista = "dashboard" | "mapa";
 
 export default function ViajesPage() {
-  const [vistaActual, setVistaActual]     = useState<Vista>("dashboard");
-  const [showHistorico, setShowHistorico] = useState(false);
+  const [vistaActual, setVistaActual]         = useState<Vista>("dashboard");
+  const [showHistorico, setShowHistorico]     = useState(false);
   const [selectedViajeId, setSelectedViajeId] = useState<string | null>(null);
-  const [isModalConvoyOpen, setIsModalConvoyOpen] = useState(false);
+  const [isModalConvoyOpen, setIsModalConvoyOpen]     = useState(false);
   const [isModalNuevoViajeOpen, setIsModalNuevoViajeOpen] = useState(false);
+  const [isLaunchpadOpen, setIsLaunchpadOpen] = useState(false);
 
-  // Se consulta la lista de viajes (se solicitan los primeros 100 para abarcar la selección activa)
   const { data: viajes } = useViajes(1, 100, "");
   const viajeSeleccionado = viajes?.find((v) => v.id === selectedViajeId);
 
@@ -29,16 +30,33 @@ export default function ViajesPage() {
     setIsModalConvoyOpen(true);
   };
 
+  const handleAbrirLaunchpad = () => {
+    if (!viajeSeleccionado) {
+      alert("Debe seleccionar un buque de la jurisdicción para abrir el Launchpad.");
+      return;
+    }
+    setIsLaunchpadOpen(true);
+  };
+
   const toggleVista = () =>
     setVistaActual((v) => (v === "mapa" ? "dashboard" : "mapa"));
 
+  // Datos del buque activo, normalizados para el LaunchpadModal
+  const buqueParaLaunchpad = viajeSeleccionado
+    ? { 
+        matricula: viajeSeleccionado.matricula ?? '', 
+        nombre: viajeSeleccionado.buque,
+        omi: viajeSeleccionado.omi
+      }
+    : { matricula: '', nombre: '' };
+
   return (
     <div className="flex flex-col flex-grow">
-      {/* ════════════════════════════════════════════════════════════════════
+      {/* ═══════════════════════════════════════════════════════════════════
           BOTONERA SUPERIOR
-      ════════════════════════════════════════════════════════════════════ */}
+      ═══════════════════════════════════════════════════════════════════ */}
       <div className="bg-[#002454] border-t border-blue-800 px-6 py-2 flex items-center gap-2 flex-wrap">
-        
+
         {/* ── 1. Ver Mapa AIS / Volver al Dashboard ──────────────────────── */}
         <button
           onClick={toggleVista}
@@ -100,7 +118,7 @@ export default function ViajesPage() {
           Barcos en Puerto
         </button>
 
-        {/* ── 5. Viaje Histórico — abre ModalHistorico ───────────────────── */}
+        {/* ── 5. Viaje Histórico ─────────────────────────────────────────── */}
         <button
           onClick={() => setShowHistorico(true)}
           className="flex items-center gap-1.5 px-4 py-1.5 bg-[#104a8e] hover:bg-[#1a5fa8] text-white text-xs font-semibold rounded transition border border-blue-600"
@@ -111,18 +129,18 @@ export default function ViajesPage() {
           Viaje (Histórico)
         </button>
 
-        {/* ── NUEVO: Inspecciones ────────────────────────────────────────── */}
-        <Link
-          to="/inspecciones"
+        {/* ── 6. Sistemas Externos (Launchpad) ────────────────────────────── */}
+        <button
+          onClick={handleAbrirLaunchpad}
           className="flex items-center gap-1.5 px-4 py-1.5 bg-[#104a8e] hover:bg-[#1a5fa8] text-white text-xs font-semibold rounded transition border border-blue-600"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
           </svg>
-          Inspecciones
-        </Link>
+          Sistemas Externos
+        </button>
 
-        {/* ── 6. Catálogos ────────────────────────────────────────────────── */}
+        {/* ── 7. Catálogos ────────────────────────────────────────────────── */}
         <Link
           to="/catalogos"
           className="flex items-center gap-1.5 px-4 py-1.5 bg-[#104a8e] hover:bg-[#1a5fa8] text-white text-xs font-semibold rounded transition border border-blue-600"
@@ -135,9 +153,9 @@ export default function ViajesPage() {
 
       </div>{/* /botonera */}
 
-      {/* ════════════════════════════════════════════════════════════════════
+      {/* ═══════════════════════════════════════════════════════════════════
           CUERPO
-      ════════════════════════════════════════════════════════════════════ */}
+      ═══════════════════════════════════════════════════════════════════ */}
       {vistaActual === "mapa" ? (
         <div style={{ height: "calc(100vh - 104px)" }} className="flex-grow">
           <MapaAIS />
@@ -151,9 +169,9 @@ export default function ViajesPage() {
         </div>
       )}
 
-      {/* ════════════════════════════════════════════════════════════════════
+      {/* ═══════════════════════════════════════════════════════════════════
           MODALES
-      ════════════════════════════════════════════════════════════════════ */}
+      ═══════════════════════════════════════════════════════════════════ */}
       {showHistorico && (
         <ModalHistorico onClose={() => setShowHistorico(false)} />
       )}
@@ -168,13 +186,20 @@ export default function ViajesPage() {
         isOpen={isModalNuevoViajeOpen}
         onClose={() => setIsModalNuevoViajeOpen(false)}
         onSuccess={(res: NuevoViajeResponse) => {
-          // res es el objeto completo — el mensaje ya viene normalizado desde el hook
           alert(`✅ ${res.mensaje}`);
         }}
         onError={(err: NuevoViajeError) => {
           alert(`❌ Error al registrar: ${err.mensaje}`);
         }}
       />
+
+      {viajeSeleccionado && (
+        <LaunchpadModal
+          isOpen={isLaunchpadOpen}
+          onClose={() => setIsLaunchpadOpen(false)}
+          buqueSeleccionado={buqueParaLaunchpad}
+        />
+      )}
 
     </div>
   );

@@ -21,6 +21,8 @@ namespace Mbpc.Api.DTOs
         public List<PracticoDto> Practicos { get; set; } = new List<PracticoDto>();
         public List<InspectorDto> Inspectores { get; set; } = new List<InspectorDto>();
         public bool EsConvoy { get; set; }
+        public string? Omi { get; set; }
+        public string? Matricula { get; set; }
     }
 
     // ══════════════════════════════════════════════════════════════════════════

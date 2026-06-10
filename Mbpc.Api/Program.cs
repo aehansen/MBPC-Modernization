@@ -202,4 +202,72 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+
+// ── Semillero de datos de prueba para buques en Gualeguaychú (id: 425) ─────
+using (var scope = app.Services.CreateScope())
+{
+    try
+    {
+        var database = scope.ServiceProvider.GetRequiredService<IMongoDatabase>();
+        var mongoSettings = scope.ServiceProvider.GetRequiredService<IOptions<MongoDbSettings>>().Value;
+        var collectionPos = database.GetCollection<Mbpc.Api.Models.Mongo.ViajePosicionMongo>(mongoSettings.LastMbpcCollectionName);
+        var collectionDet = database.GetCollection<Mbpc.Api.Models.Mongo.ViajeDetalleMongo>(mongoSettings.DetailsMbpcCollectionName);
+
+        var seedVessels = new[]
+        {
+            new { Name = "MAREM", Imo = (int?)9545077, Matricula = (string?)null, TravelId = 9000000L },
+            new { Name = "ARGENMAR MISTRAL", Imo = (int?)9498937, Matricula = (string?)"03166", TravelId = 9000001L },
+            new { Name = "NOEMI G", Imo = (int?)null, Matricula = (string?)"01376", TravelId = 9000002L },
+            new { Name = "MAMACOTA", Imo = (int?)null, Matricula = (string?)"0821M", TravelId = 9000003L },
+            new { Name = "YORK", Imo = (int?)1020514, Matricula = (string?)null, TravelId = 9000004L }
+        };
+
+        foreach (var v in seedVessels)
+        {
+            var exists = collectionPos.Find(p => p.VesselName == v.Name).Any();
+            if (!exists)
+            {
+                var pos = new Mbpc.Api.Models.Mongo.ViajePosicionMongo
+                {
+                    TravelId = v.TravelId,
+                    VesselName = v.Name,
+                    Imo = v.Imo,
+                    CallSign = v.Matricula,
+                    NavegationStatusDesc = "Amarrado",
+                    MsgTime = DateTime.UtcNow,
+                    Latitude = -33.0095, // Coordenadas sobre el río Gualeguaychú
+                    Longitude = -58.5085,
+                    Origin = "Gualeguaychú",
+                    Destination = "Buenos Aires",
+                    CosteraId = 425
+                };
+                collectionPos.InsertOne(pos);
+
+                var det = new Mbpc.Api.Models.Mongo.ViajeDetalleMongo
+                {
+                    IdViaje = v.TravelId,
+                    VesselName = v.Name,
+                    Origin = "Gualeguaychú",
+                    Destination = "Buenos Aires",
+                    CosteraId = 425,
+                    Etapas = new List<Mbpc.Api.Models.Mongo.EtapaMongo>
+                    {
+                        new Mbpc.Api.Models.Mongo.EtapaMongo
+                        {
+                            EtapaId = 1,
+                            FechaInicio = DateTime.UtcNow,
+                            Barcazas = new List<Mbpc.Api.Models.Mongo.BarcazaMongo>()
+                        }
+                    }
+                };
+                collectionDet.InsertOne(det);
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"Error al sembrar viajes de prueba en Gualeguaychú: {ex.Message}");
+    }
+}
+
 app.Run();

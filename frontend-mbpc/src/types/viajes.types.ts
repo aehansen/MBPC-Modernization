@@ -8,6 +8,8 @@ export interface ViajeDto {
   estadoActual: string;
   costeraId: string | null;
   esConvoy?: boolean;
+  omi?: string;
+  matricula?: string;
 }
 
 // ─── Viaje histórico (búsqueda global desde Oracle) ───────────────────────────

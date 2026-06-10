@@ -254,7 +254,7 @@ namespace Mbpc.Api.Services
                 ? contexto.Split("query=")[1].Trim()
                 : contexto.Trim();
 
-            _logger.LogWarning("Oracle Offline. Usando MOCK de 100 buques filtrado por: '{Query}'", query);
+            _logger.LogDebug("Oracle Offline. Usando MOCK de 100 buques filtrado por: '{Query}'", query);
 
             var mockDb = ObtenerMockDb();
 
@@ -407,6 +407,11 @@ namespace Mbpc.Api.Services
 
                 // ─── BUQUES MOTOR / ULTRAMAR ───
                 new() { IdBuque = 5000001, Nombre = "MSC ROSARIA", Matricula = "N/A", Omi = "9320257", Tipo = "Buque Motor" },
+                new() { IdBuque = 5000007, Nombre = "MAREM", Matricula = null, Omi = "9545077", Tipo = "Buque Motor" },
+                new() { IdBuque = 5000008, Nombre = "ARGENMAR MISTRAL", Matricula = "03166", Omi = "9498937", Tipo = "Buque Motor" },
+                new() { IdBuque = 5000009, Nombre = "NOEMI G", Matricula = "01376", Omi = null, Tipo = "Buque Motor" },
+                new() { IdBuque = 5000010, Nombre = "MAMACOTA", Matricula = "0821M", Omi = null, Tipo = "Buque Motor" },
+                new() { IdBuque = 5000011, Nombre = "YORK", Matricula = null, Omi = "1020514", Tipo = "Buque Motor" },
                 new() { IdBuque = 5000002, Nombre = "CLIPPER BRUNSWICK", Matricula = "N/A", Omi = "9400000", Tipo = "Buque Motor" },
                 new() { IdBuque = 5000003, Nombre = "FEDERAL KIVALINA", Matricula = "N/A", Omi = "9200000", Tipo = "Buque Motor" },
                 new() { IdBuque = 5000004, Nombre = "STAR GRACE", Matricula = "N/A", Omi = "9500000", Tipo = "Buque Motor" },

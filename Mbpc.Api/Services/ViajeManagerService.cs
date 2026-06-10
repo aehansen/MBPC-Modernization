@@ -107,7 +107,12 @@ namespace Mbpc.Api.Services
             if (costeraId == 0)
                 return Builders<ViajePosicionMongo>.Filter.Empty;
 
-            return Builders<ViajePosicionMongo>.Filter.Eq("CosteraId", costeraId);
+            return Builders<ViajePosicionMongo>.Filter.Or(
+                Builders<ViajePosicionMongo>.Filter.Eq("CosteraId", costeraId),
+                Builders<ViajePosicionMongo>.Filter.Eq("CosteraId", 0),
+                Builders<ViajePosicionMongo>.Filter.Eq("CosteraId", BsonNull.Value),
+                Builders<ViajePosicionMongo>.Filter.Exists("CosteraId", false)
+            );
         }
 
         private static FilterDefinition<ViajeDetalleMongo> BuildFiltroCosteraDetalle(int costeraId)
@@ -115,7 +120,12 @@ namespace Mbpc.Api.Services
             if (costeraId == 0)
                 return Builders<ViajeDetalleMongo>.Filter.Empty;
 
-            return Builders<ViajeDetalleMongo>.Filter.Eq("CosteraId", costeraId);
+            return Builders<ViajeDetalleMongo>.Filter.Or(
+                Builders<ViajeDetalleMongo>.Filter.Eq("CosteraId", costeraId),
+                Builders<ViajeDetalleMongo>.Filter.Eq("CosteraId", 0),
+                Builders<ViajeDetalleMongo>.Filter.Eq("CosteraId", BsonNull.Value),
+                Builders<ViajeDetalleMongo>.Filter.Exists("CosteraId", false)
+            );
         }
 
         public async Task<List<ViajePosicionMongo>> GetViajesAsync(string? nombre = null, int pagina = 1, int tamanio = 50)
@@ -150,6 +160,9 @@ namespace Mbpc.Api.Services
                     ? p.VesselName
                     : p.TravelId.ToString();
 
+                string? matricula = null;
+                string? omi = p.Imo?.ToString();
+
                 if (long.TryParse(buqueNombre, out long buqueId))
                 {
                     _logger.LogDebug(
@@ -161,6 +174,40 @@ namespace Mbpc.Api.Services
                     buqueNombre = !string.IsNullOrWhiteSpace(infoBuque?.Nombre)
                         ? infoBuque.Nombre
                         : $"BUQUE {buqueNombre}";
+
+                    if (infoBuque != null)
+                    {
+                        matricula = infoBuque.Matricula;
+                        if (string.IsNullOrEmpty(omi) || omi == "-")
+                        {
+                            omi = infoBuque.Omi;
+                        }
+                    }
+                }
+                else
+                {
+                    try
+                    {
+                        var buquesEncontrados = await _buqueService.BuscarBuquesDisponiblesAsync(buqueNombre);
+                        var exactBuque = buquesEncontrados?.FirstOrDefault(b => b.Nombre != null && b.Nombre.Equals(buqueNombre, StringComparison.OrdinalIgnoreCase));
+                        if (exactBuque != null)
+                        {
+                            matricula = exactBuque.Matricula;
+                            if (string.IsNullOrEmpty(omi) || omi == "-" || omi == "S/D")
+                            {
+                                omi = exactBuque.Omi;
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "ObtenerViajesDtoAsync: No se pudo hidratar buque por nombre '{Nombre}'", buqueNombre);
+                    }
+                }
+
+                if (string.IsNullOrEmpty(omi) || omi == "-")
+                {
+                    omi = p.Imo?.ToString();
                 }
 
                 var esConvoy = false;
@@ -210,7 +257,9 @@ namespace Mbpc.Api.Services
                     Ruta                  = $"{p.Origin ?? "Sin Origen"} ➔ {p.Destination ?? "Sin Destino"} | Pos: {Math.Round(p.Latitude, 4)}, {Math.Round(p.Longitude, 4)}",
                     FechaInicioFormateada = p.MsgTime.ToString("dd/MM/yyyy HH:mm"),
                     EstadoActual          = p.NavegationStatusDesc ?? "N/A",
-                    EsConvoy              = esConvoy
+                    EsConvoy              = esConvoy,
+                    Omi                   = omi,
+                    Matricula             = matricula
                 });
             }
 
@@ -686,6 +735,25 @@ namespace Mbpc.Api.Services
                     nuevoViaje.BuqueId);
             }
 
+            int? buqueImo = null;
+            string? buqueCallSign = null;
+            try
+            {
+                var buqueInfo = await _buqueService.ObtenerBuquePorIdAsync(nuevoViaje.BuqueId);
+                if (buqueInfo != null)
+                {
+                    if (int.TryParse(buqueInfo.Omi, out var imoVal))
+                    {
+                        buqueImo = imoVal;
+                    }
+                    buqueCallSign = buqueInfo.Matricula;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "IniciarViajeAsync: No se pudo obtener información del buque {BuqueId} para inicializar IMO", nuevoViaje.BuqueId);
+            }
+
             try
             {
                 var nuevoDocumentoPosicion = new ViajePosicionMongo
@@ -700,7 +768,9 @@ namespace Mbpc.Api.Services
                     CourseOverGround     = 0,
                     Origin               = nuevoViaje.Origen,
                     Destination          = nuevoViaje.Destino,
-                    CosteraId            = costeraIdInt
+                    CosteraId            = costeraIdInt,
+                    Imo                  = buqueImo,
+                    CallSign             = buqueCallSign
                 };
 
                 await _viajesCollection.InsertOneAsync(nuevoDocumentoPosicion);
