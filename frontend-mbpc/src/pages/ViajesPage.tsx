@@ -111,6 +111,17 @@ export default function ViajesPage() {
           Viaje (Histórico)
         </button>
 
+        {/* ── NUEVO: Inspecciones ────────────────────────────────────────── */}
+        <Link
+          to="/inspecciones"
+          className="flex items-center gap-1.5 px-4 py-1.5 bg-[#104a8e] hover:bg-[#1a5fa8] text-white text-xs font-semibold rounded transition border border-blue-600"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+          </svg>
+          Inspecciones
+        </Link>
+
         {/* ── 6. Catálogos ────────────────────────────────────────────────── */}
         <Link
           to="/catalogos"

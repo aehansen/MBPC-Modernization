@@ -57,10 +57,17 @@ namespace Mbpc.Api.Services
                 using var connection = new OracleConnection(_oracleConnectionString);
                 await connection.OpenAsync();
 
-                // FIX: Cambiamos 'USo' por 'DESCRIPCION' (o el nombre real de la columna de texto)
-                var result = await connection.QueryAsync<PuntoControlDto>(
-                    "SELECT ID as Id, DESCRIPCION as Nombre FROM MBPC.TBL_PUNTODECONTROL ORDER BY DESCRIPCION",
-                    commandType: CommandType.Text);
+                // Join con TBL_ZONAS y RIOS_CANALES_KM para obtener la denominación y kilómetros correctos
+                var sql = @"
+                    SELECT P.ID as Id, 
+                           COALESCE(Z.DESCRIPCION, 'Zona Desconocida') || 
+                           CASE WHEN K.KM IS NOT NULL THEN ' (KM ' || K.KM || ')' ELSE '' END as Nombre
+                    FROM MBPC.TBL_PUNTODECONTROL P
+                    LEFT JOIN MBPC.TBL_ZONAS Z ON P.ZONA_ID = Z.ID
+                    LEFT JOIN MBPC.RIOS_CANALES_KM K ON P.RIOS_CANALES_KM_ID = K.ID
+                    ORDER BY Nombre";
+
+                var result = await connection.QueryAsync<PuntoControlDto>(sql, commandType: CommandType.Text);
 
                 return result;
             }
@@ -91,7 +98,7 @@ namespace Mbpc.Api.Services
         // ════════════════════════════════════════════════════════════════════════
         // MUELLES — LECTURA
         // Tabla real: MBPC.TBL_MUELLES
-        // Mapeo:      ID → Id  |  NOMBRE → Nombre
+        // Mapeo:      ID → Id  |  DESCRIPCION → Nombre
         // ════════════════════════════════════════════════════════════════════════
 
         public async Task<IEnumerable<MuelleDto>> ObtenerMuellesAsync()
@@ -101,9 +108,9 @@ namespace Mbpc.Api.Services
                 using var connection = new OracleConnection(_oracleConnectionString);
                 await connection.OpenAsync();
 
-                // FIX: Cambiamos 'INSTA_PORT' por 'NOMBRE'
+                // Usamos DESCRIPCION que es la columna real de texto
                 var result = await connection.QueryAsync<MuelleDto>(
-                    "SELECT ID as Id, NOMBRE as Nombre FROM MBPC.TBL_MUELLES ORDER BY NOMBRE",
+                    "SELECT ID as Id, DESCRIPCION as Nombre FROM MBPC.TBL_MUELLES ORDER BY DESCRIPCION",
                     commandType: CommandType.Text);
 
                 return result;
@@ -136,8 +143,7 @@ namespace Mbpc.Api.Services
                 using var connection = new OracleConnection(_oracleConnectionString);
                 await connection.OpenAsync();
 
-                // FIX: Consistente con el cambio anterior, 'INSTA_PORT' -> 'NOMBRE'
-                var sql = "SELECT ID as Id, NOMBRE as Nombre " +
+                var sql = "SELECT ID as Id, DESCRIPCION as Nombre " +
                           "FROM MBPC.TBL_MUELLES WHERE ID = :Id AND ROWNUM = 1";
 
                 var resultado = await connection.QueryAsync<MuelleDetalleDto>(

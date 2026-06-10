@@ -6,7 +6,6 @@
 // centralizada en axiosClient.js. Este archivo NO debe importar ni configurar
 // axios directamente.
 // ──────────────────────────────────────────────────────────────────────────────
-
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
@@ -17,6 +16,7 @@ import Login       from "./pages/Login";
 import MainLayout  from "./components/layout/MainLayout";
 import ViajesPage  from "./pages/ViajesPage";
 import Catalogos   from "./pages/Catalogos";
+import InspeccionesPage from "./pages/InspeccionesPage";
 
 // ── CSS global ────────────────────────────────────────────────────────────
 import "./index.css";
@@ -79,13 +79,25 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
               </RequireAuth>
             }
           />
-
+          
           <Route
             path="/catalogos"
             element={
               <RequireAuth>
                 <MainLayout>
                   <Catalogos />
+                </MainLayout>
+              </RequireAuth>
+            }
+          />
+
+          {/* NUEVA RUTA: Inspecciones */}
+          <Route
+            path="/inspecciones"
+            element={
+              <RequireAuth>
+                <MainLayout>
+                  <InspeccionesPage />
                 </MainLayout>
               </RequireAuth>
             }

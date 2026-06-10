@@ -32,6 +32,7 @@ namespace Mbpc.Api.Services
         private readonly ICargaService                         _cargaService;
         private readonly IBuqueService                         _buqueService;
         private readonly IHttpContextAccessor                  _httpContextAccessor;
+        private readonly ICosteraService                       _costeraService;
 
         private static readonly AsyncRetryPolicy _oracleRetryPolicy = Policy
             .Handle<OracleException>()
@@ -76,7 +77,8 @@ namespace Mbpc.Api.Services
             ICosteraUserContext           costeraUserContext,
             ICargaService                 cargaService,
             IBuqueService                 buqueService,
-            IHttpContextAccessor          httpContextAccessor) 
+            IHttpContextAccessor          httpContextAccessor,
+            ICosteraService               costeraService) 
         {
             var database = mongoClient.GetDatabase(mongoSettings.Value.DatabaseName);
 
@@ -97,6 +99,7 @@ namespace Mbpc.Api.Services
             _cargaService           = cargaService;
             _buqueService           = buqueService;
             _httpContextAccessor    = httpContextAccessor;
+            _costeraService         = costeraService;
         }
 
         private static FilterDefinition<ViajePosicionMongo> BuildFiltroCostera(int costeraId)
@@ -904,6 +907,16 @@ namespace Mbpc.Api.Services
 
             await _tracklogCollection.InsertOneAsync(tracklogEntry);
 
+            // ── RECONCILIACIÓN ESPACIAL REACTIVA ──────────────────────────────────
+            try
+            {
+                await EvaluarReconciliacionReactivaAsync(posicionActual, dto.Latitud, dto.Longitud, velocidadKn);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al evaluar reconciliación espacial reactiva para viaje '{Id}'.", id);
+            }
+
             return new PosicionActualizadaResultDto
             {
                 VesselName           = posicionActual.VesselName,
@@ -1486,6 +1499,149 @@ namespace Mbpc.Api.Services
             {
                 _logger.LogError(ex, "Error al registrar el evento de auditoría '{Tipo}' para el viaje '{Id}'.", tipo, viajeId);
             }
+        }
+
+        private async Task EvaluarReconciliacionReactivaAsync(ViajePosicionMongo viaje, double latitud, double longitud, double velocidadKn)
+        {
+            if (latitud == 0 && longitud == 0) return;
+
+            var costeras = await _costeraService.ObtenerLimitesJurisdiccionalesAsync();
+            int nuevaCosteraId = DeterminarJurisdicionCorrespondiente(latitud, longitud, costeras);
+
+            if (nuevaCosteraId > 0 && nuevaCosteraId != viaje.CosteraId)
+            {
+                _logger.LogInformation(
+                    "RECONCILIACIÓN REACTIVA DETECTADA: Buque {Buque} (TravelId: {TravelId}) pasa de Costera {ActualId} a Costera {NuevaId}.",
+                    viaje.VesselName, viaje.TravelId, viaje.CosteraId, nuevaCosteraId);
+
+                // Conservar el principal de usuario original
+                var originalUser = _httpContextAccessor.HttpContext?.User;
+                try
+                {
+                    // Forzar el claim de CosteraId correspondiente a la costera de origen del buque
+                    var identityTransfer = new ClaimsIdentity(new[] { new Claim("CosteraId", (viaje.CosteraId ?? 0).ToString()) }, "BackgroundSystem");
+                    if (_httpContextAccessor.HttpContext == null)
+                    {
+                        _httpContextAccessor.HttpContext = new DefaultHttpContext();
+                    }
+                    _httpContextAccessor.HttpContext.User = new ClaimsPrincipal(identityTransfer);
+
+                    var dto = new TransferirJurisdiccionDto
+                    {
+                        NuevaCosteraId = nuevaCosteraId,
+                        Velocidad = velocidadKn,
+                        Rumbo = 0 // Rumbo por defecto o calculado si se dispone
+                    };
+
+                    await TransferirJurisdiccionAsync(viaje.TravelId.ToString(), dto);
+                }
+                finally
+                {
+                    // Restaurar el principal original
+                    if (_httpContextAccessor.HttpContext != null)
+                    {
+                        _httpContextAccessor.HttpContext.User = originalUser ?? new ClaimsPrincipal();
+                    }
+                }
+            }
+        }
+
+        private int DeterminarJurisdicionCorrespondiente(double latitud, double longitud, IEnumerable<CosteraDto> costeras)
+        {
+            int mejorCosteraId = 0;
+            double distanciaMinima = double.MaxValue;
+
+            foreach (var costera in costeras)
+            {
+                if (costera.Geometry?.Coordinates == null) continue;
+
+                var type = costera.Geometry.Type;
+                double minDistanciaLocal = double.MaxValue;
+
+                if (type.Equals("Polygon", StringComparison.OrdinalIgnoreCase) || 
+                    type.Equals("LineString", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (costera.Geometry.Coordinates is double[][] poligono)
+                    {
+                        if (type.Equals("Polygon", StringComparison.OrdinalIgnoreCase) && IsPointInPolygon(latitud, longitud, poligono))
+                            return costera.Properties.CosteraId;
+                        
+                        minDistanciaLocal = DistanciaMinimaAPoligono(latitud, longitud, poligono);
+                    }
+                }
+                else if (type.Equals("MultiPolygon", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (costera.Geometry.Coordinates is double[][][] multiPoligono)
+                    {
+                        foreach (var poligono in multiPoligono)
+                        {
+                            if (IsPointInPolygon(latitud, longitud, poligono))
+                                return costera.Properties.CosteraId; 
+                            
+                            double dist = DistanciaMinimaAPoligono(latitud, longitud, poligono);
+                            if (dist < minDistanciaLocal) minDistanciaLocal = dist;
+                        }
+                    }
+                }
+
+                if (minDistanciaLocal < distanciaMinima)
+                {
+                    distanciaMinima = minDistanciaLocal;
+                    mejorCosteraId = costera.Properties.CosteraId;
+                }
+            }
+
+            if (distanciaMinima < 0.01) return mejorCosteraId;
+            return 0; 
+        }
+
+        private double DistanciaMinimaAPoligono(double lat, double lon, double[][] poligono)
+        {
+            double minD = double.MaxValue;
+            if (poligono == null || poligono.Length == 0) return minD;
+
+            for (int i = 0; i < poligono.Length - 1; i++)
+            {
+                double dist = DistanciaPuntoASegmento(lon, lat, poligono[i][0], poligono[i][1], poligono[i + 1][0], poligono[i + 1][1]);
+                if (dist < minD) minD = dist;
+            }
+            
+            double distCierre = DistanciaPuntoASegmento(lon, lat, poligono[poligono.Length - 1][0], poligono[poligono.Length - 1][1], poligono[0][0], poligono[0][1]);
+            if (distCierre < minD) minD = distCierre;
+
+            return minD;
+        }
+
+        private double DistanciaPuntoASegmento(double px, double py, double x1, double y1, double x2, double y2)
+        {
+            double dx = x2 - x1;
+            double dy = y2 - y1;
+            double lengthSquared = dx * dx + dy * dy;
+
+            if (lengthSquared == 0.0) return DistanciaCuadrada(px, py, x1, y1);
+
+            double t = Math.Max(0, Math.Min(1, ((px - x1) * dx + (py - y1) * dy) / lengthSquared));
+            return DistanciaCuadrada(px, py, x1 + t * dx, y1 + t * dy);
+        }
+
+        private double DistanciaCuadrada(double x1, double y1, double x2, double y2)
+        {
+            return (x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2); 
+        }
+
+        private bool IsPointInPolygon(double puntoLat, double puntoLon, double[][] poligono)
+        {
+            if (poligono == null || poligono.Length < 3) return false;
+            bool inside = false;
+            for (int i = 0, j = poligono.Length - 1; i < poligono.Length; j = i++)
+            {
+                if ((poligono[i][1] > puntoLat) != (poligono[j][1] > puntoLat) &&
+                    (puntoLon < (poligono[j][0] - poligono[i][0]) * (puntoLat - poligono[i][1]) / (poligono[j][1] - poligono[i][1]) + poligono[i][0]))
+                {
+                    inside = !inside;
+                }
+            }
+            return inside;
         }
     }
 }
