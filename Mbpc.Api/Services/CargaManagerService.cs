@@ -185,7 +185,8 @@ namespace Mbpc.Api.Services
                 Tonelaje         = b.Cantidad ?? 0d,
                 TipoUnidad       = b.Nombre == "0" ? "Bodega" : "Barcaza",
                 MercaderiaId     = b.MercaderiaId,
-                MercaderiaNombre = b.Carga ?? "A Definir"
+                MercaderiaNombre = b.Carga ?? "A Definir",
+                Unidad           = b.Unidad
             }).ToList();
 
             var cacheOptions = new MemoryCacheEntryOptions
@@ -324,7 +325,8 @@ namespace Mbpc.Api.Services
                         Tonelaje         = b.Cantidad ?? 0d,
                         TipoUnidad       = esBodega ? "Bodega" : "Barcaza",
                         MercaderiaId     = b.MercaderiaId,
-                        MercaderiaNombre = cargaNombre
+                        MercaderiaNombre = cargaNombre,
+                        Unidad           = b.Unidad
                     };
                 })
                 .ToList();
@@ -760,7 +762,7 @@ namespace Mbpc.Api.Services
                                         : nuevaCarga.BarcazaId.ToString(),
                         Carga        = tipoCarga?.Nombre ?? "A Definir",
                         Cantidad     = nuevaCarga.Tonelaje,
-                        Unidad       = "Tn",
+                        Unidad       = string.IsNullOrWhiteSpace(nuevaCarga.Unidad) ? "Tn" : nuevaCarga.Unidad,
                         MuelleActual = null,
                         MercaderiaId = nuevaCarga.MercaderiaId
                     };
@@ -845,6 +847,7 @@ namespace Mbpc.Api.Services
                         barcazaTarget.Carga        = tipoCarga?.Nombre ?? "A Definir";
                         barcazaTarget.Cantidad     = dto.Tonelaje;
                         barcazaTarget.MercaderiaId = dto.MercaderiaId;
+                        barcazaTarget.Unidad       = string.IsNullOrWhiteSpace(dto.Unidad) ? "Tn" : dto.Unidad;
 
                         var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
                         await _detailsCollection.ReplaceOneAsync(filtroId, doc);

@@ -20,6 +20,9 @@ import CargaDeleteModal from './CargaDeleteModal';
 // Importamos el nuevo autocomplete de tipo de carga/mercadería
 import TipoCargaAutocomplete from './TipoCargaAutocomplete';
 
+// Importamos unidades de medida
+import { UNIDADES_MEDIDA } from '../../constants/unidades';
+
 // ─── Tipos Locales ────────────────────────────────────────────────────────────
 interface AutocompleteBarcaza {
   idBuque: number;
@@ -59,6 +62,7 @@ export default function CargasModal({
   const [showForm, setShowForm] = useState(false);
   const [tipo, setTipo] = useState<TipoCarga>('Barcaza');
   const [tonelaje, setTonelaje] = useState<number>(0);
+  const [unidad, setUnidad] = useState<string>('TN');
 
   // ─── Estado para la Mercadería seleccionada ──────────────────────────────────
   const [mercaderiaSeleccionada, setMercaderiaSeleccionada] = useState<{
@@ -166,14 +170,18 @@ export default function CargasModal({
     // Si es Bodega, mandamos 0 (nuestra convención). Si es Barcaza, el ID que eligió.
     const payloadBarcazaId = tipo === 'Bodega' ? 0 : barcazaId;
 
+    const isLastre = mercaderiaSeleccionada?.nombre?.toUpperCase() === 'EN LASTRE' || mercaderiaSeleccionada?.oracleId === 412;
+    const finalTonelaje = isLastre ? 0 : tonelaje;
+
     crearCarga(
       {
         viajeId: viajeId,
         body: {
           barcazaId: payloadBarcazaId,
           tipo,
-          tonelaje,
+          tonelaje: finalTonelaje,
           mercaderiaId: mercaderiaSeleccionada.oracleId,
+          unidad: unidad,
         }
       },
       {
@@ -181,6 +189,7 @@ export default function CargasModal({
           setBarcazaId(null);
           setBarcazaSearch('');
           setTonelaje(0);
+          setUnidad('TN');
           setShowDropdown(false);
           setShowForm(false);
           setMercaderiaSeleccionada(null);
@@ -209,12 +218,18 @@ export default function CargasModal({
       const zona = window.prompt('Ingrese la zona de fondeo:');
       if (zona) fondear({ id, zonaFondeo: zona });
     } else if (accion === 'cargar') {
-      const val = window.prompt('Ingrese toneladas a cargar:');
+      const targetCarga = cargas.find(c => c.id === id);
+      const unidadStr = targetCarga?.unidad || 'TN';
+      const labelUnidad = UNIDADES_MEDIDA.find(u => u.value === unidadStr.toUpperCase())?.label || unidadStr;
+      const val = window.prompt(`Ingrese cantidad a cargar (${labelUnidad}):`);
       const ton = parseFloat(val || '');
       if (!isNaN(ton) && ton > 0) cargarTon({ id, toneladas: ton });
       else if (val) alert('Valor inválido');
     } else if (accion === 'descargar') {
-      const val = window.prompt('Ingrese toneladas a descargar:');
+      const targetCarga = cargas.find(c => c.id === id);
+      const unidadStr = targetCarga?.unidad || 'TN';
+      const labelUnidad = UNIDADES_MEDIDA.find(u => u.value === unidadStr.toUpperCase())?.label || unidadStr;
+      const val = window.prompt(`Ingrese cantidad a descargar (${labelUnidad}):`);
       const ton = parseFloat(val || '');
       if (!isNaN(ton) && ton > 0) descargarTon({ id, toneladas: ton });
       else if (val) alert('Valor inválido');
@@ -339,21 +354,42 @@ export default function CargasModal({
                 <TipoCargaAutocomplete
                   label="Mercadería / Naturaleza"
                   value={mercaderiaSeleccionada?.oracleId || null}
-                  onChange={(val) => setMercaderiaSeleccionada(val)}
+                  onChange={(val) => {
+                    setMercaderiaSeleccionada(val);
+                    if (val && (val.nombre?.toUpperCase() === 'EN LASTRE' || val.oracleId === 412)) {
+                      setTonelaje(0);
+                    }
+                  }}
                 />
               </div>
 
               <div className="flex-1 min-w-[150px]">
-                <label className="block text-sm font-medium text-gray-700">Tonelaje Total</label>
+                <label className="block text-sm font-medium text-gray-700">Tonelaje / Volumen</label>
                 <input
                   type="number"
                   step="0.01"
                   min="0"
                   required
                   value={tonelaje}
-                  onChange={e => setTonelaje(parseFloat(e.target.value))}
-                  className="mt-1 block w-full rounded border-gray-300 shadow-sm p-2 border focus:outline-none focus:ring-1 focus:ring-[#104a8e] focus:border-[#104a8e]"
+                  disabled={mercaderiaSeleccionada?.nombre?.toUpperCase() === 'EN LASTRE' || mercaderiaSeleccionada?.oracleId === 412}
+                  onChange={e => setTonelaje(parseFloat(e.target.value) || 0)}
+                  className="mt-1 block w-full rounded border-gray-300 shadow-sm p-2 border focus:outline-none focus:ring-1 focus:ring-[#104a8e] focus:border-[#104a8e] disabled:bg-gray-100 disabled:text-gray-500"
                 />
+              </div>
+
+              <div className="flex-1 min-w-[150px]">
+                <label className="block text-sm font-medium text-gray-700">Unidad de Medida</label>
+                <select
+                  value={unidad}
+                  onChange={e => setUnidad(e.target.value)}
+                  className="mt-1 block w-full rounded border-gray-300 shadow-sm p-2 border bg-white focus:outline-none focus:ring-1 focus:ring-[#104a8e] focus:border-[#104a8e]"
+                >
+                  {UNIDADES_MEDIDA.map((u) => (
+                    <option key={u.value} value={u.value}>
+                      {u.label}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <button type="submit" disabled={isCreando} className="bg-[#104a8e] text-white px-4 py-2 rounded font-medium hover:bg-[#002454] transition-colors disabled:opacity-50">
@@ -370,9 +406,10 @@ export default function CargasModal({
                 <thead className="bg-[#002454] text-white sticky top-0">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase">Descripción</th>
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase">Tipo de Carga</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase">Riesgo</th>
                     <th className="px-4 py-3 text-left text-xs font-semibold uppercase">Muelle / Zona</th>
-                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase">Tonelaje</th>
+                    <th className="px-4 py-3 text-right text-xs font-semibold uppercase">Tonelaje / Volumen</th>
                     <th className="px-4 py-3 text-center text-xs font-semibold uppercase">Acciones</th>
                   </tr>
                 </thead>
@@ -386,7 +423,12 @@ export default function CargasModal({
                           "UABL 101 (PY-101) - Soja" o "A Definir" para barcazas sin declarar */}
                       <td className="px-4 py-3 text-sm text-gray-900 font-medium">
                         {carga.descripcionLista && carga.descripcionLista !== 'A Definir'
-                          ? carga.descripcionLista
+                          ? carga.descripcionLista.split(' - ')[0]
+                          : <span className="italic text-gray-400">A Definir</span>}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-900">
+                        {carga.mercaderiaNombre && carga.mercaderiaNombre !== 'A Definir'
+                          ? carga.mercaderiaNombre
                           : <span className="italic text-gray-400">A Definir</span>}
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-900">
@@ -399,7 +441,7 @@ export default function CargasModal({
                       {/* TONELAJE: formateado con separador de miles; guion si es 0 */}
                       <td className="px-4 py-3 text-sm text-right font-medium">
                         {carga.tonelaje > 0
-                          ? `${carga.tonelaje.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} t`
+                          ? `${carga.tonelaje.toLocaleString('es-AR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ${(carga.unidad || 'TN').toUpperCase()}`
                           : <span className="italic text-gray-400">—</span>}
                       </td>
                       <td className="px-4 py-3 text-sm text-center">

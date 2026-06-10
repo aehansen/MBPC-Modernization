@@ -449,13 +449,38 @@ public sealed class ConvoyManagerService : IConvoyManagerService
             ? await buqueService.ObtenerBuquesPorIdsAsync(idsNumericos)
             : new Dictionary<long, BuqueAutocompleteDto>();
 
+        // Recolectar mercadería IDs únicos
+        var mercaderiaIds = barcazasRaw
+            .Where(b => b.MercaderiaId.HasValue && b.MercaderiaId.Value > 0)
+            .Select(b => b.MercaderiaId!.Value)
+            .Distinct()
+            .ToList();
+
+        var tipoCargaService = _serviceProvider.GetRequiredService<ITipoCargaService>();
+        var dictTipoCarga = new Dictionary<int, TipoCargaDto>();
+        if (mercaderiaIds.Any())
+        {
+            var tareasTipoCarga = mercaderiaIds
+                .Select(mId => tipoCargaService.ObtenerPorIdAsync(mId))
+                .ToList();
+            var resultadosTipoCarga = await Task.WhenAll(tareasTipoCarga);
+            for (int i = 0; i < mercaderiaIds.Count; i++)
+            {
+                var res = resultadosTipoCarga[i];
+                if (res != null)
+                {
+                    dictTipoCarga[mercaderiaIds[i]] = res;
+                }
+            }
+        }
+
         _logger.LogDebug(
             "ResolverBarcazas Hito 5.9 — Batch lookup resolvió {Resueltos}/{Total} ID(s) numéricos en 1 round-trip para ViajeId={ViajeId}.",
             catalogoBarcazas.Count, idsNumericos.Count, viajeId);
 
         // Mapear con lookups O(1)
         return barcazasRaw
-            .Select(b => MapearBarcazaDesdeMongo(b, catalogoBarcazas))
+            .Select(b => MapearBarcazaDesdeMongo(b, catalogoBarcazas, dictTipoCarga))
             .ToList();
     }
 
@@ -514,7 +539,8 @@ public sealed class ConvoyManagerService : IConvoyManagerService
 
     private static BarcazaConvoyDto MapearBarcazaDesdeMongo(
         BarcazaMongo b,
-        Dictionary<long, BuqueAutocompleteDto> catalogo)
+        Dictionary<long, BuqueAutocompleteDto> catalogo,
+        Dictionary<int, TipoCargaDto> tiposCarga)
     {
         // Hito 5.9: Si el Nombre es un ID numérico, resolverlo desde el catálogo batch (lookup O(1))
         string nombreDisplay    = b.Nombre ?? "S/N";
@@ -528,6 +554,12 @@ public sealed class ConvoyManagerService : IConvoyManagerService
             matriculaDisplay = info.Matricula ?? b.Matricula;
         }
 
+        string nivelRiesgo = "Bajo";
+        if (b.MercaderiaId.HasValue && tiposCarga.TryGetValue(b.MercaderiaId.Value, out var tc))
+        {
+            nivelRiesgo = tc.EsPeligrosa ? "Alto" : "Bajo";
+        }
+
         return new BarcazaConvoyDto(
             Id:           string.IsNullOrWhiteSpace(b.Matricula) ? b.Nombre! : b.Matricula,
             Nombre:       nombreDisplay,
@@ -539,7 +571,8 @@ public sealed class ConvoyManagerService : IConvoyManagerService
             MuelleActual: b.MuelleActual,
             Estado:       string.IsNullOrWhiteSpace(b.MuelleActual)
                               ? EstadoBarcaza.EnTransito
-                              : EstadoBarcaza.Amarrada
+                              : EstadoBarcaza.Amarrada,
+            NivelRiesgo:  nivelRiesgo
         );
     }
 
@@ -555,11 +588,12 @@ public sealed class ConvoyManagerService : IConvoyManagerService
                               ? "General"
                               : c.NivelRiesgo,
             Tonelaje:     c.Tonelaje,
-            Unidad:       "TON",
+            Unidad:       c.Unidad ?? "TON",
             MuelleActual: c.MuelleActual,
             Estado:       string.IsNullOrWhiteSpace(c.MuelleActual)
                               ? EstadoBarcaza.EnTransito
-                              : EstadoBarcaza.Amarrada
+                              : EstadoBarcaza.Amarrada,
+            NivelRiesgo:  c.NivelRiesgo ?? "Bajo"
         );
 
     private static RemolcadorConvoyDto? MapearRemolcador(ViajeDetalleMongo? detalle, string? estadoNavegacion = null)

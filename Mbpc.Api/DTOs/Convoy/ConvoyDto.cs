@@ -15,7 +15,8 @@ public record BarcazaConvoyDto(
     double Tonelaje,
     string Unidad,
     string? MuelleActual,
-    EstadoBarcaza Estado
+    EstadoBarcaza Estado,
+    string NivelRiesgo
 );
 
 /// <summary>

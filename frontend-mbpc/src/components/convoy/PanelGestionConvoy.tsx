@@ -466,9 +466,16 @@ export default function PanelGestionConvoy({
                             {b.matricula ?? 'S/M'}
                           </p>
                         </div>
-                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${estadoCfg.badgeCls}`}>
-                          {estadoCfg.label}
-                        </span>
+                        <div className="flex flex-col items-end gap-1.5 flex-shrink-0">
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider border ${estadoCfg.badgeCls}`}>
+                            {estadoCfg.label}
+                          </span>
+                          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider border ${
+                            b.nivelRiesgo === 'Alto' ? 'bg-red-950/40 text-red-400 border-red-500/40' : 'bg-slate-800/80 text-slate-400 border-slate-700/60'
+                          }`}>
+                            Riesgo: {b.nivelRiesgo || 'Bajo'}
+                          </span>
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-2 gap-2">

@@ -11,6 +11,10 @@ export interface CargaDto {
   nivelRiesgo: string;
   muelleActual: string | null;
   tonelaje: number;
+  unidad?: string;
+  mercaderiaId?: number | null;
+  mercaderiaNombre?: string | null;
+  tipoUnidad?: string;
 }
 
 // ─── Requests ─────────────────────────────────────────────────────────────────
@@ -19,6 +23,7 @@ export interface NuevaCargaRequest {
   nombre: string;
   tipo: TipoCarga;
   tonelaje: number;
+  unidad?: string;
 }
 
 export interface AmarrarCargaParams {

@@ -37,11 +37,16 @@ namespace Mbpc.Api.DTOs
         /// Tonelaje de la carga en toneladas métricas.
         /// </summary>
         [Required(ErrorMessage = "El tonelaje es requerido.")]
-        [Range(0.01, double.MaxValue, ErrorMessage = "El tonelaje debe ser un valor positivo.")]
+        [Range(0.0, double.MaxValue, ErrorMessage = "El tonelaje debe ser un valor positivo.")]
         public double Tonelaje { get; set; }
 
         [Required(ErrorMessage = "La mercadería/naturaleza es requerida.")]
         [Range(1, int.MaxValue, ErrorMessage = "Debe seleccionar una mercadería válida.")]
         public int MercaderiaId { get; set; }
+
+        /// <summary>
+        /// Unidad de medida de la carga (TN, M3, BBL, KG).
+        /// </summary>
+        public string? Unidad { get; set; }
     }
 }

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { cargaApi } from "../../axiosClient";
 import TipoCargaAutocomplete from "./TipoCargaAutocomplete";
+import { UNIDADES_MEDIDA } from "../../constants/unidades";
 
 /**
  * CargaEditModal
@@ -26,6 +27,7 @@ export default function CargaEditModal({ carga, onClose, onSuccess }) {
     register,
     handleSubmit,
     watch,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm({
     defaultValues: {
@@ -34,6 +36,7 @@ export default function CargaEditModal({ carga, onClose, onSuccess }) {
       // Extraemos el nombre y matrícula de la descripción (ej: "UABL 101 (PY-101)")
       barcazaNombreDisplay: carga?.descripcionLista ? carga.descripcionLista.split(' - ')[0] : (carga?.id ?? ""),
       tonelaje: carga?.tonelaje ?? "",
+      unidad: (carga?.unidad ?? "TN").toUpperCase(),
     },
   });
 
@@ -50,6 +53,9 @@ export default function CargaEditModal({ carga, onClose, onSuccess }) {
       return;
     }
 
+    const isLastre = mercaderiaSeleccionada?.nombre?.toUpperCase() === 'EN LASTRE' || mercaderiaSeleccionada?.oracleId === 412;
+    const finalTonelaje = isLastre ? 0 : parseFloat(data.tonelaje);
+
     try {
       // El token JWT es inyectado automáticamente por el interceptor de axiosClient.
       await cargaApi.update(carga.id, {
@@ -58,10 +64,11 @@ export default function CargaEditModal({ carga, onClose, onSuccess }) {
         barcazaId: Number(carga.id),
         // 'tipo' debe ser siempre "Barcaza" o "Bodega" — valor del selector, NO el nombre de la mercadería
         tipo: data.tipo,
-        tonelaje: parseFloat(data.tonelaje),
+        tonelaje: finalTonelaje,
         // 'mercaderiaId' es el ID Oracle del producto (Soja=42, Gasoil=17...)
         // El backend resuelve el nombre legible desde Oracle en cada GET, no hace falta enviarlo.
         mercaderiaId: mercaderiaSeleccionada.oracleId,
+        unidad: data.unidad,
       });
 
       onSuccess?.();
@@ -145,28 +152,58 @@ export default function CargaEditModal({ carga, onClose, onSuccess }) {
               <TipoCargaAutocomplete
                 label="Mercadería / Naturaleza"
                 value={mercaderiaSeleccionada?.oracleId || null}
-                onChange={(val) => setMercaderiaSeleccionada(val)}
+                onChange={(val) => {
+                  setMercaderiaSeleccionada(val);
+                  if (val && (val.nombre?.toUpperCase() === 'EN LASTRE' || val.oracleId === 412)) {
+                    setValue("tonelaje", 0);
+                  }
+                }}
               />
             </div>
 
             {/* Tonelaje */}
             <div>
               <label htmlFor="tonelaje" className="mb-1 block text-sm font-medium text-slate-700">
-                Tonelaje (Tn)
+                Tonelaje / Volumen
               </label>
               <input
                 id="tonelaje"
                 type="number"
                 step="0.01"
-                className={`w-full rounded-md border px-3 py-2 text-sm shadow-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 transition ${errors.tonelaje ? "border-red-400 focus:ring-red-400" : "border-slate-300"
+                disabled={mercaderiaSeleccionada?.nombre?.toUpperCase() === 'EN LASTRE' || mercaderiaSeleccionada?.oracleId === 412}
+                className={`w-full rounded-md border px-3 py-2 text-sm shadow-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-sky-500 transition disabled:bg-slate-100 disabled:text-slate-500 ${errors.tonelaje ? "border-red-400 focus:ring-red-400" : "border-slate-300"
                   }`}
                 placeholder="Ej: 1250.50"
                 {...register("tonelaje", {
                   required: "El tonelaje es requerido.",
-                  min: { value: 0.01, message: "El tonelaje debe ser mayor a 0." },
+                  validate: (val) => {
+                    const isLastre = mercaderiaSeleccionada?.nombre?.toUpperCase() === 'EN LASTRE' || mercaderiaSeleccionada?.oracleId === 412;
+                    if (isLastre) {
+                      return parseFloat(val) === 0 || "El tonelaje debe ser 0 para EN LASTRE.";
+                    }
+                    return parseFloat(val) >= 0 || "El tonelaje debe ser positivo.";
+                  }
                 })}
               />
               {errors.tonelaje && <p className="mt-1 text-xs text-red-500">{errors.tonelaje.message}</p>}
+            </div>
+
+            {/* Unidad de Medida */}
+            <div>
+              <label htmlFor="unidad" className="mb-1 block text-sm font-medium text-slate-700">
+                Unidad de Medida
+              </label>
+              <select
+                id="unidad"
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-sky-500 transition bg-white"
+                {...register("unidad")}
+              >
+                {UNIDADES_MEDIDA.map((u) => (
+                  <option key={u.value} value={u.value}>
+                    {u.label}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
 

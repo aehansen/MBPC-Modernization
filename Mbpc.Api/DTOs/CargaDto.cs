@@ -20,5 +20,6 @@ namespace Mbpc.Api.DTOs
         // ── Hito 5.9: Propiedades para edición de carga ─────────────────────
         public int? MercaderiaId { get; set; }
         public string? MercaderiaNombre { get; set; }
+        public string? Unidad { get; set; }
     }
 }

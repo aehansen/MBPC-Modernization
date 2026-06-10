@@ -49,6 +49,7 @@ export interface BarcazaConvoyDto {
   unidad: string;
   muelleActual: string | null;
   estado: EstadoBarcaza;
+  nivelRiesgo: string;
 }
 
 /**
