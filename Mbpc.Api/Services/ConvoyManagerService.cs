@@ -561,7 +561,7 @@ public sealed class ConvoyManagerService : IConvoyManagerService
         }
 
         return new BarcazaConvoyDto(
-            Id:           string.IsNullOrWhiteSpace(b.Matricula) ? b.Nombre! : b.Matricula,
+            Id:           b.Nombre!,
             Nombre:       nombreDisplay,
             Bandera:      b.Bandera    ?? "N/A",
             Matricula:    matriculaDisplay,

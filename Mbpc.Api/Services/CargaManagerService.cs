@@ -418,9 +418,8 @@ namespace Mbpc.Api.Services
             {
                 try
                 {
-                    var barcazaTarget = (doc.Etapas?.SelectMany(e => e.Barcazas ?? new List<BarcazaMongo>())
-                        ?? Enumerable.Empty<BarcazaMongo>())
-                        .FirstOrDefault(b => b.Nombre == id);
+                    var ultimaEtapa = doc.Etapas?.LastOrDefault();
+                    var barcazaTarget = ultimaEtapa?.Barcazas?.FirstOrDefault(b => b.Nombre == id);
 
                     if (barcazaTarget is not null)
                     {
@@ -479,9 +478,8 @@ namespace Mbpc.Api.Services
             {
                 try
                 {
-                    var barcazaTarget = (doc.Etapas?.SelectMany(e => e.Barcazas ?? new List<BarcazaMongo>())
-                        ?? Enumerable.Empty<BarcazaMongo>())
-                        .FirstOrDefault(b => b.Nombre == id);
+                    var ultimaEtapa = doc.Etapas?.LastOrDefault();
+                    var barcazaTarget = ultimaEtapa?.Barcazas?.FirstOrDefault(b => b.Nombre == id);
 
                     if (barcazaTarget is not null)
                     {
@@ -540,9 +538,8 @@ namespace Mbpc.Api.Services
             {
                 try
                 {
-                    var barcazaTarget = (doc.Etapas?.SelectMany(e => e.Barcazas ?? new List<BarcazaMongo>())
-                        ?? Enumerable.Empty<BarcazaMongo>())
-                        .FirstOrDefault(b => b.Nombre == id);
+                    var ultimaEtapa = doc.Etapas?.LastOrDefault();
+                    var barcazaTarget = ultimaEtapa?.Barcazas?.FirstOrDefault(b => b.Nombre == id);
 
                     if (barcazaTarget is not null)
                     {
@@ -601,9 +598,8 @@ namespace Mbpc.Api.Services
             {
                 try
                 {
-                    var barcazaTarget = (doc.Etapas?.SelectMany(e => e.Barcazas ?? new List<BarcazaMongo>())
-                        ?? Enumerable.Empty<BarcazaMongo>())
-                        .FirstOrDefault(b => b.Nombre == id);
+                    var ultimaEtapa = doc.Etapas?.LastOrDefault();
+                    var barcazaTarget = ultimaEtapa?.Barcazas?.FirstOrDefault(b => b.Nombre == id);
 
                     if (barcazaTarget is not null)
                     {
@@ -743,9 +739,10 @@ namespace Mbpc.Api.Services
                     "PKG_MBPC_CARGAS.SP_AGREGAR_CARGA", parameters, commandType: CommandType.StoredProcedure);
                 exitoOracle = parameters.Get<int>("p_RESULTADO") == 1;
             }
-            catch (OracleException)
+            catch (OracleException ex)
             {
                 if (!_env.IsDevelopment()) throw;
+                _logger.LogWarning(ex, "[DEV BYPASS] OracleException en AgregarCargaAsync. Marcando éxito.");
                 exitoOracle = true;
             }
 
@@ -814,9 +811,10 @@ namespace Mbpc.Api.Services
                 await connection.ExecuteAsync("PKG_MBPC_CARGAS.SP_MODIFICAR_CARGA", parameters, commandType: CommandType.StoredProcedure);
                 exitoOracle = parameters.Get<int>("p_RESULTADO") == 1;
             }
-            catch (OracleException)
+            catch (OracleException ex)
             {
                 if (!_env.IsDevelopment()) throw;
+                _logger.LogWarning(ex, "[DEV BYPASS] OracleException en ModificarCargaAsync. Marcando éxito.");
                 exitoOracle = true;
             }
 
@@ -983,9 +981,10 @@ namespace Mbpc.Api.Services
                     commandType: CommandType.StoredProcedure);
                 exitoOracle = parameters.Get<int>("p_RESULTADO") == 1;
             }
-            catch (OracleException)
+            catch (OracleException ex)
             {
                 if (!_env.IsDevelopment()) throw;
+                _logger.LogWarning(ex, "[DEV BYPASS] OracleException en EliminarCargaAsync. Marcando éxito.");
                 exitoOracle = true;
             }
 
