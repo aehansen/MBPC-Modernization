@@ -125,9 +125,10 @@ builder.Services.AddScoped<ICosteraService, CosteraManagerService>();
 builder.Services.AddScoped<ICatalogoService, CatalogoManagerService>();
 builder.Services.AddScoped<IReporteService, ReporteManagerService>();
 builder.Services.AddScoped<IInspeccionService, InspeccionManagerService>();
+builder.Services.AddScoped<IReconciliacionService, ReconciliacionManagerService>();
 
 // ── Background Workers / Hosted Services ──────────────────────────────────────
-// builder.Services.AddHostedService<ReconciliacionEspacialWorker>();
+builder.Services.AddHostedService<ReconciliacionEspacialWorker>();
 
 // ── Servicio de Chat / IA ────────────────────────────────────────────────────
 builder.Services.AddScoped<IChatService, ChatManagerService>();
