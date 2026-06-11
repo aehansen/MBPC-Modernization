@@ -34,6 +34,8 @@ namespace Mbpc.Api.DTOs
         /// </summary>
         public bool TieneDetalleOperativo { get; set; }
         public int CosteraId { get; set; }
+        public bool RequiereTransferencia { get; set; }
+        public int? CosteraIdPendiente { get; set; }
 
         // ── Manifiesto (si existe en ViajeDetalleMongo) ──────────────────────
         public int CantidadBarcazas { get; set; }

@@ -1,7 +1,12 @@
 using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Oracle.ManagedDataAccess.Client;
 using Mbpc.Api.DTOs;
 using Mbpc.Api.Services;
 using Microsoft.Extensions.Logging;
@@ -15,20 +20,83 @@ namespace Mbpc.Api.Controllers
     {
         private readonly IViajeService _viajeService;
         private readonly IReconciliacionService _reconciliacionService;
+        private readonly IAisIngestionService _aisIngestionService;
         private readonly ILogger<SimuladorController> _logger;
-
         private readonly IHttpContextAccessor _httpContextAccessor;
+
+        private const string OracleAisConnectionString = "User Id=AISC;Password=AISCbu2016;Data Source=(DESCRIPTION =(LOAD_BALANCE = ON)(ADDRESS = (PROTOCOL = TCP)(HOST = exa1-scan-01)(PORT = 1521))(CONNECT_DATA =(SERVER = DEDICATED)(SERVICE_NAME = svc_bp)));";
 
         public SimuladorController(
             IViajeService viajeService,
             IReconciliacionService reconciliacionService,
+            IAisIngestionService aisIngestionService,
             IHttpContextAccessor httpContextAccessor,
             ILogger<SimuladorController> logger)
         {
             _viajeService = viajeService;
             _reconciliacionService = reconciliacionService;
+            _aisIngestionService = aisIngestionService;
             _httpContextAccessor = httpContextAccessor;
             _logger = logger;
+        }
+
+        /// <summary>
+        /// Testea la conectividad con la base de datos Oracle AIS y retorna las primeras 5 filas.
+        /// </summary>
+        [HttpGet("test-conexion-ais")]
+        public async Task<IActionResult> TestConexionAis()
+        {
+            _logger.LogInformation("Simulador: Probando conexión con Oracle AIS...");
+            var resultados = new List<Dictionary<string, object>>();
+
+            try
+            {
+                using (var connection = new OracleConnection(OracleAisConnectionString))
+                {
+                    await connection.OpenAsync();
+                    _logger.LogInformation("Simulador: ¡Conexión con Oracle AIS abierta con éxito!");
+
+                    using (var command = connection.CreateCommand())
+                    {
+                        // Traemos solo 5 registros para analizar las columnas y datos sin saturar
+                        command.CommandText = "SELECT * FROM buques_reportes partition (SYS_P8816) FETCH FIRST 5 ROWS ONLY";
+                        
+                        using (var reader = await command.ExecuteReaderAsync())
+                        {
+                            while (await reader.ReadAsync())
+                            {
+                                var fila = new Dictionary<string, object>();
+                                for (int i = 0; i < reader.FieldCount; i++)
+                                {
+                                    var nombreColumna = reader.GetName(i);
+                                    var valor = reader.IsDBNull(i) ? null : reader.GetValue(i);
+                                    fila[nombreColumna] = valor ?? "NULL";
+                                }
+                                resultados.Add(fila);
+                            }
+                        }
+                    }
+                }
+
+                return Ok(new
+                {
+                    conexionOk = true,
+                    mensaje = "Conexión exitosa a Oracle AIS",
+                    filasTraidas = resultados.Count,
+                    datosMuestra = resultados
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Simulador: Error al intentar conectar a Oracle AIS");
+                return StatusCode(500, new
+                {
+                    conexionOk = false,
+                    error = ex.Message,
+                    tipoExcepcion = ex.GetType().FullName,
+                    stackTrace = ex.StackTrace
+                });
+            }
         }
 
         [HttpPost("iniciar-viaje-prueba")]
@@ -40,6 +108,7 @@ namespace Mbpc.Api.Controllers
             {
                 BuqueId = dto.TravelId,
                 NombreBuque = dto.NombreBuque ?? "MOCK_SHIP_TEST",
+                Mmsi = dto.Mmsi,
                 Origen = "Gualeguaychú",
                 Destino = "Buenos Aires",
                 FechaPartida = DateTime.UtcNow,
@@ -116,6 +185,13 @@ namespace Mbpc.Api.Controllers
         {
             await _reconciliacionService.EjecutarCicloReconciliacionAsync();
             return Ok(new { mensaje = "Reconciliación global disparada manualmente." });
+        }
+
+        [HttpPost("ejecutar-ingesta-ais")]
+        public async Task<IActionResult> EjecutarIngestaAisManual()
+        {
+            await _aisIngestionService.SincronizarPosicionesAisAsync();
+            return Ok(new { mensaje = "Ingesta de datos AIS disparada manualmente." });
         }
     }
 

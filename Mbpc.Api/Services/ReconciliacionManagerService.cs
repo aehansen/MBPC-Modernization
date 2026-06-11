@@ -61,35 +61,11 @@ namespace Mbpc.Api.Services
 
                         if (nuevaCosteraId > 0 && nuevaCosteraId != viaje.CosteraId)
                         {
-                            _logger.LogInformation(
-                                "RECONCILIACIÓN DETECTADA: Buque {Buque} (TravelId: {TravelId}) pasa de Costera {ActualId} a Costera {NuevaId}.",
-                                viaje.NombreBuque, viaje.Id, viaje.CosteraId, nuevaCosteraId);
-
-                            // Para transferir, simulamos temporalmente la costera del viaje original
-                            var identityTransfer = new ClaimsIdentity(new[] { new Claim("CosteraId", viaje.CosteraId.ToString()) }, "BackgroundSystem");
-                            _httpContextAccessor.HttpContext.User = new ClaimsPrincipal(identityTransfer);
-
-                            var dto = new TransferirJurisdiccionDto
-                            {
-                                NuevaCosteraId = nuevaCosteraId,
-                                Velocidad = viaje.Velocidad,
-                                Rumbo = viaje.Rumbo
-                            };
-                            
-                            try 
-                            {
-                                bool exito = await _viajeService.TransferirJurisdiccionAsync(viaje.Id, dto);
-                                if (exito) _logger.LogInformation("Transferencia automática OK para {Buque}.", viaje.NombreBuque);
-                            }
-                            catch (Exception transferEx)
-                            {
-                                _logger.LogWarning("Descartando transferencia de {Buque}: {Msg}", viaje.NombreBuque, transferEx.Message);
-                            }
-                            finally
-                            {
-                                // Restaurar superusuario para continuar el loop
-                                _httpContextAccessor.HttpContext.User = new ClaimsPrincipal(identity);
-                            }
+                            await _viajeService.RegistrarSolicitudTransferenciaAsync(viaje.Id, nuevaCosteraId);
+                        }
+                        else
+                        {
+                            await _viajeService.LimpiarSolicitudTransferenciaAsync(viaje.Id);
                         }
                     }
                     catch (Exception itemEx)
@@ -147,22 +123,8 @@ namespace Mbpc.Api.Services
 
                 if (nuevaCosteraId > 0 && nuevaCosteraId != viajePos.CosteraId)
                 {
-                    _logger.LogInformation(
-                        "RECONCILIACIÓN DETECTADA (FORZADA): Buque {Buque} (TravelId: {TravelId}) pasa de Costera {ActualId} a Costera {NuevaId}.",
-                        viajePos.VesselName, viajePos.TravelId, viajePos.CosteraId, nuevaCosteraId);
-
-                    // Para transferir, simulamos temporalmente la costera del viaje original
-                    var identityTransfer = new ClaimsIdentity(new[] { new Claim("CosteraId", (viajePos.CosteraId ?? 0).ToString()) }, "BackgroundSystem");
-                    _httpContextAccessor.HttpContext.User = new ClaimsPrincipal(identityTransfer);
-
-                    var dto = new TransferirJurisdiccionDto
-                    {
-                        NuevaCosteraId = nuevaCosteraId,
-                        Velocidad = viajePos.SpeedOverGround,
-                        Rumbo = viajePos.CourseOverGround
-                    };
-
-                    return await _viajeService.TransferirJurisdiccionAsync(viajePos.TravelId.ToString(), dto);
+                    await _viajeService.RegistrarSolicitudTransferenciaAsync(viajePos.TravelId.ToString(), nuevaCosteraId);
+                    return true;
                 }
 
                 return false;
@@ -276,7 +238,7 @@ namespace Mbpc.Api.Services
             return resultado;
         }
 
-        private double[][] ParsearAnilloJson(System.Text.Json.JsonElement ringElement)
+        private double[][]? ParsearAnilloJson(System.Text.Json.JsonElement ringElement)
         {
             if (ringElement.ValueKind != System.Text.Json.JsonValueKind.Array) return null;
             var list = new List<double[]>();

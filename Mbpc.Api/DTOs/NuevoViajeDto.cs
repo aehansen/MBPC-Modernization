@@ -30,6 +30,8 @@ namespace Mbpc.Api.DTOs
     {
         public string CosteraId { get; set; } = string.Empty;
 
+        public string? Mmsi { get; set; }
+
         [Required(ErrorMessage = "El ID del buque es requerido.")]
         [Range(1, long.MaxValue, ErrorMessage = "El BuqueId debe ser un entero positivo válido del padrón BUQUES_NEW.")]
         public long BuqueId { get; set; }

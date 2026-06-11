@@ -117,3 +117,50 @@ export function useReanudarViaje() {
     onSuccess: invalidate,
   });
 }
+
+export const transferenciasKeys = {
+  all: ['transferencias'] as const,
+  pendientes: () => [...transferenciasKeys.all, 'pendientes'] as const,
+};
+
+async function fetchTransferenciasPendientes(): Promise<ViajeDto[]> {
+  const { data } = await apiClient.get<ViajeDto[]>('/viajes/transferencias-pendientes');
+  return data;
+}
+
+export function useTransferenciasPendientes() {
+  return useQuery<ViajeDto[], Error>({
+    queryKey: transferenciasKeys.pendientes(),
+    queryFn: fetchTransferenciasPendientes,
+    refetchInterval: 15000, // auto-refresh every 15s for real-time alerts
+  });
+}
+
+async function aprobarTransferencia(id: string): Promise<void> {
+  await apiClient.post(`/viajes/${id}/aprobar-transferencia`);
+}
+
+export function useAprobarTransferencia() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: aprobarTransferencia,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: viajesKeys.all });
+      qc.invalidateQueries({ queryKey: transferenciasKeys.all });
+    },
+  });
+}
+
+async function rechazarTransferencia(id: string): Promise<void> {
+  await apiClient.post(`/viajes/${id}/rechazar-transferencia`);
+}
+
+export function useRechazarTransferencia() {
+  const qc = useQueryClient();
+  return useMutation<void, Error, string>({
+    mutationFn: rechazarTransferencia,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: transferenciasKeys.all });
+    },
+  });
+}

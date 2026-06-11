@@ -53,6 +53,15 @@ namespace Mbpc.Api.Models.Mongo
         [BsonElement("location")]
         public LocationMongo? Location { get; set; }
 
+        [BsonElement("RequiereTransferencia")]
+        public bool RequiereTransferencia { get; set; }
+
+        [BsonElement("CosteraIdPendiente")]
+        public int? CosteraIdPendiente { get; set; }
+
+        [BsonElement("FechaSolicitudTransferencia")]
+        public DateTime? FechaSolicitudTransferencia { get; set; }
+
         // ── MULTITENANT GEOGRÁFICO RESILIENTE ──
         [BsonElement("CosteraId")]
         public object? CosteraIdRaw { get; set; } // Captura Int o String sin explotar

@@ -515,5 +515,82 @@ namespace Mbpc.Api.Controllers
                 return UnprocessableEntity(new { Error = ex.Message });
             }
         }
+
+        [HttpGet("transferencias-pendientes")]
+        public async Task<ActionResult<List<ViajeDto>>> ObtenerTransferenciasPendientes()
+        {
+            var costeraIdClaim = User.FindFirstValue("CosteraId");
+            if (string.IsNullOrWhiteSpace(costeraIdClaim))
+            {
+                return Forbid();
+            }
+
+            if (!int.TryParse(costeraIdClaim, out var costeraId))
+            {
+                return Forbid();
+            }
+
+            var pendientes = await _viajeService.ObtenerTransferenciasPendientesAsync(costeraId);
+            return Ok(pendientes);
+        }
+
+        [HttpPost("{id}/aprobar-transferencia")]
+        public async Task<IActionResult> AprobarTransferencia(string id)
+        {
+            var costeraIdClaim = User.FindFirstValue("CosteraId");
+            if (string.IsNullOrWhiteSpace(costeraIdClaim))
+            {
+                return Forbid();
+            }
+
+            if (!int.TryParse(costeraIdClaim, out var costeraId))
+            {
+                return Forbid();
+            }
+
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                return BadRequest(new { mensaje = "El ID del viaje es requerido." });
+            }
+
+            try
+            {
+                var exito = await _viajeService.AprobarTransferenciaAsync(id, costeraId);
+                if (!exito)
+                {
+                    return UnprocessableEntity(new { mensaje = $"No se pudo aprobar la transferencia para el viaje '{id}'." });
+                }
+
+                return Ok(new { mensaje = $"Transferencia de jurisdicción para el viaje '{id}' aprobada y completada con éxito." });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return UnprocessableEntity(new { mensaje = ex.Message });
+            }
+        }
+
+        [HttpPost("{id}/rechazar-transferencia")]
+        public async Task<IActionResult> RechazarTransferencia(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                return BadRequest(new { mensaje = "El ID del viaje es requerido." });
+            }
+
+            try
+            {
+                var exito = await _viajeService.RechazarTransferenciaAsync(id);
+                if (!exito)
+                {
+                    return UnprocessableEntity(new { mensaje = $"No se pudo rechazar la transferencia para el viaje '{id}'." });
+                }
+
+                return Ok(new { mensaje = $"Solicitud de transferencia para el viaje '{id}' rechazada y cancelada." });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return UnprocessableEntity(new { mensaje = ex.Message });
+            }
+        }
     }
 }

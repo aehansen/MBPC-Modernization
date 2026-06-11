@@ -259,7 +259,9 @@ namespace Mbpc.Api.Services
                     EstadoActual          = p.NavegationStatusDesc ?? "N/A",
                     EsConvoy              = esConvoy,
                     Omi                   = omi,
-                    Matricula             = matricula
+                    Matricula             = matricula,
+                    RequiereTransferencia = p.RequiereTransferencia,
+                    CosteraIdPendiente    = p.CosteraIdPendiente
                 });
             }
 
@@ -467,6 +469,8 @@ namespace Mbpc.Api.Services
                                         : p.Destination,
                             TieneDetalleOperativo = tieneDetalle,
                             CosteraId             = p.CosteraId ?? 0,
+                            RequiereTransferencia = p.RequiereTransferencia,
+                            CosteraIdPendiente    = p.CosteraIdPendiente,
                             CantidadBarcazas = tieneDetalle ? (detalle?.Etapas?.Sum(e => e.Barcazas?.Count ?? 0) ?? 0) : 0,
                             Remolcador       = tieneDetalle ? detalle?.Etapas?.LastOrDefault()?.Remolcador?.Nombre : null
                         };
@@ -760,6 +764,7 @@ namespace Mbpc.Api.Services
                 {
                     TravelId             = travelIdGenerado,
                     VesselName           = vesselNameParaMongo,
+                    Mmsi                 = nuevoViaje.Mmsi,
                     NavegationStatusDesc = EstadoEtapa.Amarrado.ToString(),
                     MsgTime              = DateTime.UtcNow,
                     Latitude             = nuevoViaje.Latitud.HasValue ? (double)nuevoViaje.Latitud.Value : 0, 
@@ -840,6 +845,11 @@ namespace Mbpc.Api.Services
                 {
                     await _cache.RemoveAsync(CacheKeyBarcosEnPuerto(costeraIdInt));
                     await _cache.RemoveAsync(CacheKeyMapaViajes(costeraIdInt));
+                    if (costeraIdInt != 0)
+                    {
+                        await _cache.RemoveAsync(CacheKeyBarcosEnPuerto(0));
+                        await _cache.RemoveAsync(CacheKeyMapaViajes(0));
+                    }
                 });
 
                 _logger.LogInformation(
@@ -916,11 +926,18 @@ namespace Mbpc.Api.Services
                     "Distancia: {Dist:F2} NM, Δt: {Seg:F0} s.",
                     id, velocidadKn, distanciaNM, segundosTranscurridos);
 
-                throw new InvalidOperationException(
-                    $"Cinemática inválida: velocidad calculada de {velocidadKn:F1} kn supera el límite de " +
-                    $"{MAX_VELOCIDAD_KNOTS} kn. " +
-                    $"Distancia: {distanciaNM:F2} NM en {segundosTranscurridos:F0} segundos. " +
-                    $"Verifique las coordenadas o el timestamp del transponder. Si el error persiste comuníquese con un administrador del sistema.");
+                if (_env.IsDevelopment())
+                {
+                    _logger.LogWarning("ActualizarPosicionAsync BYPASS DEV: Ignorando rechazo cinemático (velocidad {Vel:F1} kn) en modo Desarrollo.", velocidadKn);
+                }
+                else
+                {
+                    throw new InvalidOperationException(
+                        $"Cinemática inválida: velocidad calculada de {velocidadKn:F1} kn supera el límite de " +
+                        $"{MAX_VELOCIDAD_KNOTS} kn. " +
+                        $"Distancia: {distanciaNM:F2} NM en {segundosTranscurridos:F0} segundos. " +
+                        $"Verifique las coordenadas o el timestamp del transponder. Si el error persiste comuníquese con un administrador del sistema.");
+                }
             }
 
             var nuevaLocation = new LocationMongo
@@ -1491,6 +1508,8 @@ namespace Mbpc.Api.Services
                     await _cache.RemoveAsync(CacheKeyMapaViajes(costeraId));
                     await _cache.RemoveAsync(CacheKeyBarcosEnPuerto(dto.NuevaCosteraId));
                     await _cache.RemoveAsync(CacheKeyMapaViajes(dto.NuevaCosteraId));
+                    await _cache.RemoveAsync(CacheKeyBarcosEnPuerto(0));
+                    await _cache.RemoveAsync(CacheKeyMapaViajes(0));
                 });
             }
             catch (Exception redisEx)
@@ -1578,41 +1597,39 @@ namespace Mbpc.Api.Services
             var costeras = await _costeraService.ObtenerLimitesJurisdiccionalesAsync();
             int nuevaCosteraId = DeterminarJurisdicionCorrespondiente(latitud, longitud, costeras);
 
+            _logger.LogInformation("EvaluarReconciliacionReactiva — Buque: '{Buque}' | Coords: [{Lat}, {Lng}] | nuevaCosteraId: {NuevaId} | viaje.CosteraId: {ActualId}",
+                viaje.VesselName, latitud, longitud, nuevaCosteraId, viaje.CosteraId);
+
             if (nuevaCosteraId > 0 && nuevaCosteraId != viaje.CosteraId)
             {
+                if (!viaje.RequiereTransferencia || viaje.CosteraIdPendiente != nuevaCosteraId)
+                {
+                    _logger.LogInformation(
+                        "RECONCILIACIÓN REACTIVA DETECTADA (PENDIENTE): Buque {Buque} (TravelId: {TravelId}) cruza de Costera {ActualId} a Costera {NuevaId}. Registrando solicitud de transferencia.",
+                        viaje.VesselName, viaje.TravelId, viaje.CosteraId, nuevaCosteraId);
+
+                    var update = Builders<ViajePosicionMongo>.Update
+                        .Set(p => p.RequiereTransferencia, true)
+                        .Set(p => p.CosteraIdPendiente, nuevaCosteraId)
+                        .Set(p => p.FechaSolicitudTransferencia, DateTime.UtcNow);
+
+                    var filter = Builders<ViajePosicionMongo>.Filter.Eq(p => p.Id, viaje.Id);
+                    await _viajesCollection.UpdateOneAsync(filter, update);
+                }
+            }
+            else if (viaje.RequiereTransferencia)
+            {
                 _logger.LogInformation(
-                    "RECONCILIACIÓN REACTIVA DETECTADA: Buque {Buque} (TravelId: {TravelId}) pasa de Costera {ActualId} a Costera {NuevaId}.",
-                    viaje.VesselName, viaje.TravelId, viaje.CosteraId, nuevaCosteraId);
+                    "RECONCILIACIÓN REACTIVA: Buque {Buque} (TravelId: {TravelId}) cancela cruce. Limpiando solicitud pendiente.",
+                    viaje.VesselName, viaje.TravelId);
 
-                // Conservar el principal de usuario original
-                var originalUser = _httpContextAccessor.HttpContext?.User;
-                try
-                {
-                    // Forzar el claim de CosteraId correspondiente a la costera de origen del buque
-                    var identityTransfer = new ClaimsIdentity(new[] { new Claim("CosteraId", (viaje.CosteraId ?? 0).ToString()) }, "BackgroundSystem");
-                    if (_httpContextAccessor.HttpContext == null)
-                    {
-                        _httpContextAccessor.HttpContext = new DefaultHttpContext();
-                    }
-                    _httpContextAccessor.HttpContext.User = new ClaimsPrincipal(identityTransfer);
+                var update = Builders<ViajePosicionMongo>.Update
+                    .Set(p => p.RequiereTransferencia, false)
+                    .Set(p => p.CosteraIdPendiente, (int?)null)
+                    .Set(p => p.FechaSolicitudTransferencia, (DateTime?)null);
 
-                    var dto = new TransferirJurisdiccionDto
-                    {
-                        NuevaCosteraId = nuevaCosteraId,
-                        Velocidad = velocidadKn,
-                        Rumbo = 0 // Rumbo por defecto o calculado si se dispone
-                    };
-
-                    await TransferirJurisdiccionAsync(viaje.TravelId.ToString(), dto);
-                }
-                finally
-                {
-                    // Restaurar el principal original
-                    if (_httpContextAccessor.HttpContext != null)
-                    {
-                        _httpContextAccessor.HttpContext.User = originalUser ?? new ClaimsPrincipal();
-                    }
-                }
+                var filter = Builders<ViajePosicionMongo>.Filter.Eq(p => p.Id, viaje.Id);
+                await _viajesCollection.UpdateOneAsync(filter, update);
             }
         }
 
@@ -1628,30 +1645,19 @@ namespace Mbpc.Api.Services
                 var type = costera.Geometry.Type;
                 double minDistanciaLocal = double.MaxValue;
 
-                if (type.Equals("Polygon", StringComparison.OrdinalIgnoreCase) || 
-                    type.Equals("LineString", StringComparison.OrdinalIgnoreCase))
+                var poligonos = ObtenerPoligonosDeGeometry(costera.Geometry.Coordinates, type);
+                if (poligonos == null || poligonos.Count == 0) continue;
+
+                foreach (var poligono in poligonos)
                 {
-                    if (costera.Geometry.Coordinates is double[][] poligono)
+                    if (type.Equals("Polygon", StringComparison.OrdinalIgnoreCase) || type.Equals("MultiPolygon", StringComparison.OrdinalIgnoreCase))
                     {
-                        if (type.Equals("Polygon", StringComparison.OrdinalIgnoreCase) && IsPointInPolygon(latitud, longitud, poligono))
+                        if (IsPointInPolygon(latitud, longitud, poligono))
                             return costera.Properties.CosteraId;
-                        
-                        minDistanciaLocal = DistanciaMinimaAPoligono(latitud, longitud, poligono);
                     }
-                }
-                else if (type.Equals("MultiPolygon", StringComparison.OrdinalIgnoreCase))
-                {
-                    if (costera.Geometry.Coordinates is double[][][] multiPoligono)
-                    {
-                        foreach (var poligono in multiPoligono)
-                        {
-                            if (IsPointInPolygon(latitud, longitud, poligono))
-                                return costera.Properties.CosteraId; 
-                            
-                            double dist = DistanciaMinimaAPoligono(latitud, longitud, poligono);
-                            if (dist < minDistanciaLocal) minDistanciaLocal = dist;
-                        }
-                    }
+
+                    double dist = DistanciaMinimaAPoligono(latitud, longitud, poligono);
+                    if (dist < minDistanciaLocal) minDistanciaLocal = dist;
                 }
 
                 if (minDistanciaLocal < distanciaMinima)
@@ -1663,6 +1669,79 @@ namespace Mbpc.Api.Services
 
             if (distanciaMinima < 0.01) return mejorCosteraId;
             return 0; 
+        }
+
+        private List<double[][]> ObtenerPoligonosDeGeometry(object coordinatesObj, string type)
+        {
+            var resultado = new List<double[][]>();
+
+            if (coordinatesObj is System.Text.Json.JsonElement element)
+            {
+                if (element.ValueKind != System.Text.Json.JsonValueKind.Array) return resultado;
+
+                if (type.Equals("Polygon", StringComparison.OrdinalIgnoreCase) || type.Equals("LineString", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (type.Equals("Polygon", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (element.GetArrayLength() > 0)
+                        {
+                            var ring = ParsearAnilloJson(element[0]);
+                            if (ring != null) resultado.Add(ring);
+                        }
+                    }
+                    else // LineString
+                    {
+                        var ring = ParsearAnilloJson(element);
+                        if (ring != null) resultado.Add(ring);
+                    }
+                }
+                else if (type.Equals("MultiPolygon", StringComparison.OrdinalIgnoreCase))
+                {
+                    foreach (var polyElem in element.EnumerateArray())
+                    {
+                        if (polyElem.ValueKind == System.Text.Json.JsonValueKind.Array && polyElem.GetArrayLength() > 0)
+                        {
+                            var ring = ParsearAnilloJson(polyElem[0]);
+                            if (ring != null) resultado.Add(ring);
+                        }
+                    }
+                }
+            }
+            else
+            {
+                // Caso arrays nativos (de MongoDB mapping)
+                if (coordinatesObj is double[][] poly2d)
+                {
+                    resultado.Add(poly2d);
+                }
+                else if (coordinatesObj is double[][][] poly3d)
+                {
+                    if (type.Equals("MultiPolygon", StringComparison.OrdinalIgnoreCase))
+                    {
+                        foreach (var poly in poly3d) resultado.Add(poly);
+                    }
+                    else if (poly3d.Length > 0)
+                    {
+                        resultado.Add(poly3d[0]);
+                    }
+                }
+            }
+
+            return resultado;
+        }
+
+        private double[][]? ParsearAnilloJson(System.Text.Json.JsonElement ringElement)
+        {
+            if (ringElement.ValueKind != System.Text.Json.JsonValueKind.Array) return null;
+            var list = new List<double[]>();
+            foreach (var pt in ringElement.EnumerateArray())
+            {
+                if (pt.ValueKind == System.Text.Json.JsonValueKind.Array && pt.GetArrayLength() >= 2)
+                {
+                    list.Add(new double[] { pt[0].GetDouble(), pt[1].GetDouble() });
+                }
+            }
+            return list.ToArray();
         }
 
         private double DistanciaMinimaAPoligono(double lat, double lon, double[][] poligono)
@@ -1712,6 +1791,257 @@ namespace Mbpc.Api.Services
                 }
             }
             return inside;
+        }
+
+        public async Task RegistrarSolicitudTransferenciaAsync(string id, int nuevaCosteraId)
+        {
+            var filtro = BuildFiltroViaje(id);
+            var viaje = await _viajesCollection.Find(filtro).FirstOrDefaultAsync();
+            if (viaje == null) return;
+
+            if (!viaje.RequiereTransferencia || viaje.CosteraIdPendiente != nuevaCosteraId)
+            {
+                _logger.LogInformation(
+                    "Reconciliación Global: Detectado cruce para Buque {Buque} (TravelId: {TravelId}) de Costera {ActualId} a Costera {NuevaId}. Registrando solicitud pendiente.",
+                    viaje.VesselName, viaje.TravelId, viaje.CosteraId, nuevaCosteraId);
+
+                var update = Builders<ViajePosicionMongo>.Update
+                    .Set(p => p.RequiereTransferencia, true)
+                    .Set(p => p.CosteraIdPendiente, nuevaCosteraId)
+                    .Set(p => p.FechaSolicitudTransferencia, DateTime.UtcNow);
+
+                await _viajesCollection.UpdateOneAsync(filtro, update);
+            }
+        }
+
+        public async Task LimpiarSolicitudTransferenciaAsync(string id)
+        {
+            var filtro = BuildFiltroViaje(id);
+            var viaje = await _viajesCollection.Find(filtro).FirstOrDefaultAsync();
+            if (viaje != null && viaje.RequiereTransferencia)
+            {
+                _logger.LogInformation(
+                    "Reconciliación Global: Buque {Buque} (TravelId: {TravelId}) ya no requiere transferencia. Limpiando solicitud.",
+                    viaje.VesselName, viaje.TravelId);
+
+                var update = Builders<ViajePosicionMongo>.Update
+                    .Set(p => p.RequiereTransferencia, false)
+                    .Set(p => p.CosteraIdPendiente, (int?)null)
+                    .Set(p => p.FechaSolicitudTransferencia, (DateTime?)null);
+
+                await _viajesCollection.UpdateOneAsync(filtro, update);
+            }
+        }
+
+        public async Task<List<ViajeDto>> ObtenerTransferenciasPendientesAsync(int costeraId)
+        {
+            FilterDefinition<ViajePosicionMongo> filtro;
+            var filtroPendiente = Builders<ViajePosicionMongo>.Filter.Eq(p => p.RequiereTransferencia, true);
+
+            if (costeraId == 0)
+            {
+                filtro = filtroPendiente;
+            }
+            else
+            {
+                var filtroOrigen = Builders<ViajePosicionMongo>.Filter.Eq("CosteraId", costeraId);
+                var filtroDestino = Builders<ViajePosicionMongo>.Filter.Eq(p => p.CosteraIdPendiente, costeraId);
+                var filtroCosteras = Builders<ViajePosicionMongo>.Filter.Or(filtroOrigen, filtroDestino);
+                filtro = Builders<ViajePosicionMongo>.Filter.And(filtroPendiente, filtroCosteras);
+            }
+
+            var posiciones = await _viajesCollection.Find(filtro).ToListAsync();
+            var viajesDto = new List<ViajeDto>();
+
+            foreach (var p in posiciones)
+            {
+                var buqueNombre = !string.IsNullOrWhiteSpace(p.VesselName)
+                    ? p.VesselName
+                    : p.TravelId.ToString();
+
+                string? matricula = null;
+                string? omi = p.Imo?.ToString();
+
+                if (long.TryParse(buqueNombre, out long buqueId))
+                {
+                    var infoBuque = await _buqueService.ObtenerBuquePorIdAsync(buqueId);
+                    buqueNombre = !string.IsNullOrWhiteSpace(infoBuque?.Nombre)
+                        ? infoBuque.Nombre
+                        : $"BUQUE {buqueNombre}";
+
+                    if (infoBuque != null)
+                    {
+                        matricula = infoBuque.Matricula;
+                        if (string.IsNullOrEmpty(omi) || omi == "-")
+                        {
+                            omi = infoBuque.Omi;
+                        }
+                    }
+                }
+                else
+                {
+                    try
+                    {
+                        var buquesEncontrados = await _buqueService.BuscarBuquesDisponiblesAsync(buqueNombre);
+                        var exactBuque = buquesEncontrados?.FirstOrDefault(b => b.Nombre != null && b.Nombre.Equals(buqueNombre, StringComparison.OrdinalIgnoreCase));
+                        if (exactBuque != null)
+                        {
+                            matricula = exactBuque.Matricula;
+                            if (string.IsNullOrEmpty(omi) || omi == "-" || omi == "S/D")
+                            {
+                                omi = exactBuque.Omi;
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogDebug(ex, "ObtenerTransferenciasPendientesAsync: No se pudo hidratar buque por nombre '{Nombre}'", buqueNombre);
+                    }
+                }
+
+                var esConvoy = false;
+                var travelId = p.TravelId;
+                var vesselName = p.VesselName;
+
+                var filtroDetalleBase = travelId > 0
+                    ? Builders<ViajeDetalleMongo>.Filter.Eq(v => v.IdViaje, travelId)
+                    : Builders<ViajeDetalleMongo>.Filter.Eq(v => v.VesselName, vesselName);
+
+                var detalle = await _detallesCollection.Find(filtroDetalleBase).FirstOrDefaultAsync();
+
+                if (detalle != null)
+                {
+                    var tieneBarcazasEtapa = detalle.Etapas?.Any(e => 
+                        e != null && e.Barcazas != null && 
+                        e.Barcazas.Any(b => b != null && !string.IsNullOrWhiteSpace(b.Nombre) && b.Nombre != "0")) ?? false;
+
+                    var tieneBarcazasRaiz = detalle.Barcazas != null && 
+                        detalle.Barcazas.Any(b => b != null && !string.IsNullOrWhiteSpace(b.Nombre) && b.Nombre != "0");
+
+                    esConvoy = tieneBarcazasEtapa || tieneBarcazasRaiz;
+                }
+
+                viajesDto.Add(new ViajeDto
+                {
+                    Id = p.Id,
+                    Buque = buqueNombre,
+                    NombreBuque = p.VesselName ?? p.TravelId.ToString(),
+                    Ruta = $"{p.Origin ?? "Sin Origen"} ➔ {p.Destination ?? "Sin Destino"}",
+                    FechaInicioFormateada = p.MsgTime.ToString("dd/MM/yyyy HH:mm"),
+                    EstadoActual = p.NavegationStatusDesc ?? "N/A",
+                    CosteraId = p.CosteraId?.ToString(),
+                    RequiereTransferencia = p.RequiereTransferencia,
+                    CosteraIdPendiente = p.CosteraIdPendiente,
+                    EsConvoy = esConvoy,
+                    Omi = omi,
+                    Matricula = matricula
+                });
+            }
+
+            return viajesDto;
+        }
+
+        public async Task<bool> AprobarTransferenciaAsync(string id, int operadorCosteraId)
+        {
+            var filtro = BuildFiltroViaje(id);
+            var viaje = await _viajesCollection.Find(filtro).FirstOrDefaultAsync();
+
+            if (viaje == null)
+            {
+                throw new InvalidOperationException($"No se encontró el viaje '{id}'.");
+            }
+
+            if (!viaje.RequiereTransferencia || !viaje.CosteraIdPendiente.HasValue)
+            {
+                throw new InvalidOperationException($"El viaje '{id}' no posee ninguna solicitud de transferencia pendiente.");
+            }
+
+            int targetCosteraId = viaje.CosteraIdPendiente.Value;
+            int sourceCosteraId = viaje.CosteraId ?? 0;
+
+            if (operadorCosteraId != 0 && operadorCosteraId != sourceCosteraId && operadorCosteraId != targetCosteraId)
+            {
+                throw new InvalidOperationException($"El operador de la Costera {operadorCosteraId} no está autorizado para aprobar esta transferencia (Origen: {sourceCosteraId}, Destino: {targetCosteraId}).");
+            }
+
+            var originalUser = _httpContextAccessor.HttpContext?.User;
+            try
+            {
+                var identity = new ClaimsIdentity(new[] { new Claim("CosteraId", sourceCosteraId.ToString()) }, "BackgroundSystem");
+                if (_httpContextAccessor.HttpContext == null)
+                {
+                    _httpContextAccessor.HttpContext = new DefaultHttpContext();
+                }
+                _httpContextAccessor.HttpContext.User = new ClaimsPrincipal(identity);
+
+                var dto = new TransferirJurisdiccionDto
+                {
+                    NuevaCosteraId = targetCosteraId,
+                    Velocidad = viaje.SpeedOverGround,
+                    Rumbo = viaje.CourseOverGround
+                };
+
+                bool exito = await TransferirJurisdiccionAsync(id, dto);
+                if (exito)
+                {
+                    var clearUpdate = Builders<ViajePosicionMongo>.Update
+                        .Set(p => p.RequiereTransferencia, false)
+                        .Set(p => p.CosteraIdPendiente, (int?)null)
+                        .Set(p => p.FechaSolicitudTransferencia, (DateTime?)null);
+
+                    await _viajesCollection.UpdateOneAsync(filtro, clearUpdate);
+                    _logger.LogInformation("AprobarTransferencia: Solicitud de transferencia aprobada y completada para el viaje '{Id}'.", id);
+                }
+
+                return exito;
+            }
+            finally
+            {
+                if (originalUser != null && _httpContextAccessor.HttpContext != null)
+                {
+                    _httpContextAccessor.HttpContext.User = originalUser;
+                }
+            }
+        }
+
+        public async Task<bool> RechazarTransferenciaAsync(string id)
+        {
+            var filtro = BuildFiltroViaje(id);
+            var viaje = await _viajesCollection.Find(filtro).FirstOrDefaultAsync();
+
+            if (viaje == null)
+            {
+                throw new InvalidOperationException($"No se encontró el viaje '{id}'.");
+            }
+
+            if (!viaje.RequiereTransferencia)
+            {
+                return false;
+            }
+
+            var update = Builders<ViajePosicionMongo>.Update
+                .Set(p => p.RequiereTransferencia, false)
+                .Set(p => p.CosteraIdPendiente, (int?)null)
+                .Set(p => p.FechaSolicitudTransferencia, (DateTime?)null);
+
+            var result = await _viajesCollection.UpdateOneAsync(filtro, update);
+
+            try
+            {
+                await _redisRetryPolicy.ExecuteAsync(async () =>
+                {
+                    await _cache.RemoveAsync(CacheKeyBarcosEnPuerto(viaje.CosteraId ?? 0));
+                    await _cache.RemoveAsync(CacheKeyMapaViajes(viaje.CosteraId ?? 0));
+                    await _cache.RemoveAsync(CacheKeyBarcosEnPuerto(0));
+                    await _cache.RemoveAsync(CacheKeyMapaViajes(0));
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "RechazarTransferenciaAsync: Error al invalidar la caché.");
+            }
+
+            return result.ModifiedCount > 0;
         }
     }
 }

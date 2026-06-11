@@ -9,6 +9,8 @@ import LaunchpadModal from "../components/viajes/LaunchpadModal";
 import ModalGestionConvoy from "@/components/convoy/ModalGestionConvoy";
 import type { NuevoViajeResponse, NuevoViajeError } from "@/types/viajes.types";
 
+import PanelTransferencias from '../components/viajes/PanelTransferencias';
+
 type Vista = "dashboard" | "mapa";
 
 export default function ViajesPage() {
@@ -173,6 +175,7 @@ export default function ViajesPage() {
         </div>
       ) : (
         <div className="flex-grow p-6 md:p-8 space-y-8">
+          <PanelTransferencias />
           <ViajesDashboard
             selectedViajeId={selectedViajeId}
             onViajeSelected={setSelectedViajeId}

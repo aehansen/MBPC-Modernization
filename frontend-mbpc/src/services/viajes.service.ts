@@ -80,6 +80,19 @@ const viajesService = {
   ): Promise<void> => {
     await api.put(`/api/viajes/${viajeId}/transferir`, { nuevaCosteraId });
   },
+
+  getTransferenciasPendientes: async (): Promise<ViajeDto[]> => {
+    const { data } = await api.get<ViajeDto[]>('/api/viajes/transferencias-pendientes');
+    return data;
+  },
+
+  aprobarTransferencia: async (id: string): Promise<void> => {
+    await api.post(`/api/viajes/${id}/aprobar-transferencia`);
+  },
+
+  rechazarTransferencia: async (id: string): Promise<void> => {
+    await api.post(`/api/viajes/${id}/rechazar-transferencia`);
+  },
 };
 
 export default viajesService;

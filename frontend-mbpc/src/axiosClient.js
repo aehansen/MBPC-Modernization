@@ -58,6 +58,9 @@ export const viajesApi = {
   fondear: (id) => apiClient.put(`/viajes/${id}/fondear`),
   reanudar: (id) => apiClient.put(`/viajes/${id}/reanudar`),
   actualizarPosicion: (id, payload) => apiClient.put(`/viajes/${id}/posicion`, payload),
+  getTransferenciasPendientes: () => apiClient.get("/viajes/transferencias-pendientes"),
+  aprobarTransferencia: (id) => apiClient.post(`/viajes/${id}/aprobar-transferencia`),
+  rechazarTransferencia: (id) => apiClient.post(`/viajes/${id}/rechazar-transferencia`),
 };
 
 export const mapaApi = {

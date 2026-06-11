@@ -33,6 +33,11 @@ namespace Mbpc.Api.Workers
 
                     using (var scope = _serviceScopeFactory.CreateScope())
                     {
+                        // 1. Ingestar posiciones reales de buques activos y reconciliarlas
+                        var ingestionService = scope.ServiceProvider.GetRequiredService<IAisIngestionService>();
+                        await ingestionService.SincronizarPosicionesAisAsync(stoppingToken);
+
+                        // 2. Ejecutar el barrido de reconciliación global de respaldo
                         var reconciliacionService = scope.ServiceProvider.GetRequiredService<IReconciliacionService>();
                         await reconciliacionService.EjecutarCicloReconciliacionAsync(stoppingToken);
                     }

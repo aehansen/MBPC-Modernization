@@ -138,6 +138,31 @@ namespace Mbpc.Api.Services
         Task<bool> TransferirJurisdiccionAsync(string id, TransferirJurisdiccionDto dto);
 
         /// <summary>
+        /// Registra una solicitud de transferencia pendiente de aprobación.
+        /// </summary>
+        Task RegistrarSolicitudTransferenciaAsync(string id, int nuevaCosteraId);
+
+        /// <summary>
+        /// Limpia/cancela una solicitud de transferencia pendiente de aprobación.
+        /// </summary>
+        Task LimpiarSolicitudTransferenciaAsync(string id);
+
+        /// <summary>
+        /// Obtiene la lista de transferencias pendientes para la costera indicada (origen o destino).
+        /// </summary>
+        Task<List<ViajeDto>> ObtenerTransferenciasPendientesAsync(int costeraId);
+
+        /// <summary>
+        /// Aprueba y ejecuta la transferencia de jurisdicción pendiente.
+        /// </summary>
+        Task<bool> AprobarTransferenciaAsync(string id, int operadorCosteraId);
+
+        /// <summary>
+        /// Rechaza/cancela la transferencia de jurisdicción pendiente.
+        /// </summary>
+        Task<bool> RechazarTransferenciaAsync(string id);
+
+        /// <summary>
         /// Valida si el viaje está finalizado y lanza InvalidOperationException si es así.
         /// </summary>
         Task ThrowIfViajeFinalizadoAsync(string viajeId);

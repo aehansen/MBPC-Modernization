@@ -23,6 +23,8 @@ namespace Mbpc.Api.DTOs
         public bool EsConvoy { get; set; }
         public string? Omi { get; set; }
         public string? Matricula { get; set; }
+        public bool RequiereTransferencia { get; set; }
+        public int? CosteraIdPendiente { get; set; }
     }
 
     // ══════════════════════════════════════════════════════════════════════════
