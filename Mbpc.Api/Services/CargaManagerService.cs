@@ -1173,6 +1173,71 @@ namespace Mbpc.Api.Services
             }
         }
 
+        public async Task<bool> SincronizarFondeoConvoyAsync(string viajeId)
+        {
+            await ViajeService.ThrowIfViajeFinalizadoAsync(viajeId);
+            try
+            {
+                using var scope = _serviceProvider.CreateScope();
+                var viajeService = scope.ServiceProvider.GetRequiredService<IViajeService>();
+                var (doc, _)     = await viajeService.GetViajeDetalleByIdAsync(viajeId);
+
+                if (doc is null)
+                {
+                    var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, viajeId);
+                    doc = await _detailsCollection.Find(filtroId).FirstOrDefaultAsync();
+                }
+
+                if (doc is null)
+                {
+                    _logger.LogWarning(
+                        "SincronizarFondeoConvoyAsync: No se encontró documento MongoDB para ViajeId='{ViajeId}'. " +
+                        "No se actualiza el estado de las barcazas.", viajeId);
+                    return false;
+                }
+
+                var ultimaEtapa = doc.Etapas?.LastOrDefault();
+                if (ultimaEtapa?.Barcazas == null || !ultimaEtapa.Barcazas.Any())
+                {
+                    _logger.LogDebug(
+                        "SincronizarFondeoConvoyAsync: El viaje '{ViajeId}' no tiene barcazas en la etapa activa. " +
+                        "No hay nada que sincronizar.", viajeId);
+                    return true;
+                }
+
+                bool modificado = false;
+                foreach (var barcaza in ultimaEtapa.Barcazas)
+                {
+                    if (string.IsNullOrWhiteSpace(barcaza.MuelleActual))
+                    {
+                        barcaza.MuelleActual = "Fondeadero";
+                        modificado = true;
+                    }
+                }
+
+                if (modificado)
+                {
+                    var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
+                    await _detailsCollection.ReplaceOneAsync(filtroId, doc);
+
+                    _cache.Remove($"{CacheKeyPrefixCargas}{viajeId}");
+                    InvalidarCacheViajePorBuque(doc.VesselName);
+
+                    _logger.LogInformation(
+                        "SincronizarFondeoConvoyAsync: Barcazas del viaje '{ViajeId}' actualizadas a Fondeada (MuelleActual → 'Fondeadero').",
+                        viajeId);
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "Error al sincronizar fondeo en cascada para el viaje '{ViajeId}'.", viajeId);
+                return false;
+            }
+        }
+
         private void InvalidarCacheViajePorBuque(string? vesselName)
         {
             if (string.IsNullOrWhiteSpace(vesselName)) return;

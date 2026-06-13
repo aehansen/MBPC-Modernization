@@ -23,5 +23,6 @@ namespace Mbpc.Api.Services
 
         Task<bool> SincronizarAmarreConvoyAsync(string viajeId);
         Task<bool> SincronizarZarpeConvoyAsync(string viajeId);
+        Task<bool> SincronizarFondeoConvoyAsync(string viajeId);
     }
 }

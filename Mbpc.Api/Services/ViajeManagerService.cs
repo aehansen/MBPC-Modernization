@@ -1368,6 +1368,18 @@ namespace Mbpc.Api.Services
                         "CambiarEstadoNavegacionAsync: Disparando sincronización de zarpe (EnTransito) para convoy del viaje '{Id}'.", id);
                     await _cargaService.SincronizarZarpeConvoyAsync(id);
                 }
+                else if (nuevoEstado.Equals(EstadoEtapa.Fondeado.ToString(), StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogInformation(
+                        "CambiarEstadoNavegacionAsync: Disparando sincronización de fondeo para convoy del viaje '{Id}'.", id);
+                    await _cargaService.SincronizarFondeoConvoyAsync(id);
+                }
+                else if (nuevoEstado.Equals(EstadoEtapa.Reanudado.ToString(), StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogInformation(
+                        "CambiarEstadoNavegacionAsync: Disparando sincronización de zarpe (EnTransito) por Reanudación para convoy del viaje '{Id}'.", id);
+                    await _cargaService.SincronizarZarpeConvoyAsync(id);
+                }
 
                 try
                 {
