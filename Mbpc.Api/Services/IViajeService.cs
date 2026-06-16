@@ -165,6 +165,6 @@ namespace Mbpc.Api.Services
         /// <summary>
         /// Valida si el viaje está finalizado y lanza InvalidOperationException si es así.
         /// </summary>
-        Task ThrowIfViajeFinalizadoAsync(string viajeId);
+        Task ThrowIfViajeFinalizadoAsync(string viajeId, bool permitirRectificacion = false);
     }
 }

@@ -201,5 +201,49 @@ namespace Mbpc.Api.Controllers
                 mensaje = $"Carga BarcazaId={nuevaCarga.BarcazaId} ({nuevaCarga.Tipo}) agregada correctamente al viaje '{viajeId}'."
             });
         }
+
+        // ── POST: transferir carga ───────────────────────────────────────────
+
+        [HttpPost("/api/cargas/{viajeId}/cargas/{cargaId}/transferir")]
+        public async Task<ActionResult> TransferirCarga(
+            string viajeId,
+            string cargaId,
+            [FromBody] TransferirCargaDto dto)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var exito = await _cargaService.TransferirCargaAsync(viajeId, cargaId, dto);
+            if (!exito)
+            {
+                return BadRequest(new { mensaje = "No se pudo realizar la transferencia de carga." });
+            }
+
+            return Ok(new { mensaje = "Transbordo registrado con éxito." });
+        }
+
+        // ── PUT: rectificar carga ────────────────────────────────────────────
+
+        [HttpPut("/api/cargas/{viajeId}/cargas/{cargaId}/rectificar")]
+        public async Task<ActionResult> RectificarCarga(
+            string viajeId,
+            string cargaId,
+            [FromBody] RectificarCargaDto dto)
+        {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            var exito = await _cargaService.RectificarCargaAsync(viajeId, cargaId, dto);
+            if (!exito)
+            {
+                return BadRequest(new { mensaje = "No se pudo realizar la rectificación de carga." });
+            }
+
+            return Ok(new { mensaje = "Rectificación histórica registrada con éxito." });
+        }
     }
 }

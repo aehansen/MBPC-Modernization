@@ -21,6 +21,16 @@ namespace Mbpc.Api.Services
         /// <param name="cargaId">Identificador de la carga a eliminar.</param>
         Task<bool> EliminarCargaAsync(string viajeId, string cargaId);
 
+        /// <summary>
+        /// Transfiere un tonelaje específico de carga desde un viaje y barcaza de origen hacia otro de destino.
+        /// </summary>
+        Task<bool> TransferirCargaAsync(string viajeOrigenId, string cargaOrigenId, TransferirCargaDto dto);
+
+        /// <summary>
+        /// Realiza una rectificación histórica del tonelaje de una carga en un viaje, incluso si el viaje está finalizado.
+        /// </summary>
+        Task<bool> RectificarCargaAsync(string viajeId, string cargaId, RectificarCargaDto dto);
+
         Task<bool> SincronizarAmarreConvoyAsync(string viajeId);
         Task<bool> SincronizarZarpeConvoyAsync(string viajeId);
         Task<bool> SincronizarFondeoConvoyAsync(string viajeId);

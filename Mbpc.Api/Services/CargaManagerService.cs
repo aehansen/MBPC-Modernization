@@ -510,6 +510,7 @@ namespace Mbpc.Api.Services
             if (doc is not null)
             {
                 await ViajeService.ThrowIfViajeFinalizadoAsync(doc.Id.ToString());
+                await ValidarCapacidadEmbarcacionAsync(id, doc.VesselName, toneladas);
             }
 
             _logger.LogInformation("Registrando carga a {Toneladas}tn de embarcación {Id}", toneladas, id);
@@ -723,6 +724,8 @@ namespace Mbpc.Api.Services
 
             string nombreBuque = doc.VesselName ?? string.Empty;
 
+            await ValidarCapacidadEmbarcacionAsync(nuevaCarga.BarcazaId.ToString(), nombreBuque, nuevaCarga.Tonelaje);
+
             bool exitoOracle = false;
             try
             {
@@ -796,6 +799,19 @@ namespace Mbpc.Api.Services
         public async Task<bool> ModificarCargaAsync(string id, ModificarCargaDto dto)
         {
             await ViajeService.ThrowIfViajeFinalizadoAsync(dto.ViajeId);
+
+            using var scope = _serviceProvider.CreateScope();
+            var viajeService = scope.ServiceProvider.GetRequiredService<IViajeService>();
+            var (doc, _) = await viajeService.GetViajeDetalleByIdAsync(dto.ViajeId);
+
+            if (doc == null)
+            {
+                _logger.LogWarning("ModificarCargaAsync: No se encontró detalle operativo para ViajeId='{ViajeId}'.", dto.ViajeId);
+                return false;
+            }
+
+            await ValidarCapacidadEmbarcacionAsync(dto.BarcazaId.ToString(), doc.VesselName, dto.Tonelaje);
+
             bool exitoOracle = false;
             try
             {
@@ -822,19 +838,6 @@ namespace Mbpc.Api.Services
             {
                 try
                 {
-                    using var scope = _serviceProvider.CreateScope();
-                    var viajeService = scope.ServiceProvider.GetRequiredService<IViajeService>();
-                    
-                    var (detalleEncontrado, _) = await viajeService.GetViajeDetalleByIdAsync(dto.ViajeId);
-                    
-                    if (detalleEncontrado == null)
-                    {
-                        _logger.LogWarning("ModificarCargaAsync: No se encontró detalle operativo para ViajeId='{ViajeId}'.", dto.ViajeId);
-                        return false;
-                    }
-
-                    var doc = detalleEncontrado;
-
                     var ultimaEtapa = doc.Etapas?.LastOrDefault();
                     var barcazaTarget = ultimaEtapa?.Barcazas?.FirstOrDefault(b => b.Nombre == id);
 
@@ -842,6 +845,24 @@ namespace Mbpc.Api.Services
                     {
                         var tipoCarga = await _tipoCargaService.ObtenerPorIdAsync(dto.MercaderiaId);
                         var anteriorDetalle = $"Carga: {barcazaTarget.Carga}, Cantidad: {barcazaTarget.Cantidad}";
+                        
+                        if (id != dto.BarcazaId.ToString())
+                        {
+                            string nuevoNombre = dto.BarcazaId.ToString();
+                            string? matricula = null;
+                            string? bandera = null;
+                            var buqueInfo = await _serviceProvider.GetRequiredService<IBuqueService>().ObtenerBuquePorIdAsync(dto.BarcazaId);
+                            if (buqueInfo != null)
+                            {
+                                nuevoNombre = buqueInfo.Nombre ?? nuevoNombre;
+                                matricula = buqueInfo.Matricula;
+                                bandera = buqueInfo.Bandera;
+                            }
+                            barcazaTarget.Nombre = nuevoNombre;
+                            barcazaTarget.Matricula = matricula;
+                            barcazaTarget.Bandera = bandera;
+                        }
+
                         barcazaTarget.Carga        = tipoCarga?.Nombre ?? "A Definir";
                         barcazaTarget.Cantidad     = dto.Tonelaje;
                         barcazaTarget.MercaderiaId = dto.MercaderiaId;
@@ -859,6 +880,7 @@ namespace Mbpc.Api.Services
                             id, doc.Id, dto.ViajeId);
 
                         _cache.Remove($"{CacheKeyPrefixCargas}{dto.ViajeId}");
+                        InvalidarCacheViajePorBuque(doc.VesselName);
                     }
                     else
                     {
@@ -1284,6 +1306,286 @@ namespace Mbpc.Api.Services
             }
         }
 
+        private async Task ValidarCapacidadEmbarcacionAsync(string id, string? vesselName, double toneladas)
+        {
+            _logger.LogInformation("ValidarCapacidadEmbarcacionAsync — id: '{Id}', vesselName: '{VesselName}', toneladas: {Toneladas}", id, vesselName, toneladas);
+            BuqueAutocompleteDto? embarcacion = null;
+            var buqueService = _serviceProvider.GetRequiredService<IBuqueService>();
+
+            if (id == "0" || id.Equals("Bodega", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.IsNullOrEmpty(vesselName))
+                {
+                    var buques = await buqueService.BuscarBuquesDisponiblesAsync(vesselName);
+                    embarcacion = buques.FirstOrDefault(b => b.Nombre != null && b.Nombre.Equals(vesselName, StringComparison.OrdinalIgnoreCase));
+                }
+            }
+            else if (long.TryParse(id, out long barcazaId) && barcazaId > 0)
+            {
+                embarcacion = await buqueService.ObtenerBuquePorIdAsync(barcazaId);
+            }
+            else if (!string.IsNullOrEmpty(id))
+            {
+                var buques = await buqueService.BuscarBarcazasDisponiblesAsync(id);
+                embarcacion = buques.FirstOrDefault(b => b.Nombre != null && b.Nombre.Equals(id, StringComparison.OrdinalIgnoreCase));
+            }
+
+            // Robust fallback: if not found via specific lookup, search via general query as fallback.
+            if (embarcacion == null && !string.IsNullOrEmpty(id))
+            {
+                _logger.LogInformation("ValidarCapacidadEmbarcacionAsync — Fallback buscando con BuscarBuquesDisponiblesAsync para id: '{Id}'", id);
+                var buques = await buqueService.BuscarBuquesDisponiblesAsync(id);
+                embarcacion = buques.FirstOrDefault(b => b.Nombre != null && b.Nombre.Equals(id, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (embarcacion != null)
+            {
+                double capacidadMax = embarcacion.CapacidadTn ?? 0;
+                _logger.LogInformation("ValidarCapacidadEmbarcacionAsync — Embarcación '{Nombre}' resuelta. Capacidad: {Capacidad} Tn, Solicitado: {Toneladas} Tn.", embarcacion.Nombre, capacidadMax, toneladas);
+                if (capacidadMax > 0 && toneladas > capacidadMax)
+                {
+                    throw new InvalidOperationException($"El tonelaje solicitado ({toneladas} Tn) supera la capacidad máxima de la embarcación {embarcacion.Nombre} ({capacidadMax} Tn).");
+                }
+            }
+            else
+            {
+                _logger.LogWarning("ValidarCapacidadEmbarcacionAsync — No se pudo resolver la embarcación '{Id}' en el catálogo maestro.", id);
+            }
+        }
+
+        public async Task<bool> TransferirCargaAsync(string viajeOrigenId, string cargaOrigenId, TransferirCargaDto dto)
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var viajeService = scope.ServiceProvider.GetRequiredService<IViajeService>();
+
+            var (docOrigen, travelIdOrigen) = await viajeService.GetViajeDetalleByIdAsync(viajeOrigenId);
+            var (docDestino, travelIdDestino) = await viajeService.GetViajeDetalleByIdAsync(dto.DestinoViajeId);
+
+            if (docOrigen == null || docDestino == null)
+            {
+                _logger.LogWarning("TransferirCargaAsync: No se encontró detalle operativo para el viaje origen o destino.");
+                return false;
+            }
+
+            await ViajeService.ThrowIfViajeFinalizadoAsync(viajeOrigenId);
+            await ViajeService.ThrowIfViajeFinalizadoAsync(dto.DestinoViajeId);
+
+            var ultimaEtapaOrigen = docOrigen.Etapas?.LastOrDefault();
+            var barcazaOrigen = ultimaEtapaOrigen?.Barcazas?.FirstOrDefault(b => b.Nombre == cargaOrigenId);
+
+            if (barcazaOrigen == null)
+            {
+                _logger.LogWarning("TransferirCargaAsync: No se encontró la barcaza origen '{CargaOrigenId}' en el viaje '{ViajeOrigenId}'.", cargaOrigenId, viajeOrigenId);
+                return false;
+            }
+
+            var ultimaEtapaDestino = docDestino.Etapas?.LastOrDefault();
+            if (ultimaEtapaDestino == null)
+            {
+                docDestino.Etapas ??= new List<EtapaMongo>();
+                ultimaEtapaDestino = new EtapaMongo { EtapaId = 1, Barcazas = new List<BarcazaMongo>() };
+                docDestino.Etapas.Add(ultimaEtapaDestino);
+            }
+            ultimaEtapaDestino.Barcazas ??= new List<BarcazaMongo>();
+
+            // Resolve name of destination vessel from catalog to match either numeric ID or string name.
+            string destBarcazaNombre = dto.DestinoBarcazaId.ToString();
+            string? matricula = null;
+            string? bandera = null;
+
+            var buqueInfo = await _serviceProvider.GetRequiredService<IBuqueService>().ObtenerBuquePorIdAsync(dto.DestinoBarcazaId);
+            if (buqueInfo != null)
+            {
+                destBarcazaNombre = buqueInfo.Nombre ?? destBarcazaNombre;
+                matricula = buqueInfo.Matricula;
+                bandera = buqueInfo.Bandera;
+            }
+
+            var barcazaDestino = ultimaEtapaDestino.Barcazas.FirstOrDefault(b =>
+                b.Nombre == dto.DestinoBarcazaId.ToString() ||
+                (b.Nombre != null && b.Nombre.Equals(destBarcazaNombre, StringComparison.OrdinalIgnoreCase)));
+
+            double nuevoTonelajeDestino = (barcazaDestino?.Cantidad ?? 0) + dto.Tonelaje;
+
+            await ValidarCapacidadEmbarcacionAsync(destBarcazaNombre, docDestino.VesselName, nuevoTonelajeDestino);
+
+            bool exitoOracle = false;
+            try
+            {
+                using var connection = new OracleConnection(_oracleConnectionString);
+                var parameters = new OracleDynamicParameters();
+                parameters.Add("p_VIAJE_ORIGEN_ID", travelIdOrigen, OracleDbType.Int64, ParameterDirection.Input);
+                parameters.Add("p_BARCAZA_ORIGEN_ID", cargaOrigenId, OracleDbType.Varchar2, ParameterDirection.Input);
+                parameters.Add("p_VIAJE_DESTINO_ID", travelIdDestino, OracleDbType.Int64, ParameterDirection.Input);
+                parameters.Add("p_BARCAZA_DESTINO_ID", dto.DestinoBarcazaId.ToString(), OracleDbType.Varchar2, ParameterDirection.Input);
+                parameters.Add("p_TONELADAS", dto.Tonelaje, OracleDbType.Double, ParameterDirection.Input);
+                parameters.Add("p_RESULTADO", dbType: OracleDbType.Int32, direction: ParameterDirection.Output);
+
+                await connection.ExecuteAsync(
+                    "PKG_MBPC_CARGAS.SP_TRANSFERIR_CARGA", parameters, commandType: CommandType.StoredProcedure);
+                exitoOracle = parameters.Get<int>("p_RESULTADO") == 1;
+            }
+            catch (OracleException ex)
+            {
+                if (!_env.IsDevelopment()) throw;
+                _logger.LogWarning(ex, "[DEV BYPASS] OracleException en TransferirCargaAsync. Marcando éxito.");
+                exitoOracle = true;
+            }
+
+            if (exitoOracle)
+            {
+                try
+                {
+                    var anteriorCantidadOrigen = barcazaOrigen.Cantidad ?? 0;
+                    barcazaOrigen.Cantidad = Math.Max(0, anteriorCantidadOrigen - dto.Tonelaje);
+                    if (barcazaOrigen.Cantidad == 0)
+                    {
+                        barcazaOrigen.Carga = "EN LASTRE";
+                        barcazaOrigen.Descargada = true;
+                    }
+
+                    var filtroIdOrigen = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, docOrigen.Id);
+                    await _detailsCollection.ReplaceOneAsync(filtroIdOrigen, docOrigen);
+                    await RegistrarEventoCargaDirectoAsync(docOrigen, TipoEventoViaje.CARGA_TRANSFERIDA,
+                        $"Transbordo origen: Se transfirieron {dto.Tonelaje} Tn desde la barcaza '{cargaOrigenId}' hacia viaje '{dto.DestinoViajeId}'.",
+                        anteriorCantidadOrigen.ToString(), barcazaOrigen.Cantidad.ToString());
+
+                    if (barcazaDestino != null)
+                    {
+                        var anteriorCantidadDestino = barcazaDestino.Cantidad ?? 0;
+                        barcazaDestino.Cantidad = nuevoTonelajeDestino;
+                        barcazaDestino.Descargada = false;
+                        if (barcazaDestino.Carga == "EN LASTRE" || string.IsNullOrWhiteSpace(barcazaDestino.Carga) || barcazaDestino.Carga == "A Definir")
+                        {
+                            barcazaDestino.Carga = barcazaOrigen.Carga;
+                            barcazaDestino.MercaderiaId = barcazaOrigen.MercaderiaId;
+                        }
+
+                        var filtroIdDestino = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, docDestino.Id);
+                        await _detailsCollection.ReplaceOneAsync(filtroIdDestino, docDestino);
+                        await RegistrarEventoCargaDirectoAsync(docDestino, TipoEventoViaje.CARGA_TRANSFERIDA,
+                            $"Transbordo destino: Se recibieron {dto.Tonelaje} Tn en la barcaza '{barcazaDestino.Nombre}' desde viaje '{viajeOrigenId}'.",
+                            anteriorCantidadDestino.ToString(), barcazaDestino.Cantidad.ToString());
+                    }
+                    else
+                    {
+                        var nuevaBarcaza = new BarcazaMongo
+                        {
+                            Nombre = destBarcazaNombre,
+                            Carga = barcazaOrigen.Carga,
+                            Cantidad = dto.Tonelaje,
+                            Unidad = barcazaOrigen.Unidad ?? "Tn",
+                            MercaderiaId = barcazaOrigen.MercaderiaId,
+                            Bandera = bandera,
+                            Matricula = matricula,
+                            MuelleActual = null,
+                            Descargada = false
+                        };
+
+                        ultimaEtapaDestino.Barcazas.Add(nuevaBarcaza);
+                        var filtroIdDestino = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, docDestino.Id);
+                        await _detailsCollection.ReplaceOneAsync(filtroIdDestino, docDestino);
+                        await RegistrarEventoCargaDirectoAsync(docDestino, TipoEventoViaje.CARGA_TRANSFERIDA,
+                            $"Transbordo destino: Barcaza '{destBarcazaNombre}' creada con {dto.Tonelaje} Tn recibidas desde viaje '{viajeOrigenId}'.",
+                            null, dto.Tonelaje.ToString());
+                    }
+
+                    _cache.Remove($"{CacheKeyPrefixCargas}{viajeOrigenId}");
+                    _cache.Remove($"{CacheKeyPrefixCargas}{dto.DestinoViajeId}");
+                    InvalidarCacheViajePorBuque(docOrigen.VesselName);
+                    InvalidarCacheViajePorBuque(docDestino.VesselName);
+                }
+                catch (Exception mongoEx)
+                {
+                    _logger.LogError(mongoEx, "Fallo al sincronizar MongoDB durante el transbordo de carga.");
+                }
+            }
+
+            return exitoOracle;
+        }
+
+        public async Task<bool> RectificarCargaAsync(string viajeId, string cargaId, RectificarCargaDto dto)
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var viajeService = scope.ServiceProvider.GetRequiredService<IViajeService>();
+
+            var (doc, travelId) = await viajeService.GetViajeDetalleByIdAsync(viajeId);
+            if (doc == null)
+            {
+                _logger.LogWarning("RectificarCargaAsync: No se encontró detalle operativo para ViajeId='{ViajeId}'.", viajeId);
+                return false;
+            }
+
+            await ViajeService.ThrowIfViajeFinalizadoAsync(viajeId, permitirRectificacion: true);
+
+            await ValidarCapacidadEmbarcacionAsync(cargaId, doc.VesselName, dto.Tonelaje);
+
+            bool exitoOracle = false;
+            try
+            {
+                using var connection = new OracleConnection(_oracleConnectionString);
+                var parameters = new OracleDynamicParameters();
+                parameters.Add("p_VIAJE_ID", travelId, OracleDbType.Int64, ParameterDirection.Input);
+                parameters.Add("p_BARCAZA_ID", cargaId, OracleDbType.Varchar2, ParameterDirection.Input);
+                parameters.Add("p_TONELAJE", dto.Tonelaje, OracleDbType.Double, ParameterDirection.Input);
+                parameters.Add("p_MOTIVO", dto.Motivo, OracleDbType.Varchar2, ParameterDirection.Input);
+                parameters.Add("p_RESULTADO", dbType: OracleDbType.Int32, direction: ParameterDirection.Output);
+
+                await connection.ExecuteAsync(
+                    "PKG_MBPC_CARGAS.SP_RECTIFICAR_CARGA", parameters, commandType: CommandType.StoredProcedure);
+                exitoOracle = parameters.Get<int>("p_RESULTADO") == 1;
+            }
+            catch (OracleException ex)
+            {
+                if (!_env.IsDevelopment()) throw;
+                _logger.LogWarning(ex, "[DEV BYPASS] OracleException en RectificarCargaAsync. Marcando éxito.");
+                exitoOracle = true;
+            }
+
+            if (exitoOracle)
+            {
+                try
+                {
+                    var ultimaEtapa = doc.Etapas?.LastOrDefault();
+                    var barcazaTarget = ultimaEtapa?.Barcazas?.FirstOrDefault(b => b.Nombre == cargaId);
+                    if (barcazaTarget is not null)
+                    {
+                        var anteriorCantidad = barcazaTarget.Cantidad ?? 0;
+                        barcazaTarget.Cantidad = dto.Tonelaje;
+                        if (dto.Tonelaje == 0)
+                        {
+                            barcazaTarget.Carga = "EN LASTRE";
+                            barcazaTarget.Descargada = true;
+                        }
+                        else
+                        {
+                            barcazaTarget.Descargada = false;
+                        }
+
+                        var filtroId = Builders<ViajeDetalleMongo>.Filter.Eq(d => d.Id, doc.Id);
+                        await _detailsCollection.ReplaceOneAsync(filtroId, doc);
+
+                        await RegistrarEventoCargaDirectoAsync(doc, TipoEventoViaje.CARGA_MODIFICADA,
+                            $"Rectificación histórica para barcaza '{cargaId}'. Motivo: {dto.Motivo}. Tonelaje anterior: {anteriorCantidad} Tn, Nuevo: {dto.Tonelaje} Tn.",
+                            anteriorCantidad.ToString(), dto.Tonelaje.ToString());
+
+                        _cache.Remove($"{CacheKeyPrefixCargas}{viajeId}");
+                        InvalidarCacheViajePorBuque(doc.VesselName);
+                    }
+                    else
+                    {
+                        _logger.LogWarning("RectificarCargaAsync: Barcaza '{CargaId}' no encontrada en el viaje.", cargaId);
+                    }
+                }
+                catch (Exception mongoEx)
+                {
+                    _logger.LogError(mongoEx, "Fallo al sincronizar MongoDB (RectificarCarga) para la barcaza '{CargaId}'.", cargaId);
+                }
+            }
+
+            return exitoOracle;
+        }
+
         private async Task RegistrarEventoCargaDirectoAsync(ViajeDetalleMongo doc, TipoEventoViaje tipo, string detalle, string? anterior = null, string? nuevo = null)
         {
             try
@@ -1313,54 +1615,6 @@ namespace Mbpc.Api.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error al registrar evento de carga directo '{Tipo}' para el viaje '{Id}'.", tipo, doc.Id);
-            }
-        }
-    }
-
-    public sealed class OracleDynamicParameters : SqlMapper.IDynamicParameters
-    {
-        private readonly List<OracleParameterInfo> _params = new();
-
-        private sealed class OracleParameterInfo
-        {
-            public required string             Name      { get; init; }
-            public          object?            Value     { get; init; }
-            public required OracleDbType       DbType    { get; init; }
-            public required ParameterDirection Direction { get; init; }
-        }
-
-        public void Add(string name, object? value, OracleDbType dbType,
-                        ParameterDirection direction = ParameterDirection.Input)
-            => _params.Add(new OracleParameterInfo
-            {
-                Name      = name,
-                Value     = value,
-                DbType    = dbType,
-                Direction = direction
-            });
-
-        public void Add(string name, OracleDbType dbType, ParameterDirection direction)
-            => _params.Add(new OracleParameterInfo
-            {
-                Name      = name,
-                Value     = null,
-                DbType    = dbType,
-                Direction = direction
-            });
-
-        void SqlMapper.IDynamicParameters.AddParameters(IDbCommand command, SqlMapper.Identity identity)
-        {
-            if (command is not OracleCommand oracleCmd)
-                throw new InvalidOperationException(
-                    "OracleDynamicParameters solo puede usarse con OracleCommand.");
-
-            foreach (var p in _params)
-            {
-                var oracleParam = oracleCmd.Parameters.Add(p.Name, p.DbType);
-                oracleParam.Direction = p.Direction;
-
-                if (p.Value is not null)
-                    oracleParam.Value = p.Value;
             }
         }
     }

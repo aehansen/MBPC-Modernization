@@ -867,7 +867,7 @@ namespace Mbpc.Api.Services
             return true;
         }
 
-        public async Task ThrowIfViajeFinalizadoAsync(string viajeId)
+        public async Task ThrowIfViajeFinalizadoAsync(string viajeId, bool permitirRectificacion = false)
         {
             var filtro = BuildFiltroViaje(viajeId);
             var viajeActual = await _viajesCollection.Find(filtro).FirstOrDefaultAsync();
@@ -876,7 +876,10 @@ namespace Mbpc.Api.Services
                 if (viajeActual.NavegationStatusDesc != null && 
                     viajeActual.NavegationStatusDesc.Equals(EstadoEtapa.Finalizado.ToString(), StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new InvalidOperationException("El viaje se encuentra finalizado. No se permiten modificaciones.");
+                    if (!permitirRectificacion)
+                    {
+                        throw new InvalidOperationException("El viaje se encuentra finalizado. No se permiten modificaciones.");
+                    }
                 }
             }
         }

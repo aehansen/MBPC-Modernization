@@ -40,5 +40,10 @@ namespace Mbpc.Api.DTOs
         /// Null indica que el buque es visible para todas las costeras.
         /// </summary>
         public string? Costera { get; set; }
+
+        /// <summary>
+        /// Capacidad de carga en toneladas.
+        /// </summary>
+        public double? CapacidadTn { get; set; }
     }
 }
