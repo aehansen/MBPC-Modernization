@@ -344,6 +344,72 @@ public sealed class ConvoyController : ControllerBase
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // POST /api/convoyes/viaje/{viajeId}/fondear-masivo
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Fondea múltiples barcazas en lote para un convoy.
+    /// </summary>
+    /// <param name="viajeId">Identificador del viaje.</param>
+    /// <param name="request">Payload con los IDs de barcazas y zona de fondeo.</param>
+    /// <param name="ct">Token de cancelación.</param>
+    /// <returns>
+    /// <c>200 OK</c> si la operación fue exitosa.
+    /// <c>400 Bad Request</c> si el payload es inválido o la transición es ilegal.
+    /// <c>404 Not Found</c> si el viaje no existe.
+    /// </returns>
+    [HttpPost("viaje/{viajeId}/fondear-masivo")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status404NotFound)]
+    [ProducesResponseType(typeof(ProblemDetails), StatusCodes.Status500InternalServerError)]
+    public async Task<IActionResult> FondearBarcazasMasivo(
+        [FromRoute] string viajeId,
+        [FromBody]  FondearBarcazasRequest request,
+        CancellationToken ct)
+    {
+        try
+        {
+            await _convoyService.FondearBarcazasAsync(viajeId, request, ct);
+            return Ok(new { mensaje = "Barcazas fondeadas correctamente." });
+        }
+        catch (ValidationException ex)
+        {
+            return BadRequest(CrearProblem(
+                status: StatusCodes.Status400BadRequest,
+                title:  "Datos de fondeo inválidos",
+                detail: ex.Message));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(CrearProblem(
+                status: StatusCodes.Status400BadRequest,
+                title:  "Operación de fondeo no permitida",
+                detail: ex.Message));
+        }
+        catch (KeyNotFoundException ex)
+        {
+            return NotFound(CrearProblem(
+                status: StatusCodes.Status404NotFound,
+                title:  "Viaje no encontrado",
+                detail: ex.Message));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "Error inesperado al fondear barcazas en lote para el ViajeId={ViajeId}",
+                viajeId);
+
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                CrearProblem(
+                    status: StatusCodes.Status500InternalServerError,
+                    title:  "Error interno del servidor",
+                    detail: "No se pudo completar la operación de fondeo masivo. Reintente más tarde."));
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // HELPER PRIVADO
     // ─────────────────────────────────────────────────────────────────────────
 

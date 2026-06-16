@@ -71,9 +71,13 @@ public sealed class ConvoyManagerService : IConvoyManagerService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(viajeId);
 
-        var detalle = await _detallesCollection
-            .Find(Builders<ViajeDetalleMongo>.Filter.Eq(x => x.Id, viajeId))
-            .FirstOrDefaultAsync(ct);
+        ViajeDetalleMongo? detalle = null;
+        if (viajeId.Length == 24 && MongoDB.Bson.ObjectId.TryParse(viajeId, out _))
+        {
+            detalle = await _detallesCollection
+                .Find(Builders<ViajeDetalleMongo>.Filter.Eq(x => x.Id, viajeId))
+                .FirstOrDefaultAsync(ct);
+        }
 
         long travelId = detalle?.IdViaje ?? 0;
 
@@ -189,6 +193,98 @@ public sealed class ConvoyManagerService : IConvoyManagerService
         if (!exito)
             throw new InvalidOperationException(
                 "El sistema legacy rechazó la operación de fondeo.");
+    }
+
+    public async Task FondearBarcazasAsync(
+        string voyageId,
+        FondearBarcazasRequest request,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(voyageId);
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (request.BarcazasIds is null || request.BarcazasIds.Count == 0)
+            throw new ValidationException("Debe especificar al menos una barcaza para fondear.");
+
+        if (string.IsNullOrWhiteSpace(request.ZonaFondeo))
+            throw new ValidationException("La zona de fondeo es requerida.");
+
+        _logger.LogInformation(
+            "Iniciando fondeo en lote: ViajeId={ViajeId} | Barcazas=[{Barcazas}] | Zona={Zona}",
+            voyageId, string.Join(',', request.BarcazasIds), request.ZonaFondeo);
+
+        // 1. Cargar el detalle del viaje desde MongoDB
+        var (detalle, travelId) = await _viajeService.GetViajeDetalleByIdAsync(voyageId, ct);
+        if (detalle is null)
+        {
+            throw new KeyNotFoundException($"No se encontró el detalle operativo del viaje '{voyageId}'.");
+        }
+
+        var etapa = detalle.Etapas?.LastOrDefault()
+            ?? throw new InvalidOperationException($"El viaje {voyageId} no posee etapas activas. No es posible fondear barcazas.");
+
+        // 2. Iterar y sincronizar con Oracle vía Dapper (con try-catch para OracleException en DEV)
+        foreach (var barcazaId in request.BarcazasIds)
+        {
+            try
+            {
+                if (!_env.IsDevelopment())
+                {
+                    using var connection = new OracleConnection(_oracleConnectionString);
+                    var parameters = new DynamicParameters();
+                    parameters.Add("p_ID_BARCAZA",  barcazaId);
+                    parameters.Add("p_ZONA_FONDEO", request.ZonaFondeo);
+                    parameters.Add("p_RESULTADO",   dbType: DbType.Int32, direction: ParameterDirection.Output);
+
+                    await connection.ExecuteAsync(
+                        "PKG_MBPC_CARGAS.SP_FONDEAR", parameters, commandType: CommandType.StoredProcedure);
+
+                    var exitoOracle = parameters.Get<int>("p_RESULTADO") == 1;
+                    if (!exitoOracle)
+                    {
+                        throw new InvalidOperationException($"El procedimiento almacenado retornó código de falla para la barcaza {barcazaId}.");
+                    }
+                }
+            }
+            catch (OracleException oraEx)
+            {
+                if (_env.IsDevelopment())
+                {
+                    _logger.LogWarning(oraEx, "DEV BYPASS: Falló la llamada a Oracle para BarcazaId={BarcazaId} en Desarrollo. Continuando.", barcazaId);
+                }
+                else
+                {
+                    _logger.LogError(oraEx, "Falla al fondear barcaza {BarcazaId} en Oracle en producción.", barcazaId);
+                    throw;
+                }
+            }
+        }
+
+        // 3. Mutar en memoria las barcazas de la última etapa
+        if (etapa.Barcazas is not null)
+        {
+            foreach (var barcazaId in request.BarcazasIds)
+            {
+                var barcazaTarget = etapa.Barcazas.FirstOrDefault(b => b.Nombre == barcazaId);
+                if (barcazaTarget is not null)
+                {
+                    barcazaTarget.MuelleActual = request.ZonaFondeo;
+                }
+            }
+        }
+
+        // 4. Guardar de forma atómica en MongoDB
+        await _detallesCollection.ReplaceOneAsync(
+            Builders<ViajeDetalleMongo>.Filter.Eq(x => x.Id, detalle.Id),
+            detalle,
+            cancellationToken: ct);
+
+        // 5. Invalidar caché
+        _cache.Remove($"cargas_viaje_{voyageId}");
+        
+        _logger.LogInformation(
+            "FondearBarcazasAsync: {Count} barcaza(s) fondeadas en MongoDB para ViajeId={ViajeId}.",
+            request.BarcazasIds.Count, voyageId);
     }
 
     public async Task<bool> AdjuntarBarcazasAsync(
@@ -571,7 +667,9 @@ public sealed class ConvoyManagerService : IConvoyManagerService
             MuelleActual: b.MuelleActual,
             Estado:       string.IsNullOrWhiteSpace(b.MuelleActual)
                               ? EstadoBarcaza.EnTransito
-                              : EstadoBarcaza.Amarrada,
+                              : b.MuelleActual.Contains("Fondea", StringComparison.OrdinalIgnoreCase) || b.MuelleActual.Contains("fondeo", StringComparison.OrdinalIgnoreCase)
+                                  ? EstadoBarcaza.Fondeada
+                                  : EstadoBarcaza.Amarrada,
             NivelRiesgo:  nivelRiesgo
         );
     }

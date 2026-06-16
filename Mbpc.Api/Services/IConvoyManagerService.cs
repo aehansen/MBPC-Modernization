@@ -65,4 +65,13 @@ public interface IConvoyManagerService
     /// <exception cref="KeyNotFoundException">Si el viaje no existe en MongoDB.</exception>
     /// <exception cref="InvalidOperationException">Si el viaje no tiene etapas activas.</exception>
     Task<bool> SepararConvoyAsync(string viajeId, SepararConvoyRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// Fondea una o más barcazas de un convoy en curso, actualizando sus estados en MongoDB
+    /// y ejecutando la operación de fondeo en el SP en Oracle.
+    /// </summary>
+    /// <param name="viajeId">Identificador del viaje (ObjectId de Mongo).</param>
+    /// <param name="request">Lista de barcazas a fondear y zona de fondeo.</param>
+    /// <param name="ct">Token de cancelación.</param>
+    Task FondearBarcazasAsync(string viajeId, FondearBarcazasRequest request, CancellationToken ct = default);
 }

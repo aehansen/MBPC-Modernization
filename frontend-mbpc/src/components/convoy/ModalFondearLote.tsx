@@ -1,8 +1,8 @@
-// src/components/convoy/ModalSepararBarcaza.tsx
-// Hito 10.6 — Liberar/separar múltiples barcazas del convoy en lote (Actualizado Hito 2)
+// src/components/convoy/ModalFondearLote.tsx
+// Hito 2 — Modal de fondeo masivo de barcazas del convoy en lote
 
 import { useState, type FormEvent } from 'react';
-import { useSepararConvoy } from '@/hooks/useGestionConvoy';
+import { useFondearBarcazasMasivo } from '@/hooks/useGestionConvoy';
 import type { DotNetProblemDetails } from '@/hooks/useGestionConvoy';
 import type { BarcazaConvoyDto } from '@/types/convoy.types';
 import { isAxiosError } from 'axios';
@@ -28,7 +28,7 @@ function resolverMensajeError(error: Error | null): string {
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
-interface ModalSepararBarcazaProps {
+interface ModalFondearLoteProps {
   isOpen: boolean;
   viajeId: string;
   barcazasIds: string[];
@@ -40,18 +40,18 @@ interface ModalSepararBarcazaProps {
 
 // ─── Componente ───────────────────────────────────────────────────────────────
 
-export function ModalSepararBarcaza({
+export function ModalFondearLote({
   isOpen,
   viajeId,
   barcazasIds,
   barcazas,
   onClose,
   onSuccess,
-}: ModalSepararBarcazaProps) {
-  const [ubicacion, setUbicacion] = useState('');
+}: ModalFondearLoteProps) {
+  const [zonaFondeo, setZonaFondeo] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
 
-  const mutSeparar = useSepararConvoy();
+  const mutFondear = useFondearBarcazasMasivo();
 
   if (!isOpen) return null;
 
@@ -61,17 +61,17 @@ export function ModalSepararBarcaza({
     e.preventDefault();
     setLocalError(null);
 
-    if (!ubicacion.trim()) {
-      setLocalError('Ingresá la ubicación de separación antes de continuar.');
+    if (!zonaFondeo.trim()) {
+      setLocalError('Ingresá la zona de fondeo antes de continuar.');
       return;
     }
 
-    mutSeparar.mutate(
+    mutFondear.mutate(
       {
         viajeId,
         payload: {
           barcazasIds,
-          ubicacion: ubicacion.trim(),
+          zonaFondeo: zonaFondeo.trim(),
         },
       },
       {
@@ -84,14 +84,14 @@ export function ModalSepararBarcaza({
   };
 
   const handleClose = () => {
-    if (mutSeparar.isPending) return;
-    setUbicacion('');
+    if (mutFondear.isPending) return;
+    setZonaFondeo('');
     setLocalError(null);
-    mutSeparar.reset();
+    mutFondear.reset();
     onClose();
   };
 
-  const errorMsg = localError ?? (mutSeparar.error ? resolverMensajeError(mutSeparar.error) : null);
+  const errorMsg = localError ?? (mutFondear.error ? resolverMensajeError(mutFondear.error) : null);
 
   // ─── Render ─────────────────────────────────────────────────────────────────
 
@@ -100,7 +100,7 @@ export function ModalSepararBarcaza({
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
-      aria-labelledby="modal-separar-title"
+      aria-labelledby="modal-fondear-title"
       onClick={(e) => {
         if (e.target === e.currentTarget) handleClose();
       }}
@@ -109,15 +109,15 @@ export function ModalSepararBarcaza({
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-700/60 bg-slate-800/60">
           <div className="flex items-center gap-3">
-            <span className="text-2xl" role="img" aria-label="Separar">🔓</span>
+            <span className="text-2xl" role="img" aria-label="Fondear">⚓</span>
             <div>
               <h2
-                id="modal-separar-title"
+                id="modal-fondear-title"
                 className="text-base font-bold text-slate-100 leading-tight"
               >
-                Liberar del Convoy
+                Fondear Barcazas
               </h2>
-              <p className="text-xs text-cyan-400 font-mono mt-0.5">
+              <p className="text-xs text-amber-500 font-mono mt-0.5">
                 {barcazasIds.length} barcaza{barcazasIds.length !== 1 ? 's' : ''} seleccionada{barcazasIds.length !== 1 ? 's' : ''}
               </p>
             </div>
@@ -125,7 +125,7 @@ export function ModalSepararBarcaza({
           <button
             type="button"
             onClick={handleClose}
-            disabled={mutSeparar.isPending}
+            disabled={mutFondear.isPending}
             className="text-slate-500 hover:text-slate-200 transition-colors disabled:opacity-40 p-1"
             aria-label="Cerrar modal"
           >
@@ -138,14 +138,14 @@ export function ModalSepararBarcaza({
         {/* Body */}
         <form onSubmit={handleSubmit} noValidate>
           <div className="px-6 py-5 space-y-4">
-            {/* Lista de barcazas a separar */}
+            {/* Lista de barcazas a fondear */}
             <div className="flex flex-col gap-2 p-3 rounded-xl bg-slate-800/60 border border-slate-700/50">
               <div className="flex items-start gap-3">
                 <svg className="w-4 h-4 text-slate-500 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  Se separarán las siguientes barcazas del convoy activo de forma irreversible dentro del viaje actual:
+                  Se fondearán las siguientes barcazas del convoy activo. Esta operación actualizará sus estados y ubicaciones:
                 </p>
               </div>
               <ul className="mt-2 pl-7 list-disc text-xs text-slate-300 space-y-1 max-h-24 overflow-y-auto font-medium font-mono">
@@ -170,34 +170,34 @@ export function ModalSepararBarcaza({
               </div>
             )}
 
-            {/* Ubicación */}
+            {/* Zona de Fondeo */}
             <div>
               <label
-                htmlFor="ubicacion"
+                htmlFor="zonaFondeo"
                 className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5"
               >
-                Ubicación de Separación
+                Zona de Fondeo
               </label>
               <input
-                id="ubicacion"
-                name="ubicacion"
+                id="zonaFondeo"
+                name="zonaFondeo"
                 type="text"
                 required
                 maxLength={200}
-                value={ubicacion}
+                value={zonaFondeo}
                 onChange={(e) => {
-                  setUbicacion(e.target.value);
+                  setZonaFondeo(e.target.value);
                   setLocalError(null);
-                  mutSeparar.reset();
+                  mutFondear.reset();
                 }}
-                placeholder="Ej: Puerto Ibicuy - Muelle 3"
+                placeholder="Ej: Zona Fondeo Km 120 - KM 125"
                 className="w-full bg-slate-800 border border-slate-600 rounded-lg px-3 py-2.5
                            text-slate-200 placeholder-slate-600 text-sm
-                           focus:outline-none focus:ring-2 focus:ring-cyan-500/60 focus:border-cyan-500/60
+                           focus:outline-none focus:ring-2 focus:ring-amber-500/60 focus:border-amber-500/60
                            transition-all"
               />
               <p className="mt-1.5 text-xs text-slate-600">
-                Punto geográfico o nombre del lugar donde se realiza la maniobra.
+                Identificador de la zona habilitada para el fondeo de las barcazas.
               </p>
             </div>
           </div>
@@ -207,7 +207,7 @@ export function ModalSepararBarcaza({
             <button
               type="button"
               onClick={handleClose}
-              disabled={mutSeparar.isPending}
+              disabled={mutFondear.isPending}
               className="px-4 py-2 rounded-lg text-sm font-semibold text-slate-400 border border-slate-700
                          hover:bg-slate-700/60 hover:text-slate-200 disabled:opacity-40
                          transition-colors"
@@ -216,18 +216,18 @@ export function ModalSepararBarcaza({
             </button>
             <button
               type="submit"
-              disabled={mutSeparar.isPending}
-              className="px-5 py-2 rounded-lg text-sm font-bold text-white bg-slate-600
-                         hover:bg-slate-500 disabled:opacity-50 disabled:cursor-not-allowed
-                         transition-colors shadow-md shadow-slate-900/60 flex items-center gap-2"
+              disabled={mutFondear.isPending}
+              className="px-5 py-2 rounded-lg text-sm font-bold text-slate-900 bg-amber-500
+                         hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed
+                         transition-colors shadow-md shadow-amber-900/60 flex items-center gap-2"
             >
-              {mutSeparar.isPending && (
-                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              {mutFondear.isPending && (
+                <svg className="w-4 h-4 animate-spin text-slate-900" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
                 </svg>
               )}
-              {mutSeparar.isPending ? 'Liberando…' : '🔓 Liberar Barcazas'}
+              {mutFondear.isPending ? 'Fondeando…' : '⚓ Fondear Barcazas'}
             </button>
           </div>
         </form>
@@ -236,4 +236,4 @@ export function ModalSepararBarcaza({
   );
 }
 
-export default ModalSepararBarcaza;
+export default ModalFondearLote;

@@ -166,3 +166,33 @@ export function useSepararConvoy() {
     },
   });
 }
+
+// ---------------------------------------------------------------------------
+// Hook de Mutación — POST /api/convoyes/viaje/{viajeId}/fondear-masivo
+// ---------------------------------------------------------------------------
+export interface FondearBarcazasRequest {
+  barcazasIds: string[];
+  zonaFondeo: string;
+}
+
+interface FondearMasivoVariables {
+  viajeId: string;
+  payload: FondearBarcazasRequest;
+}
+
+export function useFondearBarcazasMasivo() {
+  const queryClient = useQueryClient();
+
+  return useMutation<void, Error, FondearMasivoVariables>({
+    mutationFn: async ({ viajeId, payload }) => {
+      await axiosInstance.post(
+        `/convoyes/viaje/${encodeURIComponent(viajeId)}/fondear-masivo`,
+        payload,
+      );
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: convoyKeys.all });
+      queryClient.invalidateQueries({ queryKey: cargasKeys.byViaje(variables.viajeId) }); // Invalidación cruzada
+    },
+  });
+}

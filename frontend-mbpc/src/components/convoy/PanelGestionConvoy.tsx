@@ -1,5 +1,5 @@
 // src/components/convoy/PanelGestionConvoy.tsx
-// Hito 10.4 — Orquestador principal de convoyes
+// Hito 10.4 — Orquestador principal de convoyes (Actualizado Hito 2 - Masivo)
 
 import { isAxiosError } from 'axios';
 import { useAdjuntarBarcazas } from '@/hooks/useGestionConvoy';
@@ -8,6 +8,7 @@ import type { ConvoyDto, EstadoBarcaza } from '@/types/convoy.types';
 import { useState } from 'react';
 import EmbarcacionSelect from "@/components/viajes/EmbarcacionSelect";
 import { ModalSepararBarcaza } from '@/components/convoy/ModalSepararBarcaza';
+import { ModalFondearLote } from '@/components/convoy/ModalFondearLote';
 
 // ============================================================================
 // DTOs
@@ -48,14 +49,22 @@ export interface PanelGestionConvoyProps {
 
 interface EstadoModalSeparar {
   abierto: boolean;
-  barcazaId: string;
-  barcazaNombre: string;
+  barcazasIds: string[];
+}
+
+interface EstadoModalFondearLote {
+  abierto: boolean;
+  barcazasIds: string[];
 }
 
 const MODAL_SEPARAR_INICIAL: EstadoModalSeparar = {
   abierto: false,
-  barcazaId: '',
-  barcazaNombre: '',
+  barcazasIds: [],
+};
+
+const MODAL_FONDEAR_LOTE_INICIAL: EstadoModalFondearLote = {
+  abierto: false,
+  barcazasIds: [],
 };
 
 // ============================================================================
@@ -225,8 +234,12 @@ export default function PanelGestionConvoy({
   // ─── Estado del Borrador (Hito 10.4) ──────────────────────────────────────
   const [borradorEmbarcaciones, setBorradorEmbarcaciones] = useState<EmbarcacionBorrador[]>([]);
 
+  // ─── Estado de Selección Múltiple (Hito 2 - Masivo) ─────────────────────────
+  const [selectedBarcazas, setSelectedBarcazas] = useState<string[]>([]);
+
   // ─── Estado de los Modales ─────────────────────────────────────────────────
   const [modalSeparar, setModalSeparar] = useState<EstadoModalSeparar>(MODAL_SEPARAR_INICIAL);
+  const [modalFondearLote, setModalFondearLote] = useState<EstadoModalFondearLote>(MODAL_FONDEAR_LOTE_INICIAL);
 
   // ─── Mutaciones ────────────────────────────────────────────────────────────
   const mutAdjuntar = useAdjuntarBarcazas();
@@ -284,8 +297,29 @@ export default function PanelGestionConvoy({
 
   // ─── Apertura de Modales ───────────────────────────────────────────────────
 
-  function abrirModalSeparar(barcazaId: string, barcazaNombre: string): void {
-    setModalSeparar({ abierto: true, barcazaId, barcazaNombre });
+  function abrirModalSeparar(barcazasIds: string[]): void {
+    setModalSeparar({ abierto: true, barcazasIds });
+  }
+
+  function abrirModalFondearLote(barcazasIds: string[]): void {
+    setModalFondearLote({ abierto: true, barcazasIds });
+  }
+
+  // ─── Lógica de Selección ───────────────────────────────────────────────────
+  function handleToggleSelect(barcazaId: string) {
+    setSelectedBarcazas((prev) =>
+      prev.includes(barcazaId)
+        ? prev.filter((id) => id !== barcazaId)
+        : [...prev, barcazaId]
+    );
+  }
+
+  function handleToggleSelectAll() {
+    if (selectedBarcazas.length === convoy.barcazas.length) {
+      setSelectedBarcazas([]);
+    } else {
+      setSelectedBarcazas(convoy.barcazas.map((b) => b.id));
+    }
   }
 
   // ─── Derivados ─────────────────────────────────────────────────────────────
@@ -301,7 +335,7 @@ export default function PanelGestionConvoy({
 
   return (
     <>
-      <div className="bg-slate-900 rounded-xl border border-slate-700/60 overflow-hidden font-sans shadow-lg">
+      <div className="bg-slate-900 rounded-xl border border-slate-700/60 overflow-hidden font-sans shadow-lg pb-16 relative">
         <div className="p-6 space-y-6">
 
           {/* ── Alertas de error de mutación ── */}
@@ -431,12 +465,22 @@ export default function PanelGestionConvoy({
                   SECCIÓN: Barcazas actuales del convoy
               ────────────────────────────────────────────────────────────── */}
           <section className="space-y-4">
-            <div className="flex items-center gap-2">
-              <div className="h-px flex-1 bg-slate-700/60" />
-              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest px-2">
-                Barcazas en Convoy
-              </h3>
-              <div className="h-px flex-1 bg-slate-700/60" />
+            <div className="flex justify-between items-center">
+              <div className="flex items-center gap-2 flex-1">
+                <div className="h-px flex-1 bg-slate-700/60" />
+                <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest px-2">
+                  Barcazas en Convoy
+                </h3>
+                <div className="h-px flex-1 bg-slate-700/60" />
+              </div>
+              {convoy.barcazas.length > 0 && (
+                <button
+                  onClick={handleToggleSelectAll}
+                  className="ml-3 text-[11px] font-bold uppercase tracking-wider text-cyan-500 hover:text-cyan-400 transition-colors"
+                >
+                  {selectedBarcazas.length === convoy.barcazas.length ? "Deseleccionar todas" : "Seleccionar todas"}
+                </button>
+              )}
             </div>
 
             {convoy.barcazas.length === 0 ? (
@@ -451,13 +495,28 @@ export default function PanelGestionConvoy({
                   const barcazaVisual = esNumerico(b.nombre)
                     ? (b.matricula ? b.matricula : `BZA-${b.nombre}`)
                     : b.nombre;
+                  const isSelected = selectedBarcazas.includes(b.id);
 
                   return (
                     <div
                       key={b.id}
-                      className="bg-slate-800/60 rounded-xl border border-slate-700/60 p-5 space-y-3 hover:border-cyan-500/30 transition-colors"
+                      className={`relative bg-slate-800/60 rounded-xl border p-5 space-y-3 hover:border-cyan-500/30 transition-all ${
+                        isSelected 
+                          ? 'border-cyan-500 bg-slate-800/80 shadow-md ring-1 ring-cyan-500/30' 
+                          : 'border-slate-700/60'
+                      }`}
                     >
-                      <div className="flex justify-between items-start">
+                      {/* Checkbox de Selección */}
+                      <div className="absolute top-3 left-3 z-10">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => handleToggleSelect(b.id)}
+                          className="w-4.5 h-4.5 rounded border-slate-600 bg-slate-850 text-cyan-600 focus:ring-cyan-500 focus:ring-offset-slate-900 focus:ring-2 cursor-pointer"
+                        />
+                      </div>
+
+                      <div className="flex justify-between items-start pl-6">
                         <div className="min-w-0 pr-2">
                           <h3 className="font-bold text-slate-100 truncate" title={barcazaVisual}>
                             {barcazaVisual}
@@ -497,14 +556,20 @@ export default function PanelGestionConvoy({
                         </div>
                       </div>
 
-                      <div className="pt-3 border-t border-slate-700/50">
+                      <div className="pt-3 border-t border-slate-700/50 flex gap-2">
                         <button
-                          onClick={() => abrirModalSeparar(b.id, barcazaVisual)}
+                          onClick={() => abrirModalSeparar([b.id])}
                           disabled={!convoyPuedeLiberar}
                           title={!convoyPuedeLiberar ? "El convoy debe estar Amarrado o Fondeado para liberar" : "Liberar barcaza"}
-                          className="w-full bg-slate-700 text-slate-200 py-2 rounded-lg text-xs font-semibold hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                          className="flex-1 bg-slate-700 text-slate-200 py-2 rounded-lg text-xs font-semibold hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
                         >
-                          Liberar del Convoy
+                          Liberar
+                        </button>
+                        <button
+                          onClick={() => abrirModalFondearLote([b.id])}
+                          className="flex-1 bg-slate-800 text-amber-500 border border-amber-500/20 py-2 rounded-lg text-xs font-semibold hover:bg-amber-950/20 transition-all"
+                        >
+                          Fondear
                         </button>
                       </div>
                     </div>
@@ -514,15 +579,69 @@ export default function PanelGestionConvoy({
             )}
           </section>
         </div>
+
+        {/* ── Barra de Acciones en Lote ── */}
+        {selectedBarcazas.length > 0 && (
+          <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center justify-between gap-6 px-6 py-4 bg-slate-900/90 border border-slate-700/80 rounded-2xl shadow-2xl backdrop-blur-md w-[90%] max-w-xl animate-fade-in">
+            <div className="flex items-center gap-2">
+              <span className="w-5 h-5 rounded-full bg-cyan-500 text-slate-950 font-bold text-xs flex items-center justify-center">
+                {selectedBarcazas.length}
+              </span>
+              <p className="text-xs font-semibold text-slate-200">
+                Barcaza{selectedBarcazas.length !== 1 ? 's' : ''} seleccionada{selectedBarcazas.length !== 1 ? 's' : ''}
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setSelectedBarcazas([])}
+                className="text-xs text-slate-400 hover:text-slate-200 font-semibold px-2 py-1.5 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={!convoyPuedeLiberar}
+                onClick={() => abrirModalSeparar(selectedBarcazas)}
+                title={!convoyPuedeLiberar ? "El convoy debe estar Amarrado o Fondeado" : "Separar barcazas en lote"}
+                className="px-4 py-2 bg-slate-800 text-slate-200 border border-slate-700 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-xs font-bold rounded-lg transition-all"
+              >
+                Separar
+              </button>
+              <button
+                type="button"
+                onClick={() => abrirModalFondearLote(selectedBarcazas)}
+                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold rounded-lg transition-all shadow-md shadow-amber-900/20"
+              >
+                Fondear
+              </button>
+            </div>
+          </div>
+        )}
       </div>
+
       <ModalSepararBarcaza
         isOpen={modalSeparar.abierto}
         viajeId={viajeId}
-        barcazaId={modalSeparar.barcazaId}
-        barcazaNombre={modalSeparar.barcazaNombre}
+        barcazasIds={modalSeparar.barcazasIds}
+        barcazas={convoy.barcazas.filter((b) => modalSeparar.barcazasIds.includes(b.id))}
         onClose={() => setModalSeparar(MODAL_SEPARAR_INICIAL)}
         onSuccess={() => {
           setModalSeparar(MODAL_SEPARAR_INICIAL);
+          setSelectedBarcazas([]);
+          onRefreshConvoy();
+        }}
+      />
+
+      <ModalFondearLote
+        isOpen={modalFondearLote.abierto}
+        viajeId={viajeId}
+        barcazasIds={modalFondearLote.barcazasIds}
+        barcazas={convoy.barcazas.filter((b) => modalFondearLote.barcazasIds.includes(b.id))}
+        onClose={() => setModalFondearLote(MODAL_FONDEAR_LOTE_INICIAL)}
+        onSuccess={() => {
+          setModalFondearLote(MODAL_FONDEAR_LOTE_INICIAL);
+          setSelectedBarcazas([]);
           onRefreshConvoy();
         }}
       />

@@ -58,3 +58,22 @@ public sealed class SepararConvoyRequest
     [Required(ErrorMessage = "La ubicación es obligatoria.")]
     public string Ubicacion { get; init; } = string.Empty;
 }
+
+/// <summary>
+/// Payload para fondear múltiples barcazas de un convoy en lote.
+/// </summary>
+public sealed class FondearBarcazasRequest
+{
+    /// <summary>
+    /// Lista de identificadores de barcazas a fondear.
+    /// </summary>
+    [Required(ErrorMessage = "Debe especificar al menos una barcaza.")]
+    [MinLength(1, ErrorMessage = "La lista de barcazas no puede estar vacía.")]
+    public List<string> BarcazasIds { get; init; } = [];
+
+    /// <summary>
+    /// Zona de fondeo designada para las barcazas.
+    /// </summary>
+    [Required(ErrorMessage = "La zona de fondeo es obligatoria.")]
+    public string ZonaFondeo { get; init; } = string.Empty;
+}
