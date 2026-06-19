@@ -7,80 +7,114 @@ using MongoDB.Driver;
 using MongoDB.Driver.GeoJsonObjectModel;
 using Mbpc.Api.DTOs;
 using Mbpc.Api.Models.Mongo;
+using Microsoft.Extensions.Logging;
+using System.Text.Json.Serialization;
 
 namespace Mbpc.Api.Services
 {
     public class CosteraManagerService : ICosteraService
     {
         private readonly IMongoCollection<CosteraMongo> _costerasCollection;
-        private readonly string _jsonPath;
+        private readonly ILogger<CosteraManagerService> _logger;
+        private readonly string? _jsonPath;
 
-        public CosteraManagerService(IMongoDatabase database)
+        public CosteraManagerService(IMongoDatabase database, ILogger<CosteraManagerService> logger)
         {
             _costerasCollection = database.GetCollection<CosteraMongo>("Costeras");
+            _logger = logger;
             
-            var localPath = Path.Combine(Directory.GetCurrentDirectory(), "Data", "geocercas_costeras.json");
-            var baseDirectoryPath = Path.Combine(AppContext.BaseDirectory, "Data", "geocercas_costeras.json");
-            _jsonPath = File.Exists(localPath) ? localPath : baseDirectoryPath;
-        }
-
-        public async Task<IEnumerable<CosteraDto>> ObtenerLimitesJurisdiccionalesAsync()
-        {
-            if (File.Exists(_jsonPath))
+            var pathsToTry = new[]
             {
-                try
+                Path.Combine(Directory.GetCurrentDirectory(), "Data", "geocercas_costeras.json"),
+                Path.Combine(Directory.GetCurrentDirectory(), "Mbpc.Api", "Data", "geocercas_costeras.json"),
+                Path.Combine(AppContext.BaseDirectory, "Data", "geocercas_costeras.json"),
+                Path.Combine(AppContext.BaseDirectory, "geocercas_costeras.json")
+            };
+
+            foreach (var path in pathsToTry)
+            {
+                if (File.Exists(path))
                 {
-                    var jsonContent = await File.ReadAllTextAsync(_jsonPath);
-                    var options = new System.Text.Json.JsonSerializerOptions
-                    {
-                        PropertyNameCaseInsensitive = true
-                    };
-                    var collection = System.Text.Json.JsonSerializer.Deserialize<GeoJsonFeatureCollectionDto>(jsonContent, options);
-                    if (collection?.Features != null)
-                    {
-                        return collection.Features;
-                    }
-                }
-                catch (Exception)
-                {
-                    // Fallback a MongoDB
+                    _jsonPath = path;
+                    _logger.LogInformation("CosteraManagerService: Cargando geocercas desde archivo: '{Path}'", path);
+                    break;
                 }
             }
 
-            var listaDocumentos = await _costerasCollection.Find(_ => true).ToListAsync();
-            return listaDocumentos.Select(MapDocumentToDto).ToList();
+            if (_jsonPath == null)
+            {
+                _logger.LogWarning("CosteraManagerService: geocercas_costeras.json no encontrado en las rutas especificadas. Se utilizará MongoDB como fallback.");
+            }
         }
 
-        public async Task<CosteraDto?> ObtenerLimitePorCosteraIdAsync(int costeraId)
+        private class GeorefCosteraRecord
         {
-            if (File.Exists(_jsonPath))
+            [JsonPropertyName("id")]
+            public int Id { get; set; }
+            [JsonPropertyName("etiqueta")]
+            public string Etiqueta { get; set; } = null!;
+            [JsonPropertyName("lat")]
+            public double Lat { get; set; }
+            [JsonPropertyName("lng")]
+            public double Lng { get; set; }
+        }
+
+        private List<CosteraDto> LoadGeorefCosteras()
+        {
+            try
             {
-                try
+                var path = Path.Combine(Directory.GetCurrentDirectory(), "Data", "costeras_georreferenciadas.json");
+                if (!File.Exists(path))
                 {
-                    var jsonContent = await File.ReadAllTextAsync(_jsonPath);
-                    var options = new System.Text.Json.JsonSerializerOptions
+                    path = Path.Combine(Directory.GetCurrentDirectory(), "Mbpc.Api", "Data", "costeras_georreferenciadas.json");
+                }
+                if (!File.Exists(path))
+                {
+                    path = Path.Combine(AppContext.BaseDirectory, "Data", "costeras_georreferenciadas.json");
+                }
+                if (!File.Exists(path))
+                {
+                    _logger.LogWarning("LoadGeorefCosteras: costeras_georreferenciadas.json no encontrado.");
+                    return new List<CosteraDto>();
+                }
+
+                var json = File.ReadAllText(path);
+                var records = System.Text.Json.JsonSerializer.Deserialize<List<GeorefCosteraRecord>>(json);
+                if (records == null) return new List<CosteraDto>();
+
+                return records.Select(r => new CosteraDto
+                {
+                    Type = "Feature",
+                    Properties = new CosteraPropertiesDto
                     {
-                        PropertyNameCaseInsensitive = true
-                    };
-                    var collection = System.Text.Json.JsonSerializer.Deserialize<GeoJsonFeatureCollectionDto>(jsonContent, options);
-                    if (collection?.Features != null)
+                        CosteraId = r.Id,
+                        Nombre = r.Etiqueta
+                    },
+                    Geometry = new GeoJsonGeometryDto
                     {
-                        return collection.Features.FirstOrDefault(c => c.Properties.CosteraId == costeraId);
+                        Type = "Point",
+                        Coordinates = new double[] { r.Lng, r.Lat } // GeoJSON is [lng, lat]
                     }
-                }
-                catch (Exception)
-                {
-                    // Fallback a MongoDB
-                }
+                }).ToList();
             }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al cargar costeras_georreferenciadas.json");
+                return new List<CosteraDto>();
+            }
+        }
 
-            var documento = await _costerasCollection
-                .Find(c => c.CosteraId == costeraId)
-                .FirstOrDefaultAsync();
+        public Task<IEnumerable<CosteraDto>> ObtenerLimitesJurisdiccionalesAsync()
+        {
+            var list = LoadGeorefCosteras();
+            return Task.FromResult<IEnumerable<CosteraDto>>(list);
+        }
 
-            if (documento == null) return null;
-
-            return MapDocumentToDto(documento);
+        public Task<CosteraDto?> ObtenerLimitePorCosteraIdAsync(int costeraId)
+        {
+            var list = LoadGeorefCosteras();
+            var item = list.FirstOrDefault(c => c.Properties.CosteraId == costeraId);
+            return Task.FromResult<CosteraDto?>(item);
         }
 
         private CosteraDto MapDocumentToDto(CosteraMongo mongoModel)

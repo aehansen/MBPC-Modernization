@@ -418,7 +418,7 @@ namespace Mbpc.Api.Services
 
             try
             {
-                var cachedData = await _redisRetryPolicy.ExecuteAsync(async () =>
+                var cachedData = _env.IsDevelopment() ? null : await _redisRetryPolicy.ExecuteAsync(async () =>
                     await _cache.GetStringAsync(cacheKey));
 
                 if (cachedData != null)
@@ -443,7 +443,13 @@ namespace Mbpc.Api.Services
                         .Where(d => !string.IsNullOrWhiteSpace(d.VesselName))
                         .ToLookup(d => d.VesselName, StringComparer.OrdinalIgnoreCase);
 
-                    listaCompleta = posiciones.Select(p =>
+                    // Deduplicar posiciones eligiendo el registro más reciente para cada buque (por VesselName normalizado)
+                    var posicionesDeduplicadas = posiciones
+                        .GroupBy(x => x.VesselName?.Trim().ToUpperInvariant() ?? string.Empty)
+                        .Select(g => g.OrderByDescending(y => y.MsgTime).First())
+                        .ToList();
+
+                    listaCompleta = posicionesDeduplicadas.Select(p =>
                     {
                         var detallesHomonimos = lookupDetalles[p.VesselName ?? ""];
                         var detalle      = detallesHomonimos.FirstOrDefault();
@@ -781,6 +787,21 @@ namespace Mbpc.Api.Services
                     CallSign             = buqueCallSign
                 };
 
+                // Eliminar cualquier registro previo en last_mbpc para el mismo buque (evitando duplicación)
+                FilterDefinition<ViajePosicionMongo> filtroLimpieza;
+                if (!string.IsNullOrEmpty(nuevoDocumentoPosicion.Mmsi))
+                {
+                    filtroLimpieza = Builders<ViajePosicionMongo>.Filter.Or(
+                        Builders<ViajePosicionMongo>.Filter.Eq(p => p.Mmsi, nuevoDocumentoPosicion.Mmsi),
+                        Builders<ViajePosicionMongo>.Filter.Eq(p => p.VesselName, nuevoDocumentoPosicion.VesselName)
+                    );
+                }
+                else
+                {
+                    filtroLimpieza = Builders<ViajePosicionMongo>.Filter.Eq(p => p.VesselName, nuevoDocumentoPosicion.VesselName);
+                }
+                await _viajesCollection.DeleteManyAsync(filtroLimpieza);
+
                 await _viajesCollection.InsertOneAsync(nuevoDocumentoPosicion);
 
                 _logger.LogInformation(
@@ -1017,6 +1038,122 @@ namespace Mbpc.Api.Services
                 Longitud             = dto.Longitud,
                 VelocidadCalculadaKn = Math.Round(velocidadKn,  2),
                 DistanciaRecorridaNM = Math.Round(distanciaNM,  3),
+                TracklogId           = tracklogEntry.Id.ToString()
+            };
+        }
+
+        public async Task<PosicionActualizadaResultDto?> ReubicarBuqueAsync(string id, ReubicarBuqueDto dto)
+        {
+            await ThrowIfViajeFinalizadoAsync(id);
+            _logger.LogInformation(
+                "ReubicarBuqueAsync (Reubicación Manual) — Id: '{Id}' | Lat: {Lat} | Lng: {Lng}",
+                id, dto.Latitud, dto.Longitud);
+
+            var filtroId = BuildFiltroViaje(id);
+
+            var posicionActual = await _viajesCollection
+                .Find(filtroId)
+                .FirstOrDefaultAsync();
+
+            if (posicionActual is null)
+            {
+                _logger.LogWarning(
+                    "ReubicarBuqueAsync: No se encontró posición en last_mbpc para Id '{Id}'.", id);
+                return null;
+            }
+
+            // Para la reubicación manual, la velocidad y la distancia calculada se setean en 0.0
+            double velocidadKn = 0.0;
+            double distanciaNM = 0.0;
+
+            var nuevaLocation = new LocationMongo
+            {
+                Geo = new GeoMongo
+                {
+                    Type        = "Point",
+                    Coordinates = new[] { dto.Longitud, dto.Latitud },
+                }
+            };
+
+            var update = Builders<ViajePosicionMongo>.Update
+                .Set(p => p.Latitude,        dto.Latitud)
+                .Set(p => p.Longitude,       dto.Longitud)
+                .Set(p => p.MsgTime,         DateTime.UtcNow)
+                .Set(p => p.SpeedOverGround, velocidadKn)
+                .Set(p => p.Location,        nuevaLocation);
+
+            var updateResult = await _viajesCollection.UpdateOneAsync(filtroId, update);
+
+            if (updateResult.MatchedCount == 0)
+            {
+                _logger.LogWarning(
+                    "ReubicarBuqueAsync: UpdateOne no encontró documento para Id '{Id}'.", id);
+                return null;
+            }
+
+            if (updateResult.ModifiedCount == 0)
+            {
+                _logger.LogWarning(
+                    "ReubicarBuqueAsync: UpdateOne no modificó ningún documento para Id '{Id}'.", id);
+                throw new InvalidOperationException(
+                    "No se pudo guardar la nueva posición en la base de datos.");
+            }
+
+            var tracklogEntry = new ViajeTracklogMongo
+            {
+                PosicionId           = posicionActual.Id,
+                TravelId             = posicionActual.TravelId,
+                VesselName           = posicionActual.VesselName,
+                Mmsi                 = posicionActual.Mmsi,
+                Latitude             = dto.Latitud,
+                Longitude            = dto.Longitud,
+                SpeedOverGround      = velocidadKn,
+                CalculatedSpeedKnots = velocidadKn,
+                DistanceNM           = distanciaNM,
+                NavegationStatusDesc = posicionActual.NavegationStatusDesc,
+                MsgTime              = DateTime.UtcNow,
+                InsertedAt           = DateTime.UtcNow,
+                CosteraId            = posicionActual.CosteraId,
+                Location             = nuevaLocation,
+            };
+
+            await _tracklogCollection.InsertOneAsync(tracklogEntry);
+
+            // Reconciliación espacial reactiva (evaluación de geofencing / handovers)
+            try
+            {
+                await EvaluarReconciliacionReactivaAsync(posicionActual, dto.Latitud, dto.Longitud, velocidadKn);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error al evaluar reconciliación espacial reactiva para reubicación manual en viaje '{Id}'.", id);
+            }
+
+            // Invalidación de caché en Redis
+            var costeraId = posicionActual.CosteraId ?? 0;
+            try
+            {
+                await _redisRetryPolicy.ExecuteAsync(async () =>
+                {
+                    await _cache.RemoveAsync(CacheKeyBarcosEnPuerto(costeraId));
+                    await _cache.RemoveAsync(CacheKeyMapaViajes(costeraId));
+                    await _cache.RemoveAsync(CacheKeyBarcosEnPuerto(0));
+                    await _cache.RemoveAsync(CacheKeyMapaViajes(0));
+                });
+                _logger.LogInformation("Redis cachés invalidadas tras reubicación manual para CosteraId '{CosteraId}'.", costeraId);
+            }
+            catch (Exception redisEx)
+            {
+                _logger.LogWarning(redisEx, "ReubicarBuqueAsync: No se pudo invalidar la caché de Redis.");
+            }
+
+            return new PosicionActualizadaResultDto
+            {
+                VesselName           = posicionActual.VesselName,
+                Latitud              = dto.Latitud,
+                Longitud             = dto.Longitud,
+                VelocidadCalculadaKn = 0,
+                DistanciaRecorridaNM = 0,
                 TracklogId           = tracklogEntry.Id.ToString()
             };
         }
@@ -1653,40 +1790,67 @@ namespace Mbpc.Api.Services
 
         private int DeterminarJurisdicionCorrespondiente(double latitud, double longitud, IEnumerable<CosteraDto> costeras)
         {
-            int mejorCosteraId = 0;
-            double distanciaMinima = double.MaxValue;
+            const double MaxRadiusKm = 50.0;
+            const double MarginFactor = 0.30; // 30% margin relative to second nearest
 
+            // Collect distances to each costera
+            var distances = new List<(int CosteraId, double Distance)>(costeras.Count());
             foreach (var costera in costeras)
             {
                 if (costera.Geometry?.Coordinates == null) continue;
-
                 var type = costera.Geometry.Type;
-                double minDistanciaLocal = double.MaxValue;
 
-                var poligonos = ObtenerPoligonosDeGeometry(costera.Geometry.Coordinates, type);
-                if (poligonos == null || poligonos.Count == 0) continue;
-
-                foreach (var poligono in poligonos)
+                if (type.Equals("Point", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (type.Equals("Polygon", StringComparison.OrdinalIgnoreCase) || type.Equals("MultiPolygon", StringComparison.OrdinalIgnoreCase))
+                    double cLng = 0;
+                    double cLat = 0;
+                    if (costera.Geometry.Coordinates is System.Text.Json.JsonElement elem && elem.ValueKind == System.Text.Json.JsonValueKind.Array && elem.GetArrayLength() >= 2)
                     {
-                        if (IsPointInPolygon(latitud, longitud, poligono))
-                            return costera.Properties.CosteraId;
+                        cLng = elem[0].GetDouble();
+                        cLat = elem[1].GetDouble();
                     }
-
-                    double dist = DistanciaMinimaAPoligono(latitud, longitud, poligono);
-                    if (dist < minDistanciaLocal) minDistanciaLocal = dist;
+                    else if (costera.Geometry.Coordinates is double[] arr && arr.Length >= 2)
+                    {
+                        cLng = arr[0];
+                        cLat = arr[1];
+                    }
+                    else
+                    {
+                        continue;
+                    }
+                    double dist = CalcularHaversineKm(latitud, longitud, cLat, cLng);
+                    distances.Add((costera.Properties.CosteraId, dist));
                 }
-
-                if (minDistanciaLocal < distanciaMinima)
+                else
                 {
-                    distanciaMinima = minDistanciaLocal;
-                    mejorCosteraId = costera.Properties.CosteraId;
+                    var poligonos = ObtenerPoligonosDeGeometry(costera.Geometry.Coordinates, type);
+                    if (poligonos == null || poligonos.Count == 0) continue;
+                    double minDistanciaLocal = double.MaxValue;
+                    foreach (var poligono in poligonos)
+                    {
+                        double dist = DistanciaMinimaAPoligono(latitud, longitud, poligono);
+                        if (dist < minDistanciaLocal) minDistanciaLocal = dist;
+                    }
+                    if (minDistanciaLocal < double.MaxValue)
+                    {
+                        distances.Add((costera.Properties.CosteraId, minDistanciaLocal));
+                    }
                 }
             }
 
-            if (distanciaMinima < 0.01) return mejorCosteraId;
-            return 0; 
+            if (!distances.Any()) return 0;
+            var ordered = distances.OrderBy(d => d.Distance).ToList();
+            var nearest = ordered[0];
+            if (nearest.Distance > MaxRadiusKm) return 0;
+            if (ordered.Count > 1)
+            {
+                var second = ordered[1];
+                if (nearest.Distance * (1 + MarginFactor) >= second.Distance)
+                {
+                    return 0;
+                }
+            }
+            return nearest.CosteraId; 
         }
 
         private List<double[][]> ObtenerPoligonosDeGeometry(object coordinatesObj, string type)

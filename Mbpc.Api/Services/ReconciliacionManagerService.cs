@@ -143,40 +143,69 @@ namespace Mbpc.Api.Services
 
         private int DeterminarJurisdicionCorrespondiente(double latitud, double longitud, IEnumerable<CosteraDto> costeras)
         {
-            int mejorCosteraId = 0;
-            double distanciaMinima = double.MaxValue;
+            const double MaxRadiusKm = 50.0;
+            const double MarginFactor = 0.30; // 30% margin relative to second nearest
 
+            // Collect distances to each costera
+            var distances = new List<(int CosteraId, double Distance)>(costeras.Count());
             foreach (var costera in costeras)
             {
                 if (costera.Geometry?.Coordinates == null) continue;
-
                 var type = costera.Geometry.Type;
-                double minDistanciaLocal = double.MaxValue;
 
-                var poligonos = ObtenerPoligonosDeGeometry(costera.Geometry.Coordinates, type);
-                if (poligonos == null || poligonos.Count == 0) continue;
-
-                foreach (var poligono in poligonos)
+                if (type.Equals("Point", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (type.Equals("Polygon", StringComparison.OrdinalIgnoreCase) || type.Equals("MultiPolygon", StringComparison.OrdinalIgnoreCase))
+                    double cLng = 0;
+                    double cLat = 0;
+                    if (costera.Geometry.Coordinates is System.Text.Json.JsonElement elem && elem.ValueKind == System.Text.Json.JsonValueKind.Array && elem.GetArrayLength() >= 2)
                     {
-                        if (IsPointInPolygon(latitud, longitud, poligono))
-                            return costera.Properties.CosteraId;
+                        cLng = elem[0].GetDouble();
+                        cLat = elem[1].GetDouble();
                     }
-
-                    double dist = DistanciaMinimaAPoligono(latitud, longitud, poligono);
-                    if (dist < minDistanciaLocal) minDistanciaLocal = dist;
+                    else if (costera.Geometry.Coordinates is double[] arr && arr.Length >= 2)
+                    {
+                        cLng = arr[0];
+                        cLat = arr[1];
+                    }
+                    else
+                    {
+                        continue;
+                    }
+                    double dist = CalcularHaversineKm(latitud, longitud, cLat, cLng);
+                    distances.Add((costera.Properties.CosteraId, dist));
                 }
-
-                if (minDistanciaLocal < distanciaMinima)
+                else
                 {
-                    distanciaMinima = minDistanciaLocal;
-                    mejorCosteraId = costera.Properties.CosteraId;
+                    var poligonos = ObtenerPoligonosDeGeometry(costera.Geometry.Coordinates, type);
+                    if (poligonos == null || poligonos.Count == 0) continue;
+                    double minDistanciaLocal = double.MaxValue;
+                    foreach (var poligono in poligonos)
+                    {
+                        double dist = DistanciaMinimaAPoligono(latitud, longitud, poligono);
+                        if (dist < minDistanciaLocal) minDistanciaLocal = dist;
+                    }
+                    if (minDistanciaLocal < double.MaxValue)
+                    {
+                        distances.Add((costera.Properties.CosteraId, minDistanciaLocal));
+                    }
                 }
             }
 
-            if (distanciaMinima < 0.01) return mejorCosteraId;
-            return 0; 
+            if (!distances.Any()) return 0;
+            var ordered = distances.OrderBy(d => d.Distance).ToList();
+            var nearest = ordered[0];
+            // Apply max radius constraint
+            if (nearest.Distance > MaxRadiusKm) return 0;
+            // Apply margin factor if second costera exists
+            if (ordered.Count > 1)
+            {
+                var second = ordered[1];
+                if (nearest.Distance * (1 + MarginFactor) >= second.Distance)
+                {
+                    return 0;
+                }
+            }
+            return nearest.CosteraId;
         }
 
         private List<double[][]> ObtenerPoligonosDeGeometry(object coordinatesObj, string type)
@@ -300,5 +329,18 @@ namespace Mbpc.Api.Services
             }
             return inside;
         }
+
+        private static double CalcularHaversineKm(double lat1, double lng1, double lat2, double lng2)
+        {
+            double dLat = ToRadians(lat2 - lat1);
+            double dLng = ToRadians(lng2 - lng1);
+            double a = Math.Sin(dLat / 2) * Math.Sin(dLat / 2) +
+                       Math.Cos(ToRadians(lat1)) * Math.Cos(ToRadians(lat2)) *
+                       Math.Sin(dLng / 2) * Math.Sin(dLng / 2);
+            double c = 2 * Math.Atan2(Math.Sqrt(a), Math.Sqrt(1 - a));
+            return 6371.0 * c;
+        }
+
+        private static double ToRadians(double degrees) => degrees * Math.PI / 180.0;
     }
 }

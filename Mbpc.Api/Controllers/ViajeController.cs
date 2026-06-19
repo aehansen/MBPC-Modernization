@@ -400,6 +400,79 @@ namespace Mbpc.Api.Controllers
             });
         }
 
+        [HttpPut("{id}/reubicar")]
+        public async Task<ActionResult> ReubicarBuque(
+            string id,
+            [FromBody] ReubicarBuqueDto dto)
+        {
+            if (!ModelState.IsValid)
+            {
+                _logger.LogWarning(
+                    "ReubicarBuque rechazado por ModelState inválido para Id: {Id}. Errores: {@Errors}",
+                    id,
+                    ModelState.Values
+                              .SelectMany(v => v.Errors)
+                              .Select(e => e.ErrorMessage));
+
+                return ValidationProblem(ModelState);
+            }
+
+            var costeraIdClaim = User.FindFirstValue("CosteraId");
+
+            if (string.IsNullOrWhiteSpace(costeraIdClaim))
+            {
+                _logger.LogWarning(
+                    "ReubicarBuque rechazado: token sin Claim 'CosteraId'. Usuario: {User}",
+                    User.Identity?.Name ?? "desconocido");
+                return Forbid();
+            }
+
+            if (string.IsNullOrWhiteSpace(id))
+                return BadRequest(new { mensaje = "El ID del viaje es requerido." });
+
+            _logger.LogInformation(
+                "ReubicarBuque (Manual) — Id: '{Id}' | Lat: {Lat} | Lng: {Lng} | CosteraId: {CosteraId}",
+                id, dto.Latitud, dto.Longitud, costeraIdClaim);
+
+            PosicionActualizadaResultDto? resultado;
+
+            try
+            {
+                resultado = await _viajeService.ReubicarBuqueAsync(id, dto);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger.LogWarning(
+                    "ReubicarBuque bloqueado para Id: '{Id}'. Detalle: {Msg}",
+                    id, ex.Message);
+
+                return UnprocessableEntity(new { mensaje = ex.Message });
+            }
+
+            if (resultado is null)
+            {
+                _logger.LogError(
+                    "ReubicarBuqueAsync retornó null para Id: '{Id}' CosteraId: {CosteraId}.",
+                    id, costeraIdClaim);
+
+                return NotFound(new
+                {
+                    mensaje = $"No se encontró el viaje con Id '{id}' para la costera {costeraIdClaim}."
+                });
+            }
+
+            return Ok(new
+            {
+                mensaje              = $"Posición del buque '{resultado.VesselName}' corregida manualmente.",
+                vesselName           = resultado.VesselName,
+                latitud              = resultado.Latitud,
+                longitud             = resultado.Longitud,
+                velocidadCalculadaKn = resultado.VelocidadCalculadaKn,
+                distanciaRecorridaNM = resultado.DistanciaRecorridaNM,
+                tracklogId           = resultado.TracklogId
+            });
+        }
+
         [HttpPut("{id}/transferir")]
         public async Task<ActionResult> TransferirJurisdiccion(string id, [FromBody] TransferirJurisdiccionDto dto)
         {

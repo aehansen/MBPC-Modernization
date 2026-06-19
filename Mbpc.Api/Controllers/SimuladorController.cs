@@ -283,6 +283,23 @@ namespace Mbpc.Api.Controllers
             return Ok(new { mensaje = "Buque real insertado con éxito en MongoDB.", travelId = dto.TravelId });
         }
         
+        [HttpPost("forzar-transferencia")]
+        public async Task<IActionResult> ForzarTransferencia([FromBody] ForzarTransferenciaDto dto)
+        {
+            _logger.LogInformation("Simulador: Forzando solicitud de transferencia para TravelId {TravelId} a Costera {NuevaCostera}", dto.TravelId, dto.NuevaCosteraId);
+            
+            var collectionPos = _database.GetCollection<ViajePosicionMongo>(_mongoSettings.LastMbpcCollectionName);
+            var viaje = await collectionPos.Find(p => p.TravelId == dto.TravelId).FirstOrDefaultAsync();
+            if (viaje == null)
+            {
+                return NotFound(new { mensaje = $"No se encontró el viaje con TravelId {dto.TravelId} en MongoDB." });
+            }
+
+            await _viajeService.RegistrarSolicitudTransferenciaAsync(viaje.Id, dto.NuevaCosteraId);
+            
+            return Ok(new { mensaje = $"Solicitud de transferencia forzada con éxito para el viaje {viaje.VesselName} a la costera {dto.NuevaCosteraId}." });
+        }
+
         [HttpPost("ejecutar-reconciliacion")]
         public async Task<IActionResult> EjecutarReconciliacionManual()
         {
@@ -329,5 +346,11 @@ namespace Mbpc.Api.Controllers
         public double Velocidad { get; set; }
         public double Curso { get; set; }
         public int CosteraId { get; set; }
+    }
+
+    public class ForzarTransferenciaDto
+    {
+        public long TravelId { get; set; }
+        public int NuevaCosteraId { get; set; }
     }
 }

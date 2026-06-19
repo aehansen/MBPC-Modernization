@@ -118,6 +118,13 @@ namespace Mbpc.Api.Services
         /// si la velocidad calculada supera el límite físico permitido.
         /// </summary>
         Task<PosicionActualizadaResultDto?> ActualizarPosicionAsync(string id, ActualizarPosicionDto dto);
+        
+        /// <summary>
+        /// Reubica geográficamente un buque en el mapa de forma manual por el operador del sistema.
+        /// Se omiten las validaciones cinemáticas pero se registra la entrada en el tracklog con velocidad = 0
+        /// y se evalúa la jurisdicción correspondiente de forma reactiva.
+        /// </summary>
+        Task<PosicionActualizadaResultDto?> ReubicarBuqueAsync(string id, ReubicarBuqueDto dto);
 
         // ── PERSONAL EXTERNO (Hito 9.0) ──────────────────────────────────────
 

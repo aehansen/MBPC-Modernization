@@ -100,7 +100,14 @@ export default function PanelTransferencias() {
                 <button
                   type="button"
                   disabled={isAprobando || isRechazando}
-                  onClick={() => rechazar(tr.id)}
+                  onClick={() => {
+                    rechazar(tr.id, {
+                      onError: (err: any) => {
+                        const msg = err.response?.data?.mensaje || err.message;
+                        alert(`Error al rechazar transferencia: ${msg}`);
+                      }
+                    });
+                  }}
                   className="px-3 py-1.5 text-xs font-semibold text-slate-400 hover:text-slate-200 border border-slate-700 hover:border-slate-500 rounded transition duration-150 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   Rechazar
@@ -108,7 +115,14 @@ export default function PanelTransferencias() {
                 <button
                   type="button"
                   disabled={isAprobando || isRechazando}
-                  onClick={() => aprobar(tr.id)}
+                  onClick={() => {
+                    aprobar(tr.id, {
+                      onError: (err: any) => {
+                        const msg = err.response?.data?.mensaje || err.message;
+                        alert(`Error al aprobar transferencia: ${msg}`);
+                      }
+                    });
+                  }}
                   className="px-3.5 py-1.5 text-xs font-bold bg-amber-600 hover:bg-amber-500 text-white rounded shadow transition duration-150 disabled:bg-amber-900 disabled:text-amber-700 disabled:cursor-not-allowed flex items-center gap-1.5"
                 >
                   {isAprobando ? (

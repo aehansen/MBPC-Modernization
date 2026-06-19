@@ -247,7 +247,6 @@ export default function ViajesDashboard({
   const [page, setPage] = useState(1);
   const [filtro, setFiltro] = useState('');
   const [debouncedFiltro, setDebouncedFiltro] = useState('');
-  const [simularAlarma, setSimularAlarma] = useState(false);
 
   const [viajeSeleccionadoIdLocal, setViajeSeleccionadoIdLocal] = useState<string | null>(null);
   const viajeSeleccionadoId = onViajeSelected ? selectedViajeIdProp : viajeSeleccionadoIdLocal;
@@ -307,37 +306,7 @@ export default function ViajesDashboard({
   const handleFinalizarViaje = (viaje: ViajeDto) => finalizarViaje({ id: viaje.id });
 
   // Los datos ya vienen filtrados desde el servidor; no se aplica ningún .filter() local.
-  let filas: ViajeDto[] = dataPaginada ?? [];
-
-  if (simularAlarma) {
-    if (filas.length === 0) {
-      filas = [
-        {
-          id: 'dummy-simulado',
-          buque: 'BUQUE SIMULADOR ALARMA',
-          ruta: 'ROSARIO ➔ LA PLATA',
-          fechaInicioFormateada: '18/06/2026 12:00',
-          estadoActual: 'Navegando',
-          costeraId: '422', // Rosario
-          latitude: -34.86383, // La Plata
-          longitude: -57.89776,
-        }
-      ];
-    } else {
-      filas = filas.map((f, idx) => {
-        if (idx === 0) {
-          return {
-            ...f,
-            estadoActual: 'Navegando',
-            costeraId: '422',
-            latitude: -34.86383,
-            longitude: -57.89776,
-          };
-        }
-        return f;
-      });
-    }
-  }
+  const filas: ViajeDto[] = dataPaginada ?? [];
 
   return (
     <div className="bg-gray-50 text-gray-900 font-sans p-6 rounded-xl">
@@ -353,21 +322,6 @@ export default function ViajesDashboard({
         </div>
 
         <div className="flex items-center gap-3 flex-wrap">
-          {/* Switch de simulación de alarmas de geofencing */}
-          <button
-            type="button"
-            onClick={() => setSimularAlarma(!simularAlarma)}
-            className={`px-3 py-2 text-sm font-semibold rounded-lg border transition-all duration-200 flex items-center gap-2 shadow-sm ${
-              simularAlarma
-                ? 'bg-rose-600 text-white border-rose-700 hover:bg-rose-700'
-                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
-            }`}
-            title="Simular un escenario de desvío geográfico fuera de jurisdicción para ver la alerta parpadeante en tiempo real"
-          >
-            <span>🚨</span>
-            <span>{simularAlarma ? 'Desactivar Simulación' : 'Simular Alarma'}</span>
-          </button>
-
           {/* Filtro server-side por nombre de buque con debounce de 500ms */}
           <input
             type="text"
