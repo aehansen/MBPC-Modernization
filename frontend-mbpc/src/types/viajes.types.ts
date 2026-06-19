@@ -7,6 +7,8 @@ export interface ViajeDto {
   fechaInicioFormateada: string;
   estadoActual: string;
   costeraId: string | null;
+  latitude?: number;
+  longitude?: number;
   esConvoy?: boolean;
   omi?: string;
   matricula?: string;

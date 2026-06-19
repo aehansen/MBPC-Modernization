@@ -15,6 +15,8 @@ namespace Mbpc.Api.DTOs
 
         // ── EJE 1: datos operativos extendidos ──────────────────────────────
         public string? CosteraId { get; set; }
+        public double Latitude { get; set; }
+        public double Longitude { get; set; }
         public List<BarcazaDto> Barcazas { get; set; } = new List<BarcazaDto>();
         public RemolcadorDto? Remolcador { get; set; }
         public List<EtapaDto> Etapas { get; set; } = new List<EtapaDto>();

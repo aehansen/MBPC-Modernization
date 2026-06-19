@@ -15,6 +15,7 @@ import {
   BarcoPuertoDto,
   ViajeHistoricoDto,
 } from '../types/reportes';
+import QueryBuilderPanel from '../components/reportes/QueryBuilderPanel';
 
 // Configuración de Grupos y Reportes (Mapeados desde el estilo legacy del viejo MBPC)
 const GRUPOS_REPORTES = [
@@ -36,7 +37,7 @@ const GRUPOS_REPORTES = [
 ];
 
 export default function PlataformaReportesPage() {
-  const [activeTab, setActiveTab] = useState<'reportes' | 'auditoria'>('reportes');
+  const [activeTab, setActiveTab] = useState<'reportes' | 'auditoria' | 'querybuilder'>('reportes');
   
   // Selectores dinámicos del sistema legacy (Grupo y Reporte)
   const [grupoSeleccionado, setGrupoSeleccionado] = useState('operativos');
@@ -228,6 +229,19 @@ export default function PlataformaReportesPage() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
           Auditoría y Bitácora (Tracklog)
+        </button>
+        <button
+          onClick={() => setActiveTab('querybuilder')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-200 ${
+            activeTab === 'querybuilder'
+              ? 'bg-white text-blue-700 shadow-sm border border-slate-200/50'
+              : 'text-slate-600 hover:text-slate-900'
+          }`}
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4" />
+          </svg>
+          Consulta Personalizada
         </button>
       </div>
 
@@ -720,6 +734,11 @@ export default function PlataformaReportesPage() {
               </div>
             )}
           </div>
+        )}
+
+        {/* PESTAÑA 3: QUERY BUILDER (CONSULTA DINÁMICA) */}
+        {activeTab === 'querybuilder' && (
+          <QueryBuilderPanel />
         )}
       </div>
     </div>

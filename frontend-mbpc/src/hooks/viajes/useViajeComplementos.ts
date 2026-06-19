@@ -13,6 +13,8 @@ import type {
   AsignarAgenciaDto,
   NotaBitacora,
   ViajeComplementos,
+  EtapaDetalle,
+  IntercalarEtapaDto,
 } from '../../types/complementos.types';
 
 export const viajeComplementosKeys = {
@@ -92,6 +94,43 @@ export function useActualizarDatosPbip(
     mutationFn: (payload: ActualizarDatosPbipDto) => putPbip({ viajeId, payload }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['viaje-complementos', viajeId] });
+    },
+  });
+}
+
+// ── HERRAMIENTAS SOPORTE ──
+
+async function fetchViajeEtapas(viajeId: string): Promise<EtapaDetalle[]> {
+  const { data } = await apiClient.get<EtapaDetalle[]>(`/viajes/${viajeId}/etapas`);
+  return data;
+}
+
+async function postIntercalarEtapa(params: {
+  viajeId: string;
+  payload: IntercalarEtapaDto;
+}): Promise<void> {
+  await apiClient.post(`/viajes/${params.viajeId}/etapas/intercalar`, params.payload);
+}
+
+export function useObtenerEtapas(viajeId: string): UseQueryResult<EtapaDetalle[], Error> {
+  return useQuery({
+    queryKey: ['viaje-etapas', viajeId],
+    queryFn: () => fetchViajeEtapas(viajeId),
+    enabled: Boolean(viajeId),
+  });
+}
+
+export function useIntercalarEtapa(
+  viajeId: string,
+): UseMutationResult<void, Error, IntercalarEtapaDto> {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: IntercalarEtapaDto) => postIntercalarEtapa({ viajeId, payload }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['viaje-etapas', viajeId] });
+      queryClient.invalidateQueries({ queryKey: ['viaje-complementos', viajeId] });
+      queryClient.invalidateQueries({ queryKey: ['cargas', viajeId] });
     },
   });
 }

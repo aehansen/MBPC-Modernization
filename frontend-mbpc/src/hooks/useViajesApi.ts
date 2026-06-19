@@ -38,6 +38,7 @@ export function useViajes(page: number, size: number, nombre: string) {
   return useQuery<ViajeDto[], Error>({
     queryKey: viajesKeys.paginated(page, size, nombre),
     queryFn: () => fetchViajes(page, size, nombre),
+    refetchInterval: 5000, // auto-refresh every 5s for real-time alerts in the grid
   });
 }
 
@@ -81,6 +82,10 @@ async function reanudarViaje(id: string): Promise<void> {
   await viajesApi.reanudar(id);
 }
 
+async function reiniciarViaje(id: string): Promise<void> {
+  await apiClient.put(`/viajes/${id}/reiniciar`);
+}
+
 function useInvalidateViajes() {
   const qc = useQueryClient();
   return () => qc.invalidateQueries({ queryKey: viajesKeys.all });
@@ -114,6 +119,14 @@ export function useReanudarViaje() {
   const invalidate = useInvalidateViajes();
   return useMutation<void, Error, string>({
     mutationFn: reanudarViaje,
+    onSuccess: invalidate,
+  });
+}
+
+export function useReiniciarViaje() {
+  const invalidate = useInvalidateViajes();
+  return useMutation<void, Error, string>({
+    mutationFn: reiniciarViaje,
     onSuccess: invalidate,
   });
 }

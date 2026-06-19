@@ -4,6 +4,8 @@ import {
   useViajeComplementos,
   useAgregarNotaBitacora,
   useAsignarAgencias,
+  useObtenerEtapas,
+  useIntercalarEtapa,
 } from "../../hooks/viajes/useViajeComplementos";
 import {
   NotaBitacora,
@@ -13,6 +15,7 @@ import {
   ViajeComplementos,
 } from "../../types/complementos.types";
 import PbipForm from "./pbip/PbipForm";
+import EmbarcacionSelect from "./EmbarcacionSelect";
 
 // ─── PROPS ────────────────────────────────────────────────────────────────────
 
@@ -443,14 +446,310 @@ function SkeletonLoader() {
   );
 }
 
+// ─── TAB ETAPAS (SOPORTE) ──────────────────────────────────────────────────────
+
+function TabEtapas({ viajeId }: { viajeId: string }) {
+  const { data: etapas = [], isLoading, isError, error } = useObtenerEtapas(viajeId);
+  const mutation = useIntercalarEtapa(viajeId);
+
+  const [showForm, setShowForm] = useState(false);
+  const [fechaInicio, setFechaInicio] = useState("");
+  const [fechaFin, setFechaFin] = useState("");
+  const [remolcador, setRemolcador] = useState<{ nombre: string; matricula: string } | null>(null);
+  const [barcazas, setBarcazas] = useState<string[]>([]);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const handleSelectRemolcador = (emb: any) => {
+    setRemolcador({ nombre: emb.nombre, matricula: emb.matricula });
+  };
+
+  const handleSelectBarcaza = (emb: any) => {
+    if (!barcazas.includes(emb.nombre)) {
+      setBarcazas([...barcazas, emb.nombre]);
+    }
+  };
+
+  const handleRemoveBarcaza = (nombre: string) => {
+    setBarcazas(barcazas.filter((b) => b !== nombre));
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setSuccessMsg(null);
+    setFormError(null);
+
+    if (!fechaInicio) {
+      setFormError("La fecha de inicio es requerida.");
+      return;
+    }
+
+    mutation.mutate(
+      {
+        fechaInicio: new Date(fechaInicio).toISOString(),
+        fechaFin: fechaFin ? new Date(fechaFin).toISOString() : undefined,
+        remolcadorNombre: remolcador?.nombre,
+        remolcadorMatricula: remolcador?.matricula,
+        barcazasNombres: barcazas,
+      },
+      {
+        onSuccess: () => {
+          setSuccessMsg("✓ Etapa intercalada y ordenada correctamente.");
+          setFechaInicio("");
+          setFechaFin("");
+          setRemolcador(null);
+          setBarcazas([]);
+          setShowForm(false);
+        },
+        onError: (err) => {
+          setFormError(err.message);
+        },
+      }
+    );
+  };
+
+  if (isLoading) return <SkeletonLoader />;
+  if (isError) {
+    return (
+      <div className="text-red-400 text-sm bg-red-950/20 border border-red-800/40 rounded-lg p-3">
+        Error al cargar etapas: {error.message}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      {/* Listado de etapas actuales (Timeline) */}
+      <div className="space-y-4">
+        <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-widest">
+          Línea de Tiempo de Etapas
+        </h3>
+        {etapas.length === 0 ? (
+          <p className="text-slate-500 text-sm italic text-center py-4">
+            Sin etapas registradas para este viaje.
+          </p>
+        ) : (
+          <div className="relative border-l border-slate-700 ml-4 space-y-6">
+            {etapas.map((etapa) => (
+              <div key={etapa.etapaId} className="relative pl-6">
+                {/* Indicador en el timeline */}
+                <div className="absolute -left-[9px] top-1.5 w-[18px] h-[18px] rounded-full border-2 border-slate-900 bg-cyan-500 flex items-center justify-center text-[10px] font-bold text-slate-950">
+                  {etapa.etapaId}
+                </div>
+                <div className="bg-slate-800/40 border border-slate-800 rounded-lg p-3.5 space-y-2">
+                  <div className="flex justify-between items-center flex-wrap gap-2">
+                    <span className="text-sm font-bold text-slate-200">
+                      Etapa #{etapa.etapaId}
+                    </span>
+                    <div className="text-xs text-slate-500 space-y-0.5">
+                      <div>
+                        <span className="font-semibold text-slate-400">Inicio:</span>{" "}
+                        {etapa.fechaInicio ? new Date(etapa.fechaInicio).toLocaleString("es-AR") : "N/D"}
+                      </div>
+                      {etapa.fechaFin && (
+                        <div>
+                          <span className="font-semibold text-slate-400">Fin:</span>{" "}
+                          {new Date(etapa.fechaFin).toLocaleString("es-AR")}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="border-t border-slate-700/50 pt-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <span className="text-xs text-slate-500 block">Remolcador</span>
+                      <span className="text-sm text-cyan-300 font-medium">
+                        {etapa.remolcadorNombre
+                          ? `${etapa.remolcadorNombre} (${etapa.remolcadorMatricula || "—"})`
+                          : "Ninguno"}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-xs text-slate-500 block">Barcazas ({etapa.barcazas.length})</span>
+                      {etapa.barcazas.length > 0 ? (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {etapa.barcazas.map((b, i) => (
+                            <span
+                              key={i}
+                              className="text-[11px] bg-slate-700 text-slate-300 px-2 py-0.5 rounded border border-slate-600/50"
+                            >
+                              {b}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-500 italic">Sin barcazas</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Botón para abrir el formulario */}
+      {!showForm && (
+        <button
+          type="button"
+          onClick={() => { setShowForm(true); setFormError(null); setSuccessMsg(null); }}
+          className="bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-400 border border-cyan-500/40 rounded-lg px-4 py-2 text-sm font-semibold transition-colors flex items-center justify-center gap-2"
+        >
+          ＋ Intercalar Nueva Etapa
+        </button>
+      )}
+
+      {/* Formulario colapsable para intercalar etapa */}
+      {showForm && (
+        <form onSubmit={handleSubmit} className="border-t border-slate-800 pt-5 space-y-4">
+          <div className="flex justify-between items-center">
+            <h4 className="text-xs font-semibold text-cyan-400 uppercase tracking-widest">
+              Intercalar Nueva Etapa
+            </h4>
+            <button
+              type="button"
+              onClick={() => setShowForm(false)}
+              className="text-xs text-slate-400 hover:text-white"
+            >
+              Cancelar
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 mb-1">
+                Fecha Inicio *
+              </label>
+              <input
+                type="datetime-local"
+                value={fechaInicio}
+                onChange={(e) => setFechaInicio(e.target.value)}
+                required
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-400 mb-1">
+                Fecha Fin (Opcional)
+              </label>
+              <input
+                type="datetime-local"
+                value={fechaFin}
+                onChange={(e) => setFechaFin(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:ring-1 focus:ring-cyan-500"
+              />
+            </div>
+          </div>
+
+          {/* Autocomplete de Remolcador */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-400 mb-1">
+              Remolcador (Catálogo Maestro)
+            </label>
+            <EmbarcacionSelect
+              onSelect={handleSelectRemolcador}
+              allowedTipos={["remolcador"]}
+            />
+            {remolcador && (
+              <div className="mt-2 text-xs text-slate-300 bg-slate-800 px-3 py-1.5 rounded border border-slate-700 flex justify-between items-center">
+                <span>
+                  Remolcador seleccionado:{" "}
+                  <strong className="text-cyan-400">
+                    {remolcador.nombre} ({remolcador.matricula})
+                  </strong>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setRemolcador(null)}
+                  className="text-red-400 hover:text-red-300 font-bold"
+                >
+                  Quitar
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Autocomplete de Barcazas */}
+          <div className="space-y-2">
+            <label className="block text-xs font-semibold text-slate-400 mb-1">
+              Asociar Barcazas (Catálogo Maestro)
+            </label>
+            <EmbarcacionSelect
+              onSelect={handleSelectBarcaza}
+              allowedTipos={["barcaza"]}
+            />
+            
+            {/* Lista de Barcazas Seleccionadas */}
+            <div className="space-y-1">
+              <span className="text-xs text-slate-500">Barcazas seleccionadas para esta etapa:</span>
+              {barcazas.length === 0 ? (
+                <p className="text-xs text-slate-500 italic">Ninguna barcaza seleccionada.</p>
+              ) : (
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {barcazas.map((b) => (
+                    <span
+                      key={b}
+                      className="text-xs bg-slate-800 text-slate-200 border border-slate-700 rounded px-2 py-1 flex items-center gap-1.5"
+                    >
+                      {b}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveBarcaza(b)}
+                        className="text-red-400 hover:text-red-300 font-bold text-xs"
+                      >
+                        &times;
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {formError && (
+            <div className="text-red-400 text-xs mt-1 bg-red-950/20 border border-red-800/40 p-2.5 rounded-lg">
+              {formError}
+            </div>
+          )}
+
+          <div className="flex gap-2 justify-end pt-2">
+            <button
+              type="button"
+              onClick={() => setShowForm(false)}
+              className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              type="submit"
+              disabled={mutation.isPending}
+              className="bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors flex items-center gap-2"
+            >
+              {mutation.isPending ? "Intercalando..." : "Intercalar Etapa"}
+            </button>
+          </div>
+        </form>
+      )}
+
+      {successMsg && (
+        <div className="text-emerald-400 text-sm bg-emerald-950/20 border border-emerald-800/40 p-3 rounded-lg">
+          {successMsg}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── TABS CONFIG ──────────────────────────────────────────────────────────────
 
-type TabId = "bitacora" | "agencias" | "pbip";
+type TabId = "bitacora" | "agencias" | "pbip" | "etapas";
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: "bitacora", label: "Bitácora", icon: "📋" },
   { id: "agencias", label: "Agencias", icon: "🏢" },
   { id: "pbip", label: "Seguridad PBIP", icon: "🛡️" },
+  { id: "etapas", label: "Etapas (Soporte)", icon: "⚓" },
 ];
 
 // ─── COMPONENTE PRINCIPAL ─────────────────────────────────────────────────────
@@ -468,6 +767,8 @@ export default function ModalComplementosViaje({
     isError,
     error,
   } = useViajeComplementos(viajeId);
+
+  const { data: etapasData } = useObtenerEtapas(viajeId);
 
   if (!isOpen) return null;
 
@@ -529,6 +830,11 @@ export default function ModalComplementosViaje({
                   {data.agencias.length}
                 </span>
               )}
+              {tab.id === "etapas" && etapasData && (
+                <span className="ml-1 text-xs bg-slate-700 text-slate-300 rounded-full px-1.5 py-0.5 leading-none">
+                  {etapasData.length}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -559,6 +865,9 @@ export default function ModalComplementosViaje({
               )}
               {activeTab === "pbip" && (
                 <PbipForm viajeId={viajeId} datosPbip={data.datosPbip} />
+              )}
+              {activeTab === "etapas" && (
+                <TabEtapas viajeId={viajeId} />
               )}
             </>
           )}

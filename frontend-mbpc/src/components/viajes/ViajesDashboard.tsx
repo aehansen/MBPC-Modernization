@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useViajes } from '../../hooks/useViajesApi';
+import { useViajes, useReiniciarViaje } from '../../hooks/useViajesApi';
 import type { ViajeDto } from '../../types/viajes.types';
 import ModalActualizarPosicion from './ModalActualizarPosicion';
 import { ModalPersonalExterno } from './ModalPersonalExterno';
@@ -8,8 +8,77 @@ import CargasModal from '../cargas/CargasModal';
 import { BotonZarpar } from '../BotonZarpar';
 import { BotonAmarrar, BotonFondear, BotonReanudar } from '../BotonesAccionViaje';
 import { useFinalizar } from '../../hooks/useAccionesViaje';
+import costerasGeoref from '../../constants/costerasGeorreferenciadas.json';
 
 const PAGE_SIZE = 10;
+
+// ─── Haversine Geofencing Alarm ───────────────────────────────────────────────
+
+function getDistanceHaversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371; // Radio de la Tierra en km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+interface AlarmaJurisdiccion {
+  alerta: boolean;
+  costeraMasCercana?: {
+    id: number;
+    etiqueta: string;
+    distanciaKm: number;
+  };
+}
+
+function calcularAlarmaJurisdiccion(viaje: ViajeDto): AlarmaJurisdiccion {
+  // Solo evaluamos si está navegando y tiene coordenadas válidas
+  if (
+    viaje.estadoActual !== 'Navegando' ||
+    !viaje.latitude ||
+    !viaje.longitude ||
+    (viaje.latitude === 0 && viaje.longitude === 0)
+  ) {
+    return { alerta: false };
+  }
+
+  let costeraCercana: typeof costerasGeoref[0] | null = null;
+  let minDistance = Infinity;
+
+  for (const c of costerasGeoref) {
+    const dist = getDistanceHaversine(viaje.latitude, viaje.longitude, c.lat, c.lng);
+    if (dist < minDistance) {
+      minDistance = dist;
+      costeraCercana = c;
+    }
+  }
+
+  // Si está a menos de 100km de influencia de alguna dependencia costera georreferenciada
+  if (costeraCercana && minDistance < 100) {
+    const costeraAsignadaIdStr = viaje.costeraId?.toString();
+    const costeraMasCercanaIdStr = costeraCercana.id.toString();
+
+    // Si la costera más cercana difiere de la asignada
+    if (costeraAsignadaIdStr && costeraAsignadaIdStr !== costeraMasCercanaIdStr) {
+      return {
+        alerta: true,
+        costeraMasCercana: {
+          id: costeraCercana.id,
+          etiqueta: costeraCercana.etiqueta,
+          distanciaKm: minDistance,
+        },
+      };
+    }
+  }
+
+  return { alerta: false };
+}
 
 // ─── Estado badge ─────────────────────────────────────────────────────────────
 
@@ -55,6 +124,17 @@ function AccionesRow({
     'px-3 py-1.5 rounded text-xs font-semibold tracking-wide transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed border';
 
   const esFinalizado = (viaje.estadoActual ?? '').toLowerCase() === 'finalizado';
+  const reiniciarMutation = useReiniciarViaje();
+
+  const handleReiniciarClick = () => {
+    if (window.confirm(`¿Seguro que desea reabrir/reiniciar el viaje de ${viaje.buque}? Se restablecerá al estado Amarrado.`)) {
+      reiniciarMutation.mutate(viaje.id, {
+        onError: (err) => {
+          alert(`Error al reiniciar viaje: ${err.message}`);
+        }
+      });
+    }
+  };
 
   return (
     <div
@@ -63,6 +143,17 @@ function AccionesRow({
       // al <tr> padre y cambie el viajeSeleccionadoId involuntariamente.
       onClick={(e) => e.stopPropagation()}
     >
+      {esFinalizado && (
+        <button
+          type="button"
+          className={`${btnBase} bg-gray-600 text-white border-gray-700 hover:bg-gray-700`}
+          onClick={handleReiniciarClick}
+          disabled={reiniciarMutation.isPending}
+          title="Reabrir/Reiniciar viaje finalizado"
+        >
+          {reiniciarMutation.isPending ? '🔄 Reabriendo...' : '🔄 Reabrir'}
+        </button>
+      )}
       {!esFinalizado && (
         <>
           <BotonZarpar viaje={viaje} />
@@ -156,6 +247,7 @@ export default function ViajesDashboard({
   const [page, setPage] = useState(1);
   const [filtro, setFiltro] = useState('');
   const [debouncedFiltro, setDebouncedFiltro] = useState('');
+  const [simularAlarma, setSimularAlarma] = useState(false);
 
   const [viajeSeleccionadoIdLocal, setViajeSeleccionadoIdLocal] = useState<string | null>(null);
   const viajeSeleccionadoId = onViajeSelected ? selectedViajeIdProp : viajeSeleccionadoIdLocal;
@@ -215,7 +307,37 @@ export default function ViajesDashboard({
   const handleFinalizarViaje = (viaje: ViajeDto) => finalizarViaje({ id: viaje.id });
 
   // Los datos ya vienen filtrados desde el servidor; no se aplica ningún .filter() local.
-  const filas: ViajeDto[] = dataPaginada ?? [];
+  let filas: ViajeDto[] = dataPaginada ?? [];
+
+  if (simularAlarma) {
+    if (filas.length === 0) {
+      filas = [
+        {
+          id: 'dummy-simulado',
+          buque: 'BUQUE SIMULADOR ALARMA',
+          ruta: 'ROSARIO ➔ LA PLATA',
+          fechaInicioFormateada: '18/06/2026 12:00',
+          estadoActual: 'Navegando',
+          costeraId: '422', // Rosario
+          latitude: -34.86383, // La Plata
+          longitude: -57.89776,
+        }
+      ];
+    } else {
+      filas = filas.map((f, idx) => {
+        if (idx === 0) {
+          return {
+            ...f,
+            estadoActual: 'Navegando',
+            costeraId: '422',
+            latitude: -34.86383,
+            longitude: -57.89776,
+          };
+        }
+        return f;
+      });
+    }
+  }
 
   return (
     <div className="bg-gray-50 text-gray-900 font-sans p-6 rounded-xl">
@@ -231,6 +353,21 @@ export default function ViajesDashboard({
         </div>
 
         <div className="flex items-center gap-3 flex-wrap">
+          {/* Switch de simulación de alarmas de geofencing */}
+          <button
+            type="button"
+            onClick={() => setSimularAlarma(!simularAlarma)}
+            className={`px-3 py-2 text-sm font-semibold rounded-lg border transition-all duration-200 flex items-center gap-2 shadow-sm ${
+              simularAlarma
+                ? 'bg-rose-600 text-white border-rose-700 hover:bg-rose-700'
+                : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+            }`}
+            title="Simular un escenario de desvío geográfico fuera de jurisdicción para ver la alerta parpadeante en tiempo real"
+          >
+            <span>🚨</span>
+            <span>{simularAlarma ? 'Desactivar Simulación' : 'Simular Alarma'}</span>
+          </button>
+
           {/* Filtro server-side por nombre de buque con debounce de 500ms */}
           <input
             type="text"
@@ -287,6 +424,7 @@ export default function ViajesDashboard({
               ) : (
                 filas.map((viaje) => {
                   const isSeleccionado = viaje.id === viajeSeleccionadoId;
+                  const alarma = calcularAlarmaJurisdiccion(viaje);
                   return (
                     <tr
                       key={viaje.id}
@@ -309,8 +447,20 @@ export default function ViajesDashboard({
                       <td className="px-4 py-3">
                         <EstadoBadge estado={viaje.estadoActual} />
                       </td>
-                      <td className="px-4 py-3 text-gray-500">
-                        {viaje.costeraId ?? <span className="italic">—</span>}
+                      <td className="px-4 py-3">
+                        <div className="flex flex-col gap-1">
+                          <span className="text-gray-700 font-semibold">
+                            {viaje.costeraId ?? <span className="italic text-gray-400">—</span>}
+                          </span>
+                          {alarma.alerta && alarma.costeraMasCercana && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded bg-rose-50 px-2 py-0.5 text-xs font-semibold text-rose-700 border border-rose-100 shadow-sm animate-pulse"
+                              title={`El buque está físicamente más cerca de la costera ${alarma.costeraMasCercana.etiqueta} (${alarma.costeraMasCercana.distanciaKm.toFixed(2)} km) que de su costera asignada`}
+                            >
+                              ⚠️ Franqueando: {alarma.costeraMasCercana.etiqueta.replace(/^[A-Z]+\s*-\s*/, '')} ({alarma.costeraMasCercana.distanciaKm.toFixed(1)} km)
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-right">
                         <AccionesRow

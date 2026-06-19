@@ -166,5 +166,10 @@ namespace Mbpc.Api.Services
         /// Valida si el viaje está finalizado y lanza InvalidOperationException si es así.
         /// </summary>
         Task ThrowIfViajeFinalizadoAsync(string viajeId, bool permitirRectificacion = false);
+
+        // ── HERRAMIENTAS SOPORTE (Hito: Personal Externo, Bitácoras y Herramientas Soporte) ──
+        Task<List<EtapaDetalleDto>?> ObtenerEtapasAsync(string viajeId);
+        Task<bool> IntercalarEtapaAsync(string viajeId, IntercalarEtapaDto dto);
+        Task<bool> ReiniciarViajeAsync(string viajeId);
     }
 }

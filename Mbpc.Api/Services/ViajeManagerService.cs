@@ -257,6 +257,9 @@ namespace Mbpc.Api.Services
                     Ruta                  = $"{p.Origin ?? "Sin Origen"} ➔ {p.Destination ?? "Sin Destino"} | Pos: {Math.Round(p.Latitude, 4)}, {Math.Round(p.Longitude, 4)}",
                     FechaInicioFormateada = p.MsgTime.ToString("dd/MM/yyyy HH:mm"),
                     EstadoActual          = p.NavegationStatusDesc ?? "N/A",
+                    CosteraId             = p.CosteraId?.ToString(),
+                    Latitude              = p.Latitude,
+                    Longitude             = p.Longitude,
                     EsConvoy              = esConvoy,
                     Omi                   = omi,
                     Matricula             = matricula,
@@ -1945,6 +1948,8 @@ namespace Mbpc.Api.Services
                     FechaInicioFormateada = p.MsgTime.ToString("dd/MM/yyyy HH:mm"),
                     EstadoActual = p.NavegationStatusDesc ?? "N/A",
                     CosteraId = p.CosteraId?.ToString(),
+                    Latitude = p.Latitude,
+                    Longitude = p.Longitude,
                     RequiereTransferencia = p.RequiereTransferencia,
                     CosteraIdPendiente = p.CosteraIdPendiente,
                     EsConvoy = esConvoy,
@@ -2057,6 +2062,140 @@ namespace Mbpc.Api.Services
             }
 
             return result.ModifiedCount > 0;
+        }
+
+        // ── HERRAMIENTAS SOPORTE (Hito: Personal Externo, Bitácoras y Herramientas Soporte) ──
+
+        public async Task<List<EtapaDetalleDto>?> ObtenerEtapasAsync(string viajeId)
+        {
+            var (detalle, _) = await GetViajeDetalleByIdAsync(viajeId);
+            if (detalle == null) return null;
+
+            if (detalle.Etapas == null) return new List<EtapaDetalleDto>();
+
+            var dtos = new List<EtapaDetalleDto>();
+            foreach (var e in detalle.Etapas)
+            {
+                dtos.Add(new EtapaDetalleDto
+                {
+                    EtapaId = e.EtapaId ?? 0,
+                    FechaInicio = e.FechaInicio,
+                    FechaFin = e.FechaFin,
+                    RemolcadorNombre = e.Remolcador?.Nombre,
+                    RemolcadorMatricula = e.Remolcador?.Matricula,
+                    Barcazas = e.Barcazas?.Select(b => b.Nombre ?? string.Empty).Where(n => !string.IsNullOrEmpty(n)).ToList() ?? new List<string>()
+                });
+            }
+
+            return dtos.OrderBy(d => d.FechaInicio).ToList();
+        }
+
+        public async Task<bool> IntercalarEtapaAsync(string viajeId, IntercalarEtapaDto dto)
+        {
+            await ThrowIfViajeFinalizadoAsync(viajeId);
+
+            var (detalle, _) = await GetViajeDetalleByIdAsync(viajeId);
+            if (detalle == null) return false;
+
+            var nuevaEtapa = new EtapaMongo
+            {
+                FechaInicio = dto.FechaInicio,
+                FechaFin = dto.FechaFin
+            };
+
+            if (!string.IsNullOrWhiteSpace(dto.RemolcadorNombre) || !string.IsNullOrWhiteSpace(dto.RemolcadorMatricula))
+            {
+                nuevaEtapa.Remolcador = new RemolcadorMongo
+                {
+                    Nombre = dto.RemolcadorNombre,
+                    Matricula = dto.RemolcadorMatricula
+                };
+            }
+
+            if (dto.BarcazasNombres != null && dto.BarcazasNombres.Count > 0)
+            {
+                nuevaEtapa.Barcazas = dto.BarcazasNombres
+                    .Select(nombre => new BarcazaMongo { Nombre = nombre })
+                    .ToList();
+            }
+            else
+            {
+                nuevaEtapa.Barcazas = new List<BarcazaMongo>();
+            }
+
+            if (detalle.Etapas == null)
+            {
+                detalle.Etapas = new List<EtapaMongo>();
+            }
+
+            detalle.Etapas.Add(nuevaEtapa);
+
+            // Ordenamos por FechaInicio cronológica
+            detalle.Etapas = detalle.Etapas
+                .OrderBy(e => e.FechaInicio ?? DateTime.MinValue)
+                .ToList();
+
+            // Re-secuenciamos los IDs
+            for (int i = 0; i < detalle.Etapas.Count; i++)
+            {
+                detalle.Etapas[i].EtapaId = i + 1;
+            }
+
+            var result = await _detallesCollection.ReplaceOneAsync(
+                Builders<ViajeDetalleMongo>.Filter.Eq(x => x.Id, detalle.Id),
+                detalle
+            );
+
+            // Invalidar caché de cargas
+            _cache.Remove($"cargas_viaje_{viajeId}");
+
+            if (result.ModifiedCount > 0)
+            {
+                await RegistrarEventoAsync(viajeId, TipoEventoViaje.REANUDACION, $"Etapa intercalada en la fecha {dto.FechaInicio}");
+                return true;
+            }
+
+            return false;
+        }
+
+        public async Task<bool> ReiniciarViajeAsync(string viajeId)
+        {
+            var filtroPosicion = BuildFiltroViaje(viajeId);
+            var viajePos = await _viajesCollection.Find(filtroPosicion).FirstOrDefaultAsync();
+            if (viajePos == null)
+            {
+                _logger.LogWarning("ReiniciarViajeAsync: No se encontró el viaje '{Id}' en la colección de posiciones.", viajeId);
+                return false;
+            }
+
+            var estadoAnterior = viajePos.NavegationStatusDesc ?? string.Empty;
+
+            // Cambiar a Amarrado
+            var exito = await CambiarEstadoNavegacionAsync(viajeId, EstadoEtapa.Amarrado.ToString());
+            if (exito)
+            {
+                await RegistrarEventoAsync(viajeId, TipoEventoViaje.REANUDACION, "Viaje reabierto/reiniciado desde estado Finalizado.", estadoAnterior, EstadoEtapa.Amarrado.ToString());
+
+                // Invalidamos las cachés de Redis (barcos en puerto y mapa) para la costera del viaje y globales (0)
+                var costeraId = viajePos.CosteraId ?? 0;
+                try
+                {
+                    await _redisRetryPolicy.ExecuteAsync(async () =>
+                    {
+                        await _cache.RemoveAsync(CacheKeyBarcosEnPuerto(costeraId));
+                        await _cache.RemoveAsync(CacheKeyMapaViajes(costeraId));
+                        await _cache.RemoveAsync(CacheKeyBarcosEnPuerto(0));
+                        await _cache.RemoveAsync(CacheKeyMapaViajes(0));
+                    });
+                    _logger.LogInformation("Redis cachés para CosteraId '{CosteraId}' y Global invalidadas por reinicio de viaje.", costeraId);
+                }
+                catch (Exception redisEx)
+                {
+                    _logger.LogWarning(redisEx, "ReiniciarViajeAsync: No se pudo invalidar la caché de Redis.");
+                }
+            }
+
+            return exito;
         }
     }
 }

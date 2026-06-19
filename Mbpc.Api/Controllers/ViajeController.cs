@@ -592,5 +592,56 @@ namespace Mbpc.Api.Controllers
                 return UnprocessableEntity(new { mensaje = ex.Message });
             }
         }
+
+        // ── HERRAMIENTAS SOPORTE ──
+
+        [HttpGet("{id}/etapas")]
+        public async Task<IActionResult> ObtenerEtapas(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                return BadRequest(new { mensaje = "El ID del viaje es requerido." });
+
+            var etapas = await _viajeService.ObtenerEtapasAsync(id);
+            if (etapas == null) return NotFound(new { mensaje = "Viaje o etapas no encontradas." });
+            return Ok(etapas);
+        }
+
+        [HttpPost("{id}/etapas/intercalar")]
+        public async Task<IActionResult> IntercalarEtapa(string id, [FromBody] IntercalarEtapaDto dto)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                return BadRequest(new { mensaje = "El ID del viaje es requerido." });
+
+            if (!ModelState.IsValid) return BadRequest(ModelState);
+
+            try
+            {
+                var result = await _viajeService.IntercalarEtapaAsync(id, dto);
+                if (!result) return NotFound(new { mensaje = "Viaje no encontrado o no se pudo guardar." });
+                return Ok(new { mensaje = "Etapa intercalada correctamente." });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return UnprocessableEntity(new { Error = ex.Message });
+            }
+        }
+
+        [HttpPut("{id}/reiniciar")]
+        public async Task<IActionResult> ReiniciarViaje(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                return BadRequest(new { mensaje = "El ID del viaje es requerido." });
+
+            try
+            {
+                var result = await _viajeService.ReiniciarViajeAsync(id);
+                if (!result) return NotFound(new { mensaje = "Viaje no encontrado." });
+                return Ok(new { mensaje = "Viaje reiniciado/reabierto correctamente." });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return UnprocessableEntity(new { Error = ex.Message });
+            }
+        }
     }
 }

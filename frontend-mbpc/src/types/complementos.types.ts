@@ -43,3 +43,20 @@ export interface ViajeComplementos {
   agencias: Agencia[];
   datosPbip: DatosPbip | null;
 }
+
+export interface EtapaDetalle {
+  etapaId: number;
+  fechaInicio?: string;
+  fechaFin?: string;
+  remolcadorNombre?: string;
+  remolcadorMatricula?: string;
+  barcazas: string[];
+}
+
+export interface IntercalarEtapaDto {
+  fechaInicio: string;
+  fechaFin?: string;
+  remolcadorNombre?: string;
+  remolcadorMatricula?: string;
+  barcazasNombres?: string[];
+}

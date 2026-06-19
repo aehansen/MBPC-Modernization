@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<SqlBuilderMetadata>
+  <Entities>
+    <Entity Name="Viaje" Table="MBPC.TBL_VIAJE" Alias="V" PrimaryKey="ID">
+      <Fields>
+        <Field Name="Id" Column="ID" Type="Numeric" Label="ID del Viaje" />
+        <Field Name="Origen" Column="ORIGEN_ID" Type="String" Label="Puerto de Origen" />
+        <Field Name="Destino" Column="DESTINO" Type="String" Label="Puerto de Destino" />
+        <Field Name="FechaSalida" Column="FECHA_SALIDA" Type="DateTime" Label="Fecha de Salida" />
+        <Field Name="Eta" Column="ETA" Type="DateTime" Label="ETA" />
+        <Field Name="Estado" Column="ESTADO" Type="Numeric" Label="Estado (1:Planif, 2:Naveg, 3:Fin, 4:Canc)" />
+        <Field Name="CosteraId" Column="COSTERA_ID" Type="Numeric" Label="ID Costera" SecurityFilter="true" />
+      </Fields>
+    </Entity>
+
+    <Entity Name="Buque" Table="MBPC.Z_TBL_BUQUES_UNICO" Alias="B" PrimaryKey="ID_BUQUE">
+      <Fields>
+        <Field Name="IdBuque" Column="ID_BUQUE" Type="Numeric" Label="ID Buque" />
+        <Field Name="Nombre" Column="NOMBRE" Type="String" Label="Nombre del Buque" />
+        <Field Name="Omi" Column="NRO_OMI" Type="String" Label="Número OMI" />
+        <Field Name="Matricula" Column="MATRICULA" Type="String" Label="Matrícula" />
+      </Fields>
+      <Joins>
+        <Join TargetEntity="Viaje" JoinTable="MBPC.TBL_VIAJE" LocalKey="ID_BUQUE" ForeignKey="BUQUE_ID" />
+      </Joins>
+    </Entity>
+  </Entities>
+</SqlBuilderMetadata>

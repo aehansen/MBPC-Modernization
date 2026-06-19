@@ -124,6 +124,7 @@ builder.Services.AddScoped<IBuqueService, BuqueManagerService>();
 builder.Services.AddScoped<ICosteraService, CosteraManagerService>();
 builder.Services.AddScoped<ICatalogoService, CatalogoManagerService>();
 builder.Services.AddScoped<IReporteService, ReporteManagerService>();
+builder.Services.AddScoped<IQueryBuilderService, QueryBuilderManagerService>();
 builder.Services.AddScoped<IInspeccionService, InspeccionManagerService>();
 builder.Services.AddScoped<IReconciliacionService, ReconciliacionManagerService>();
 builder.Services.AddScoped<IAisIngestionService, AisIngestionService>();

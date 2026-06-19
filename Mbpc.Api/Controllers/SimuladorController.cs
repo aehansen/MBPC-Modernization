@@ -10,6 +10,10 @@ using Oracle.ManagedDataAccess.Client;
 using Mbpc.Api.DTOs;
 using Mbpc.Api.Services;
 using Microsoft.Extensions.Logging;
+using MongoDB.Driver;
+using Microsoft.Extensions.Options;
+using Mbpc.Api.Models.Config;
+using Mbpc.Api.Models.Mongo;
 
 namespace Mbpc.Api.Controllers
 {
@@ -23,6 +27,8 @@ namespace Mbpc.Api.Controllers
         private readonly IAisIngestionService _aisIngestionService;
         private readonly ILogger<SimuladorController> _logger;
         private readonly IHttpContextAccessor _httpContextAccessor;
+        private readonly IMongoDatabase _database;
+        private readonly MongoDbSettings _mongoSettings;
 
         private const string OracleAisConnectionString = "User Id=AISC;Password=AISCbu2016;Data Source=(DESCRIPTION =(LOAD_BALANCE = ON)(ADDRESS = (PROTOCOL = TCP)(HOST = exa1-scan-01)(PORT = 1521))(CONNECT_DATA =(SERVER = DEDICATED)(SERVICE_NAME = svc_bp)));";
 
@@ -31,12 +37,16 @@ namespace Mbpc.Api.Controllers
             IReconciliacionService reconciliacionService,
             IAisIngestionService aisIngestionService,
             IHttpContextAccessor httpContextAccessor,
+            IMongoDatabase database,
+            IOptions<MongoDbSettings> options,
             ILogger<SimuladorController> logger)
         {
             _viajeService = viajeService;
             _reconciliacionService = reconciliacionService;
             _aisIngestionService = aisIngestionService;
             _httpContextAccessor = httpContextAccessor;
+            _database = database;
+            _mongoSettings = options.Value;
             _logger = logger;
         }
 
@@ -156,6 +166,32 @@ namespace Mbpc.Api.Controllers
             return Ok(new { mensaje = "Viaje de prueba iniciado con éxito.", travelId = travelIdReal });
         }
 
+        [HttpGet("viajes-activos")]
+        public async Task<IActionResult> GetViajesActivos()
+        {
+            var originalUser = _httpContextAccessor.HttpContext?.User;
+            var identity = new System.Security.Claims.ClaimsIdentity(new[] { new System.Security.Claims.Claim("CosteraId", "0") }, "BackgroundSystem");
+            if (_httpContextAccessor.HttpContext == null)
+            {
+                _httpContextAccessor.HttpContext = new Microsoft.AspNetCore.Http.DefaultHttpContext();
+            }
+            _httpContextAccessor.HttpContext.User = new System.Security.Claims.ClaimsPrincipal(identity);
+
+            try
+            {
+                var viajes = await _viajeService.GetViajesAsync(null, 1, 100);
+                var lista = viajes.Select(v => new { v.Id, v.TravelId, v.VesselName, v.Mmsi, v.NavegationStatusDesc, v.CosteraId }).ToList();
+                return Ok(lista);
+            }
+            finally
+            {
+                if (originalUser != null)
+                {
+                    _httpContextAccessor.HttpContext.User = originalUser;
+                }
+            }
+        }
+
         [HttpPost("simular-movimiento")]
         public async Task<IActionResult> SimularMovimiento([FromBody] SimularMovimientoDto dto)
         {
@@ -178,6 +214,73 @@ namespace Mbpc.Api.Controllers
                 mensaje = "Movimiento simulado correctamente",
                 reconciliado = reconciliado
             });
+        }
+
+        [HttpPost("insertar-buque-real")]
+        public async Task<IActionResult> InsertarBuqueReal([FromBody] InserteBuqueRealDto dto)
+        {
+            _logger.LogInformation("Simulador: Insertando buque real {Buque} (TravelId: {TravelId})", dto.NombreBuque, dto.TravelId);
+
+            var collectionPos = _database.GetCollection<ViajePosicionMongo>(_mongoSettings.LastMbpcCollectionName);
+            var collectionDet = _database.GetCollection<ViajeDetalleMongo>(_mongoSettings.DetailsMbpcCollectionName);
+
+            // Eliminar si ya existe un viaje con este TravelId
+            await collectionPos.DeleteOneAsync(p => p.TravelId == dto.TravelId);
+            await collectionDet.DeleteOneAsync(d => d.IdViaje == dto.TravelId);
+
+            var nuevaLocation = new LocationMongo
+            {
+                Geo = new GeoMongo
+                {
+                    Type = "Point",
+                    Coordinates = new[] { dto.Longitud, dto.Latitud }
+                }
+            };
+
+            var posicion = new ViajePosicionMongo
+            {
+                TravelId = dto.TravelId,
+                VesselName = dto.NombreBuque.Trim().ToUpperInvariant(),
+                Mmsi = dto.Mmsi,
+                Imo = dto.Imo,
+                CallSign = dto.CallSign,
+                Latitude = dto.Latitud,
+                Longitude = dto.Longitud,
+                NavegationStatusDesc = "Navegando",
+                SpeedOverGround = dto.Velocidad,
+                CourseOverGround = dto.Curso,
+                MsgTime = DateTime.UtcNow,
+                Origin = dto.Origen,
+                Destination = dto.Destino,
+                Location = nuevaLocation,
+                RequiereTransferencia = false,
+                CosteraIdRaw = dto.CosteraId
+            };
+
+            await collectionPos.InsertOneAsync(posicion);
+
+            var detalle = new ViajeDetalleMongo
+            {
+                IdViaje = dto.TravelId,
+                VesselName = dto.NombreBuque.Trim().ToUpperInvariant(),
+                Origin = dto.Origen,
+                Destination = dto.Destino,
+                CosteraIdRaw = dto.CosteraId,
+                Etapas = new List<EtapaMongo>
+                {
+                    new EtapaMongo
+                    {
+                        EtapaId = 1,
+                        FechaInicio = DateTime.UtcNow
+                    }
+                }
+            };
+
+            await collectionDet.InsertOneAsync(detalle);
+
+            _logger.LogInformation("Simulador: Buque real {Buque} insertado con éxito en MongoDB.", dto.NombreBuque);
+
+            return Ok(new { mensaje = "Buque real insertado con éxito en MongoDB.", travelId = dto.TravelId });
         }
         
         [HttpPost("ejecutar-reconciliacion")]
@@ -210,5 +313,21 @@ namespace Mbpc.Api.Controllers
         public long TravelId { get; set; }
         public double Latitud { get; set; }
         public double Longitud { get; set; }
+    }
+
+    public class InserteBuqueRealDto
+    {
+        public long TravelId { get; set; }
+        public string NombreBuque { get; set; } = null!;
+        public string Mmsi { get; set; } = null!;
+        public int Imo { get; set; }
+        public string CallSign { get; set; } = null!;
+        public double Latitud { get; set; }
+        public double Longitud { get; set; }
+        public string Origen { get; set; } = "ROSA-AGP";
+        public string Destino { get; set; } = "RECALADA";
+        public double Velocidad { get; set; }
+        public double Curso { get; set; }
+        public int CosteraId { get; set; }
     }
 }
