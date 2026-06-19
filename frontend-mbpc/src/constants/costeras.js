@@ -144,3 +144,10 @@ export const getNombreCostera = (id) => {
     const costera = COSTERAS.find(c => c.id === id);
     return costera ? costera.etiqueta : "Desconocida";
 };
+
+export const getSiglaMbpc = (id) => {
+    if (id === null || id === undefined) return null;
+    const numId = Number(id);
+    const costera = COSTERAS.find(c => c.id === numId);
+    return costera ? costera.nombre : id.toString();
+};

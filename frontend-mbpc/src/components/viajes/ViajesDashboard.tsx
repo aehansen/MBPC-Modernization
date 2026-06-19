@@ -9,6 +9,7 @@ import { BotonZarpar } from '../BotonZarpar';
 import { BotonAmarrar, BotonFondear, BotonReanudar } from '../BotonesAccionViaje';
 import { useFinalizar } from '../../hooks/useAccionesViaje';
 import costerasGeoref from '../../constants/costerasGeorreferenciadas.json';
+import { getSiglaMbpc } from '../../constants/costeras';
 
 const PAGE_SIZE = 10;
 
@@ -404,7 +405,7 @@ export default function ViajesDashboard({
                       <td className="px-4 py-3">
                         <div className="flex flex-col gap-1">
                           <span className="text-gray-700 font-semibold">
-                            {viaje.costeraId ?? <span className="italic text-gray-400">—</span>}
+                            {getSiglaMbpc(viaje.costeraId) ?? <span className="italic text-gray-400">—</span>}
                           </span>
                           {alarma.alerta && alarma.costeraMasCercana && (
                             <span
